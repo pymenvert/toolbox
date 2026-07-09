@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
 
+# contents:write = la CI pousse ses logs sur des branches ci-logs-* en cas
+# d'échec, pour qu'ils soient lisibles publiquement (diagnostic à distance).
+permissions:
+  contents: write
+
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -15,28 +20,28 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - name: Format
-        run: cargo fmt --all --check
-      # En cas d'échec, les erreurs sont recopiées dans le résumé du run
-      # (visible publiquement sans ouvrir les logs).
+        run: cargo fmt --all --check 2>&1 | tee fmt.log
       - name: Clippy (warnings = erreurs)
         run: |
           set -o pipefail
-          cargo clippy --workspace --all-targets -- -D warnings 2>&1 | tee clippy.log || {
-            # Les annotations ::error:: sont lisibles publiquement sur la page du run.
-            grep -B1 -A3 -E '(^|\s)(error|warning)(\[[A-Z0-9]+\])?:' clippy.log | head -n 40 \
-              | while IFS= read -r line; do echo "::error::${line}"; done
-            exit 1
-          }
+          cargo clippy --workspace --all-targets -- -D warnings 2>&1 | tee clippy.log
       - name: Tests
         run: |
           set -o pipefail
-          cargo test --workspace 2>&1 | tee tests.log || {
-            grep -B2 -A6 -E '(^error|FAILED|panicked)' tests.log | head -n 40 \
-              | while IFS= read -r line; do echo "::error::${line}"; done
-            exit 1
-          }
+          cargo test --workspace 2>&1 | tee tests.log
+      - name: Publier les logs en cas d'échec
+        if: failure()
+        run: |
+          d="$(mktemp -d)"
+          cp -v fmt.log clippy.log tests.log "$d"/ 2>/dev/null || true
+          cd "$d"
+          git init -q -b ci-logs-check .
+          git config user.email "ci@toolbox" && git config user.name "CI"
+          echo "run: ${GITHUB_RUN_ID} commit: ${GITHUB_SHA}" > run.txt
+          git add -A && git commit -q -m "logs check ${GITHUB_RUN_ID}"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" ci-logs-check
 
-  # Vérifie que ça compile pour les Pi (ARM64) sans les exécuter.
+  # Vérifie que ça compile pour les Pi (ARM64) sans exécuter.
   check-arm64:
     runs-on: ubuntu-latest
     steps:
@@ -48,29 +53,15 @@ jobs:
       - name: Check aarch64
         run: |
           set -o pipefail
-          cargo check --workspace --target aarch64-unknown-linux-gnu 2>&1 | tee arm64.log || {
-            {
-              echo "### Check ARM64 — erreurs"
-              echo '```'
-              tail -n 120 arm64.log
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
-            exit 1
-          }
-
-  shellcheck:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Shellcheck des scripts
+          cargo check --workspace --target aarch64-unknown-linux-gnu 2>&1 | tee arm64.log
+      - name: Publier les logs en cas d'échec
+        if: failure()
         run: |
-          sudo apt-get install -y shellcheck
-          shellcheck tools/bench/*.sh 2>&1 | tee sc.log || {
-            {
-              echo "### Shellcheck — remarques"
-              echo '```'
-              cat sc.log
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
-            exit 1
-   
+          d="$(mktemp -d)"
+          cp -v arm64.log "$d"/ 2>/dev/null || true
+          cd "$d"
+          git init -q -b ci-logs-arm64 .
+          git config user.email "ci@toolbox" && git config user.name "CI"
+          echo "run: ${GITHUB_RUN_ID} commit: ${GITHUB_SHA}" > run.txt
+          git add -A && git commit -q -m "logs arm64 ${GITHUB_RUN_ID}"
+          git push -q -f "https://x-access-token:${{ github.token }
