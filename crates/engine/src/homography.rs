@@ -167,8 +167,13 @@ mod tests {
 
     /// Vecteurs générés par tools/mapping/homography_ref.py — ne pas modifier
     /// à la main : relancer le script si la convention change.
+    ///
+    /// Tolérance 1e-6 (et non 1e-9) : les coins de `MappingState` sont des
+    /// f32, donc 0.08_f32 ≈ 0.079999998... — l'écart se propage en ~1e-8
+    /// dans H alors que la référence Python calcule sur des f64 exacts.
     #[test]
     fn matches_python_reference() {
+        const REF_EPS: f64 = 1e-6;
         let m = mapping([(0.08, 0.05), (0.97, 0.02), (1.0, 0.93), (0.03, 0.98)]);
         let h = from_mapping(&m).expect("homography");
         let expected = [
@@ -179,13 +184,14 @@ mod tests {
         for (r, row) in expected.iter().enumerate() {
             for (c, &want) in row.iter().enumerate() {
                 assert!(
-                    (h.0[r][c] - want).abs() < 1e-9,
+                    (h.0[r][c] - want).abs() < REF_EPS,
                     "m[{r}][{c}] = {} != {want}",
                     h.0[r][c]
                 );
             }
         }
-        assert!(close(h.apply(0.5, 0.5), (0.524401309635, 0.475079513564)));
+        let (x, y) = h.apply(0.5, 0.5);
+        assert!((x - 0.524401309635).abs() < REF_EPS && (y - 0.475079513564).abs() < REF_EPS);
     }
 
     #[test]
