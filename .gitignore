@@ -1,0 +1,10 @@
+/target
+Cargo.lock.orig
+tools/bench/media/
+tools/bench/results/
+node.toml
+/media/
+/presets/
+/logs/
+webui/node_modules/
+webui/dist/

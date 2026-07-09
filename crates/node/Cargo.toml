@@ -1,0 +1,19 @@
+[package]
+name = "toolbox-node"
+description = "Binaire du node : assemble les modules selon la config"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "toolbox-node"
+path = "src/main.rs"
+
+[dependencies]
+toolbox-core = { path = "../core" }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[lints]
+workspace = true
