@@ -37,7 +37,7 @@ jobs:
           git checkout -q --orphan ci-logs-check
           git rm -rfq --cached .
           echo "run $GITHUB_RUN_ID commit $GITHUB_SHA" > run.txt
-          git add -f run.txt fmt.log clippy.log tests.log || true
+          for f in run.txt fmt.log clippy.log tests.log; do if [ -f "$f" ]; then git add -f "$f"; fi; done
           git commit -qm "logs check $GITHUB_RUN_ID"
           git push -f origin ci-logs-check
 
@@ -61,7 +61,7 @@ jobs:
           git checkout -q --orphan ci-logs-arm64
           git rm -rfq --cached .
           echo "run $GITHUB_RUN_ID commit $GITHUB_SHA" > run.txt
-          git add -f run.txt arm64.log || true
+          for f in run.txt arm64.log; do if [ -f "$f" ]; then git add -f "$f"; fi; done
           git commit -qm "logs arm64 $GITHUB_RUN_ID"
           git push -f origin ci-logs-arm64
 
@@ -81,6 +81,6 @@ jobs:
           git checkout -q --orphan ci-logs-shellcheck
           git rm -rfq --cached .
           echo "run $GITHUB_RUN_ID commit $GITHUB_SHA" > run.txt
-          git add -f run.txt apt.log sc.log || true
+          for f in run.txt apt.log sc.log; do if [ -f "$f" ]; then git add -f "$f"; fi; done
           git commit -qm "logs shellcheck $GITHUB_RUN_ID"
           git push -f origin ci-logs-shellcheck
