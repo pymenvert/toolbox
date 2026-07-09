@@ -96,11 +96,20 @@ impl Bus {
 
     /// Traite une commande immédiatement (utilisé par la boucle et les tests).
     pub fn dispatch(&mut self, source: Source, command: &Command) -> Option<Event> {
-        match self.state.apply(command) {
+        Self::process(&mut self.state, &self.events, source, command)
+    }
+
+    fn process(
+        state: &mut NodeState,
+        events: &broadcast::Sender<Event>,
+        source: Source,
+        command: &Command,
+    ) -> Option<Event> {
+        match state.apply(command) {
             Ok(event) => {
                 info!(%source, ?command, ?event, "commande appliquée");
                 // send() n'échoue que s'il n'y a aucun abonné : pas une erreur.
-                let _ = self.events.send(event.clone());
+                let _ = events.send(event.clone());
                 Some(event)
             }
             Err(err) => {
@@ -112,10 +121,20 @@ impl Bus {
 
     /// Boucle principale : consomme les commandes jusqu'à fermeture de tous
     /// les émetteurs. À lancer dans une tâche tokio dédiée.
-    pub async fn run(mut self) {
+    ///
+    /// NB : le handle interne est droppé en entrant, sinon le bus garderait
+    /// vivant son propre émetteur et `recv()` ne rendrait jamais `None`.
+    pub async fn run(self) {
+        let Bus {
+            mut state,
+            mut rx,
+            events,
+            handle,
+        } = self;
+        drop(handle);
         info!("bus démarré");
-        while let Some((source, command)) = self.rx.recv().await {
-            self.dispatch(source, &command);
+        while let Some((source, command)) = rx.recv().await {
+            Self::process(&mut state, &events, source, &command);
         }
         info!("bus arrêté (tous les émetteurs fermés)");
     }
@@ -165,6 +184,19 @@ mod tests {
         // play sans média : refusé, aucun événement.
         assert!(bus.dispatch(Source::Osc, &Command::Play).is_none());
         assert!(events.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn bus_stops_when_all_handles_dropped() {
+        let bus = Bus::new(4, 4);
+        let handle = bus.handle();
+        let task = tokio::spawn(bus.run());
+        drop(handle);
+        // Sans le drop du handle interne dans run(), ceci bloquerait à jamais.
+        tokio::time::timeout(std::time::Duration::from_secs(1), task)
+            .await
+            .expect("le bus doit s'arrêter quand tous les handles sont droppés")
+            .expect("join");
     }
 
     #[tokio::test]

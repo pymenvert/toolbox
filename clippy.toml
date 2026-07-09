@@ -1,0 +1,4 @@
+# En prod, unwrap/expect sont interdits (lints workspace). Dans les tests,
+# expect() est le bon outil pour faire échouer proprement.
+allow-expect-in-tests = true
+allow-unwrap-in-tests = true

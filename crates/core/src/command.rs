@@ -45,17 +45,36 @@ pub enum Command {
     Play,
     Pause,
     Stop,
-    Seek { seconds: f64 },
-    Load { path: String },
-    SetLoop { enabled: bool },
-    SetVolume { volume: f32 },
+    Seek {
+        seconds: f64,
+    },
+    Load {
+        path: String,
+    },
+    SetLoop {
+        enabled: bool,
+    },
+    SetVolume {
+        volume: f32,
+    },
     /// Déplace un coin du mapping. `index` ∈ 0..=3 (0=HG, 1=HD, 2=BD, 3=BG),
     /// coordonnées normalisées 0.0..=1.0 dans l'espace de sortie.
-    CornerSet { index: u8, x: f32, y: f32 },
-    ColorSet { param: ColorParam, value: f32 },
+    CornerSet {
+        index: u8,
+        x: f32,
+        y: f32,
+    },
+    ColorSet {
+        param: ColorParam,
+        value: f32,
+    },
     MappingReset,
-    PresetSave { name: String },
-    PresetLoad { name: String },
+    PresetSave {
+        name: String,
+    },
+    PresetLoad {
+        name: String,
+    },
 }
 
 #[cfg(test)]

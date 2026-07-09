@@ -77,7 +77,7 @@ pub enum Transport {
     Paused,
 }
 
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PlayerState {
     pub transport: Transport,
     /// Média chargé (chemin relatif au dossier `media/`), s'il y en a un.
@@ -86,6 +86,19 @@ pub struct PlayerState {
     pub looping: bool,
     /// Volume 0.0..=1.0.
     pub volume: f32,
+}
+
+impl Default for PlayerState {
+    fn default() -> Self {
+        Self {
+            transport: Transport::default(),
+            media: None,
+            looping: false,
+            // Piège terrain évité : un node fraîchement démarré ne doit pas
+            // jouer en silence. Le défaut est plein volume, pas muet.
+            volume: 1.0,
+        }
+    }
 }
 
 /// L'état complet du node — LE document que l'on preset/exporte/clone.
@@ -123,9 +136,7 @@ impl NodeState {
         match command {
             Command::Play => {
                 if self.player.media.is_none() {
-                    return Err(CoreError::InvalidCommand(
-                        "play sans média chargé".into(),
-                    ));
+                    return Err(CoreError::InvalidCommand("play sans média chargé".into()));
                 }
                 self.player.transport = Transport::Playing;
                 Ok(Event::TransportChanged {
@@ -145,6 +156,9 @@ impl NodeState {
                 })
             }
             Command::Seek { seconds } => {
+                if self.player.media.is_none() {
+                    return Err(CoreError::InvalidCommand("seek sans média chargé".into()));
+                }
                 if !seconds.is_finite() || *seconds < 0.0 {
                     return Err(CoreError::OutOfRange {
                         param: "seek.seconds",
@@ -332,8 +346,6 @@ mod tests {
     #[test]
     fn presets_rejected_by_state() {
         let mut s = NodeState::default();
-        assert!(s
-            .apply(&Command::PresetSave { name: "x".into() })
-            .is_err());
+        assert!(s.apply(&Command::PresetSave { name: "x".into() }).is_err());
     }
 }

@@ -5,6 +5,7 @@
 //! sauvegarde ne corrompt jamais un preset existant — exigence "solide".
 
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use crate::error::CoreError;
@@ -43,14 +44,22 @@ impl PresetStore {
         self.dir.join(format!("{name}.json"))
     }
 
-    /// Sauvegarde atomique de l'état sous `name`.
+    /// Sauvegarde atomique de l'état sous `name` : écriture dans un fichier
+    /// temporaire, `sync_all` (flush disque — un Pi peut perdre le courant à
+    /// tout instant), puis rename atomique par-dessus l'ancien preset.
     pub fn save(&self, name: &str, state: &NodeState) -> Result<(), CoreError> {
         validate_name(name)?;
         let json = serde_json::to_vec_pretty(state)?;
         let final_path = self.path_of(name);
         let tmp_path = self.dir.join(format!(".{name}.json.tmp"));
-        fs::write(&tmp_path, &json)
-            .map_err(|e| CoreError::io(tmp_path.display().to_string(), e))?;
+        {
+            let mut file = fs::File::create(&tmp_path)
+                .map_err(|e| CoreError::io(tmp_path.display().to_string(), e))?;
+            file.write_all(&json)
+                .map_err(|e| CoreError::io(tmp_path.display().to_string(), e))?;
+            file.sync_all()
+                .map_err(|e| CoreError::io(tmp_path.display().to_string(), e))?;
+        }
         fs::rename(&tmp_path, &final_path)
             .map_err(|e| CoreError::io(final_path.display().to_string(), e))?;
         Ok(())
@@ -63,16 +72,15 @@ impl PresetStore {
         if !path.exists() {
             return Err(CoreError::PresetNotFound(name.to_string()));
         }
-        let bytes =
-            fs::read(&path).map_err(|e| CoreError::io(path.display().to_string(), e))?;
+        let bytes = fs::read(&path).map_err(|e| CoreError::io(path.display().to_string(), e))?;
         Ok(serde_json::from_slice(&bytes)?)
     }
 
     /// Liste les presets disponibles (triés, sans extension).
     pub fn list(&self) -> Result<Vec<String>, CoreError> {
         let mut names = Vec::new();
-        let entries =
-            fs::read_dir(&self.dir).map_err(|e| CoreError::io(self.dir.display().to_string(), e))?;
+        let entries = fs::read_dir(&self.dir)
+            .map_err(|e| CoreError::io(self.dir.display().to_string(), e))?;
         for entry in entries {
             let entry = entry.map_err(|e| CoreError::io(self.dir.display().to_string(), e))?;
             let path = entry.path();
@@ -142,10 +150,7 @@ mod tests {
 
         store.delete("a").expect("delete");
         assert_eq!(store.list().expect("list"), vec!["b"]);
-        assert!(matches!(
-            store.load("a"),
-            Err(CoreError::PresetNotFound(_))
-        ));
+        assert!(matches!(store.load("a"), Err(CoreError::PresetNotFound(_))));
     }
 
     #[test]

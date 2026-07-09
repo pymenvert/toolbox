@@ -29,10 +29,17 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let config_path = std::env::args()
-        .nth(1)
-        .map(PathBuf::from)
+    let explicit_path = std::env::args().nth(1).map(PathBuf::from);
+    let config_path = explicit_path
+        .clone()
         .unwrap_or_else(|| PathBuf::from("node.toml"));
+
+    // Une config demandée explicitement mais absente est une erreur (une typo
+    // ne doit pas lancer silencieusement le node sur la config par défaut).
+    // Le node.toml implicite absent, lui, est le cas nominal du mode portable.
+    if explicit_path.is_some() && !config_path.exists() {
+        return Err(format!("config introuvable : {}", config_path.display()).into());
+    }
 
     let config = NodeConfig::load(&config_path)?;
     info!(
@@ -45,16 +52,19 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
         let bus = Bus::new(256, 1024);
-        let _handle = bus.handle();
+        let handle = bus.handle();
         let bus_task = tokio::spawn(bus.run());
 
         info!("prêt — Ctrl-C pour arrêter");
         tokio::signal::ctrl_c().await?;
         info!("arrêt demandé");
 
-        // Le bus s'arrête quand tous les émetteurs sont fermés.
-        drop(_handle);
-        bus_task.abort();
+        // Arrêt propre : on ferme le dernier émetteur, le bus draine sa file
+        // et sort de sa boucle tout seul (testé dans core::bus).
+        drop(handle);
+        if bus_task.await.is_err() {
+            error!("le bus s'est terminé anormalement");
+        }
         Ok::<(), std::io::Error>(())
     })?;
 

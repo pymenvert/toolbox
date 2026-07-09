@@ -32,6 +32,7 @@ fi
   echo "# Bench ${HOST} — ${DATE}"
   echo
   echo "- Machine : ${MODEL}"
+  # shellcheck disable=SC1091
   echo "- OS : $(. /etc/os-release 2>/dev/null && echo "${PRETTY_NAME:-?}")"
   echo "- Kernel : $(uname -r)"
   echo "- GStreamer : $(gst-launch-1.0 --version | head -n1)"
@@ -49,10 +50,11 @@ run_case() {
   log="$(mktemp)"
   statlog="$(mktemp)"
 
-  GST_DEBUG="decodebin3:4" gst-launch-1.0 -v -q \
+  # timeout : un sink qui bloque (droits DRM, VT occupé) ne doit pas geler le bench.
+  GST_DEBUG="decodebin3:4" timeout 90 gst-launch-1.0 -v -q \
     filesrc location="media/${clip}.mp4" ! qtdemux ! "$parser" ! \
     decodebin3 ! queue ! videoconvert ! \
-    fpsdisplaysink text-overlay=false video-sink="$sink" \
+    fpsdisplaysink text-overlay=false silent=false video-sink="$sink" \
     >"$log" 2>&1 &
   pid=$!
 
@@ -63,7 +65,9 @@ run_case() {
   wait "$pid" || true
 
   local decoder fps drop cpu
-  decoder="$(grep -oE 'v4l2[a-z0-9]*dec|avdec_[a-z0-9]+' "$log" | head -n1 || echo '?')"
+  # grep -m1 (pas de "| head") : sous pipefail, head qui ferme le pipe ferait
+  # sortir grep en erreur et dupliquerait la valeur avec le "|| echo '?'".
+  decoder="$(grep -m1 -oE 'v4l2[a-z0-9]*dec|avdec_[a-z0-9]+' "$log" || echo '?')"
   fps="$(grep -oE 'average: [0-9.]+' "$log" | tail -n1 | grep -oE '[0-9.]+' || echo '?')"
   drop="$(grep -oE 'dropped: [0-9]+' "$log" | tail -n1 | grep -oE '[0-9]+' || echo '?')"
   cpu="$(awk '{s+=$1; n++} END {if (n>0) printf "%.0f%%", s/n; else print "?"}' "$statlog")"

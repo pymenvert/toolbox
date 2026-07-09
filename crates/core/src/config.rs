@@ -163,10 +163,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("node.toml");
         std::fs::write(&path, "ceci n'est pas du toml [[[").expect("write");
-        assert!(matches!(
-            NodeConfig::load(&path),
-            Err(CoreError::Config(_))
-        ));
+        assert!(matches!(NodeConfig::load(&path), Err(CoreError::Config(_))));
     }
 
     #[test]
