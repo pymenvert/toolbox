@@ -19,10 +19,32 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Format
         run: cargo fmt --all --check
+      # En cas d'échec, les erreurs sont recopiées dans le résumé du run
+      # (visible publiquement sans ouvrir les logs).
       - name: Clippy (warnings = erreurs)
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: |
+          set -o pipefail
+          cargo clippy --workspace --all-targets -- -D warnings 2>&1 | tee clippy.log || {
+            {
+              echo "### Clippy — erreurs"
+              echo '```'
+              tail -n 120 clippy.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          }
       - name: Tests
-        run: cargo test --workspace
+        run: |
+          set -o pipefail
+          cargo test --workspace 2>&1 | tee tests.log || {
+            {
+              echo "### Tests — échecs"
+              echo '```'
+              tail -n 120 tests.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          }
 
   # Vérifie que ça compile pour les Pi (ARM64) sans les exécuter.
   check-arm64:
@@ -34,7 +56,17 @@ jobs:
           targets: aarch64-unknown-linux-gnu
       - uses: Swatinem/rust-cache@v2
       - name: Check aarch64
-        run: cargo check --workspace --target aarch64-unknown-linux-gnu
+        run: |
+          set -o pipefail
+          cargo check --workspace --target aarch64-unknown-linux-gnu 2>&1 | tee arm64.log || {
+            {
+              echo "### Check ARM64 — erreurs"
+              echo '```'
+              tail -n 120 arm64.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          }
 
   shellcheck:
     runs-on: ubuntu-latest
@@ -43,4 +75,12 @@ jobs:
       - name: Shellcheck des scripts
         run: |
           sudo apt-get install -y shellcheck
-          shellcheck tools/bench/*.sh
+          shellcheck tools/bench/*.sh 2>&1 | tee sc.log || {
+            {
+              echo "### Shellcheck — remarques"
+              echo '```'
+              cat sc.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          }
