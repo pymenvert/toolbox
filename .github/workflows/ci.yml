@@ -7,6 +7,7 @@ on:
 
 # contents:write = la CI pousse ses logs sur des branches ci-logs-* en cas
 # d'échec, pour qu'ils soient lisibles publiquement (diagnostic à distance).
+# Le push réutilise les identifiants persistés par actions/checkout.
 permissions:
   contents: write
 
@@ -32,14 +33,13 @@ jobs:
       - name: Publier les logs en cas d'échec
         if: failure()
         run: |
-          d="$(mktemp -d)"
-          cp -v fmt.log clippy.log tests.log "$d"/ 2>/dev/null || true
-          cd "$d"
-          git init -q -b ci-logs-check .
           git config user.email "ci@toolbox" && git config user.name "CI"
-          echo "run: ${GITHUB_RUN_ID} commit: ${GITHUB_SHA}" > run.txt
-          git add -A && git commit -q -m "logs check ${GITHUB_RUN_ID}"
-          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" ci-logs-check
+          git checkout -q --orphan ci-logs-check
+          git rm -rfq --cached .
+          echo "run $GITHUB_RUN_ID commit $GITHUB_SHA" > run.txt
+          git add -f run.txt fmt.log clippy.log tests.log || true
+          git commit -qm "logs check $GITHUB_RUN_ID"
+          git push -f origin ci-logs-check
 
   # Vérifie que ça compile pour les Pi (ARM64) sans exécuter.
   check-arm64:
@@ -57,11 +57,30 @@ jobs:
       - name: Publier les logs en cas d'échec
         if: failure()
         run: |
-          d="$(mktemp -d)"
-          cp -v arm64.log "$d"/ 2>/dev/null || true
-          cd "$d"
-          git init -q -b ci-logs-arm64 .
           git config user.email "ci@toolbox" && git config user.name "CI"
-          echo "run: ${GITHUB_RUN_ID} commit: ${GITHUB_SHA}" > run.txt
-          git add -A && git commit -q -m "logs arm64 ${GITHUB_RUN_ID}"
-          git push -q -f "https://x-access-token:${{ github.token }
+          git checkout -q --orphan ci-logs-arm64
+          git rm -rfq --cached .
+          echo "run $GITHUB_RUN_ID commit $GITHUB_SHA" > run.txt
+          git add -f run.txt arm64.log || true
+          git commit -qm "logs arm64 $GITHUB_RUN_ID"
+          git push -f origin ci-logs-arm64
+
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shellcheck des scripts
+        run: |
+          set -o pipefail
+          sudo apt-get install -y shellcheck 2>&1 | tee apt.log
+          shellcheck tools/bench/*.sh 2>&1 | tee sc.log
+      - name: Publier les logs en cas d'échec
+        if: failure()
+        run: |
+          git config user.email "ci@toolbox" && git config user.name "CI"
+          git checkout -q --orphan ci-logs-shellcheck
+          git rm -rfq --cached .
+          echo "run $GITHUB_RUN_ID commit $GITHUB_SHA" > run.txt
+          git add -f run.txt apt.log sc.log || true
+          git commit -qm "logs shellcheck $GITHUB_RUN_ID"
+          git push -f origin ci-logs-shellcheck
