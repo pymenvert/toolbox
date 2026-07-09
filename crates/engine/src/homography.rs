@@ -111,10 +111,14 @@ pub fn from_mapping(mapping: &MappingState) -> Result<Mat3, HomographyError> {
             return Err(HomographyError::Degenerate);
         }
         a.swap(col, pivot);
-        for r in (col + 1)..8 {
-            let f = a[r][col] / a[col][col];
-            for c in col..9 {
-                a[r][c] -= f * a[col][c];
+        // Élimination sous le pivot. La ligne pivot est copiée ([f64; 9], Copy)
+        // pour itérer proprement sans conflit d'emprunts.
+        let (top, bottom) = a.split_at_mut(col + 1);
+        let pivot_row = top[col];
+        for row in bottom.iter_mut() {
+            let f = row[col] / pivot_row[col];
+            for (c, cell) in row.iter_mut().enumerate().skip(col) {
+                *cell -= f * pivot_row[c];
             }
         }
     }
@@ -172,13 +176,12 @@ mod tests {
             [-0.029651662520, 0.848647364850, 0.050000000000],
             [0.017416874010, -0.083012893011, 1.000000000000],
         ];
-        for r in 0..3 {
-            for c in 0..3 {
+        for (r, row) in expected.iter().enumerate() {
+            for (c, &want) in row.iter().enumerate() {
                 assert!(
-                    (h.0[r][c] - expected[r][c]).abs() < 1e-9,
-                    "m[{r}][{c}] = {} != {}",
-                    h.0[r][c],
-                    expected[r][c]
+                    (h.0[r][c] - want).abs() < 1e-9,
+                    "m[{r}][{c}] = {} != {want}",
+                    h.0[r][c]
                 );
             }
         }
