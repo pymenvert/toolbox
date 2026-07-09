@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Toolbox — maquette UI</title>
+<style>
+  :root {
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --surface-2: #232322;
+    --ink: #ffffff;
+    --ink-2: #c3c2b7;
+    --muted: #898781;
+    --hairline: #2c2c2a;
+    --border: rgba(255,255,255,0.10);
+    --accent: #3987e5;
+    --good: #0ca30c;
+    --warning: #fab219;
+    --serious: #ec835a;
+    --critical: #d03b3b;
+    --radius: 10px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--page); color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 14px; height: 100vh; display: flex; overflow: hidden;
+  }
+
+  /* ---------- Sidebar ---------- */
+  nav {
+    width: 200px; min-width: 200px; background: var(--surface);
+    border-right: 1px solid var(--hairline); display: flex; flex-direction: column;
+    padding: 14px 10px;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; padding: 6px 10px 18px; }
+  .brand .logo {
+    width: 30px; height: 30px; border-radius: 8px;
+    background: linear-gradient(135deg, var(--accent), #9085e9);
+    display: grid; place-items: center; font-weight: 700; font-size: 15px;
+  }
+  .brand b { font-size: 15px; letter-spacing: .3px; }
+  .brand small { display: block; color: var(--muted); font-weight: 400; }
+  nav a {
+    display: flex; align-items: center; gap: 10px; color: var(--ink-2);
+    text-decoration: none; padding: 9px 12px; border-radius: 8px; margin: 1px 0;
+    cursor: pointer; user-select: none;
+  }
+  nav a:hover { background: var(--surface-2); color: var(--ink); }
+  nav a.active { background: var(--surface-2); color: var(--ink); box-shadow: inset 2px 0 0 var(--accent); }
+  nav a .ic { width: 18px; text-align: center; opacity: .9; }
+  nav a .soon { margin-left: auto; font-size: 10px; color: var(--muted); border: 1px solid var(--hairline); padding: 1px 6px; border-radius: 20px; }
+  nav .spacer { flex: 1; }
+  .nodecard {
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 10px 12px; font-size: 12px; color: var(--ink-2);
+  }
+  .nodecard .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--good); margin-right: 6px; }
+
+  /* ---------- Layout ---------- */
+  main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  header {
+    height: 54px; display: flex; align-items: center; gap: 14px; padding: 0 20px;
+    border-bottom: 1px solid var(--hairline); background: var(--surface);
+  }
+  header h1 { font-size: 16px; font-weight: 600; }
+  header .grow { flex: 1; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 7px; padding: 5px 12px;
+    border-radius: 20px; background: var(--surface-2); border: 1px solid var(--border);
+    color: var(--ink-2); font-size: 12px;
+  }
+  .pill .dot { width: 8px; height: 8px; border-radius: 50%; }
+  button {
+    font: inherit; color: var(--ink); background: var(--surface-2);
+    border: 1px solid var(--border); border-radius: 8px; padding: 7px 14px; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  button.ghost { background: transparent; }
+  section.page { flex: 1; overflow: auto; padding: 20px; display: none; }
+  section.page.visible { display: block; }
+  .grid { display: grid; gap: 14px; }
+
+  /* ---------- Cards & tiles ---------- */
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 16px;
+  }
+  .card h3 { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .8px; margin-bottom: 12px; }
+  .tiles { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  .tile { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
+  .tile .k { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+  .tile .v { font-size: 26px; font-weight: 650; letter-spacing: -.5px; }
+  .tile .v small { font-size: 13px; color: var(--ink-2); font-weight: 400; margin-left: 3px; }
+  .tile .sub { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .tile.warn .v { color: var(--warning); }
+  .tile .sub .st { display: inline-flex; align-items: center; gap: 4px; }
+
+  /* ---------- Transport ---------- */
+  .transport { display: flex; align-items: center; gap: 10px; }
+  .transport button { width: 44px; height: 44px; border-radius: 50%; font-size: 16px; display: grid; place-items: center; }
+  .transport button.play { width: 54px; height: 54px; background: var(--accent); border-color: var(--accent); font-size: 20px; }
+  .seek { flex: 1; display: flex; align-items: center; gap: 10px; color: var(--ink-2); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .seek .bar { flex: 1; height: 6px; border-radius: 3px; background: var(--surface-2); position: relative; cursor: pointer; }
+  .seek .bar i { position: absolute; inset: 0 62% 0 0; background: var(--accent); border-radius: 3px; }
+
+  /* ---------- Mapping ---------- */
+  .maplayout { display: grid; grid-template-columns: 1fr 260px; gap: 14px; height: calc(100% - 4px); }
+  #mapstage {
+    position: relative; background: #000; border: 1px solid var(--border);
+    border-radius: var(--radius); overflow: hidden; touch-action: none; min-height: 420px;
+  }
+  #warp { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .corner {
+    position: absolute; width: 26px; height: 26px; border-radius: 50%;
+    background: var(--accent); border: 3px solid #fff; cursor: grab;
+    transform: translate(-50%, -50%); display: grid; place-items: center;
+    font-size: 11px; font-weight: 700; user-select: none; touch-action: none;
+    box-shadow: 0 2px 10px rgba(0,0,0,.6);
+  }
+  .corner:active { cursor: grabbing; background: #9085e9; }
+  .mapside .row { display: flex; justify-content: space-between; align-items: center; padding: 7px 0; border-bottom: 1px solid var(--hairline); font-size: 13px; color: var(--ink-2); }
+  .mapside .row:last-child { border: none; }
+  .mapside .row b { color: var(--ink); font-variant-numeric: tabular-nums; font-weight: 500; }
+  .hint { font-size: 12px; color: var(--muted); line-height: 1.6; margin-top: 10px; }
+  kbd { background: var(--surface-2); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; font-size: 11px; }
+
+  /* ---------- Sliders (couleur) ---------- */
+  .slider { display: grid; grid-template-columns: 110px 1fr 60px; align-items: center; gap: 12px; padding: 9px 0; }
+  .slider label { color: var(--ink-2); font-size: 13px; }
+  .slider output { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink); font-size: 13px; }
+  input[type=range] { -webkit-appearance: none; height: 6px; border-radius: 3px; background: var(--surface-2); outline: none; }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%;
+    background: var(--accent); border: 3px solid #fff; cursor: pointer;
+  }
+
+  /* ---------- Media ---------- */
+  .drop {
+    border: 2px dashed var(--hairline); border-radius: var(--radius); padding: 26px;
+    text-align: center; color: var(--muted); margin-bottom: 14px; cursor: pointer;
+  }
+  .drop:hover { border-color: var(--accent); color: var(--ink-2); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: var(--muted); font-weight: 500; font-size: 12px; padding: 8px 10px; border-bottom: 1px solid var(--hairline); }
+  td { padding: 9px 10px; border-bottom: 1px solid var(--hairline); color: var(--ink-2); }
+  td:first-child { color: var(--ink); }
+  tr:hover td { background: var(--surface-2); }
+  td .act { opacity: 0; } tr:hover .act { opacity: 1; }
+  td button { padding: 3px 10px; font-size: 12px; }
+  .badge { font-size: 11px; padding: 2px 8px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--border); color: var(--ink-2); }
+
+  /* ---------- Logs ---------- */
+  .logbar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+  .chip {
+    padding: 4px 12px; border-radius: 16px; border: 1px solid var(--border);
+    background: transparent; color: var(--ink-2); font-size: 12px; cursor: pointer;
+  }
+  .chip.on { background: var(--surface-2); color: var(--ink); border-color: var(--accent); }
+  #logview {
+    background: #111110; border: 1px solid var(--border); border-radius: var(--radius);
+    font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 12px;
+    padding: 12px; height: calc(100vh - 210px); overflow: auto; line-height: 1.7;
+  }
+  .lg { display: flex; gap: 10px; white-space: nowrap; }
+  .lg .t { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .lg .lv { width: 46px; font-weight: 700; }
+  .lg .md { color: var(--ink-2); width: 60px; }
+  .lg .msg { color: var(--ink); }
+  .lv.INFO { color: var(--accent); } .lv.WARN { color: var(--warning); }
+  .lv.ERROR { color: var(--critical); } .lv.DEBUG { color: var(--muted); }
+
+  /* ---------- Settings ---------- */
+  .setrow { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--hairline); }
+  .setrow:last-child { border: none; }
+  .setrow .lab b { display: block; font-weight: 500; }
+  .setrow .lab span { font-size: 12px; color: var(--muted); }
+  .toggle { width: 40px; height: 22px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--border); position: relative; cursor: pointer; }
+  .toggle i { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--muted); transition: .15s; }
+  .toggle.on { background: var(--accent); border-color: var(--accent); }
+  .toggle.on i { left: 20px; background: #fff; }
+  select, input[type=text] {
+    font: inherit; color: var(--ink); background: var(--surface-2);
+    border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px;
+  }
+  @media (max-width: 900px) {
+    nav { width: 64px; min-width: 64px; }
+    nav a span, .brand div, .nodecard, nav a .soon { display: none; }
+    .maplayout { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="brand"><div class="logo">T</div><div><b>Toolbox</b><small>vp-01</small></div></div>
+  <a data-page="dashboard" class="active"><span class="ic">◈</span><span>Dashboard</span></a>
+  <a data-page="mapping"><span class="ic">⬚</span><span>Mapping</span></a>
+  <a data-page="media"><span class="ic">▤</span><span>Médias</span></a>
+  <a data-page="color"><span class="ic">◐</span><span>Couleur</span></a>
+  <a data-page="seq"><span class="ic">≡</span><span>Séquenceur</span><span class="soon">phase 3</span></a>
+  <a data-page="logs"><span class="ic">☰</span><span>Logs</span></a>
+  <a data-page="settings"><span class="ic">⚙</span><span>Réglages</span></a>
+  <div class="spacer"></div>
+  <div class="nodecard">
+    <div><span class="dot"></span><b style="color:var(--ink)">vp-01</b> · 192.168.1.41</div>
+    <div style="margin-top:6px">Tailscale : <span style="color:var(--good)">connecté</span></div>
+    <div style="margin-top:2px">v0.1.0 · up 2 j 04 h</div>
+  </div>
+</nav>
+
+<main>
+  <header>
+    <h1 id="pagetitle">Dashboard</h1>
+    <span class="pill"><span class="dot" style="background:var(--good)"></span>En lecture — boucle_fond.mp4</span>
+    <div class="grow"></div>
+    <button class="ghost" onclick="alert('Le VP affiche la mire + le nom du node (démo)')">Mire de test</button>
+    <button class="ghost">Identify</button>
+  </header>
+
+  <!-- ================= DASHBOARD ================= -->
+  <section class="page visible" id="page-dashboard">
+    <div class="grid tiles" style="margin-bottom:14px">
+      <div class="tile"><div class="k">FPS rendu</div><div class="v">60.0</div><div class="sub">cible 60 — 0 drift</div></div>
+      <div class="tile"><div class="k">Frames perdues</div><div class="v">0<small>/ 5 min</small></div><div class="sub">décodeur : v4l2slh265dec (HW)</div></div>
+      <div class="tile warn"><div class="k">Température SoC</div><div class="v">71<small>°C</small></div><div class="sub"><span class="st">⚠ surveiller (throttle à 80°)</span></div></div>
+      <div class="tile"><div class="k">CPU</div><div class="v">34<small>%</small></div><div class="sub">4 cœurs · charge 1.2</div></div>
+      <div class="tile"><div class="k">RAM</div><div class="v">1.1<small>/ 8 Go</small></div><div class="sub">moteur : 410 Mo</div></div>
+      <div class="tile"><div class="k">Disque</div><div class="v">83<small>Go libres</small></div><div class="sub">SSD NVMe · media/ : 27 Go</div></div>
+    </div>
+
+    <div class="grid" style="grid-template-columns: 2fr 1fr;">
+      <div class="card">
+        <h3>Lecture</h3>
+        <div style="display:flex; gap:16px; align-items:center; margin-bottom:16px">
+          <div style="width:120px;height:68px;border-radius:8px;background:linear-gradient(120deg,#1c5cab,#9085e9);display:grid;place-items:center;font-size:11px;color:#fff">aperçu</div>
+          <div>
+            <b style="font-size:15px">boucle_fond.mp4</b>
+            <div style="color:var(--muted);font-size:12px;margin-top:4px">1920×1080 · 60 fps · HEVC · 02:34 · boucle activée</div>
+          </div>
+        </div>
+        <div class="transport">
+          <button title="Stop">■</button>
+          <button class="play" title="Lecture/Pause">❚❚</button>
+          <button title="Boucle" style="color:var(--accent)">⟳</button>
+          <div class="seek"><span>00:58</span><div class="bar"><i></i></div><span>02:34</span></div>
+          <span class="pill">vol <b style="margin-left:4px">100%</b></span>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Contrôle externe</h3>
+        <div class="setrow" style="padding:8px 0"><div class="lab"><b>OSC</b><span>port 9000 · 14 msg/min</span></div><span class="badge" style="color:var(--good)">actif</span></div>
+        <div class="setrow" style="padding:8px 0"><div class="lab"><b>WebSocket</b><span>2 clients connectés</span></div><span class="badge" style="color:var(--good)">actif</span></div>
+        <div class="setrow" style="padding:8px 0"><div class="lab"><b>MIDI</b><span>aucun périphérique</span></div><span class="badge">inactif</span></div>
+        <div class="hint" style="margin-top:8px">Dernière commande : <code style="color:var(--accent)">/seek 58.0</code> (osc, il y a 12 s)</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= MAPPING ================= -->
+  <section class="page" id="page-mapping">
+    <div class="maplayout">
+      <div id="mapstage">
+        <canvas id="warp"></canvas>
+        <div class="corner" data-i="0">1</div>
+        <div class="corner" data-i="1">2</div>
+        <div class="corner" data-i="2">3</div>
+        <div class="corner" data-i="3">4</div>
+      </div>
+      <div class="mapside">
+        <div class="card">
+          <h3>Coins</h3>
+          <div class="row"><span>1 · haut gauche</span><b id="c0">0.000 , 0.000</b></div>
+          <div class="row"><span>2 · haut droit</span><b id="c1">1.000 , 0.000</b></div>
+          <div class="row"><span>3 · bas droit</span><b id="c2">1.000 , 1.000</b></div>
+          <div class="row"><span>4 · bas gauche</span><b id="c3">0.000 , 1.000</b></div>
+          <div style="display:flex; gap:8px; margin-top:14px">
+            <button onclick="resetCorners()">Réinitialiser</button>
+            <button class="primary" onclick="alert('Preset sauvegardé (démo)')">Sauver preset</button>
+          </div>
+          <div class="hint">
+            Glisse les poignées (souris ou tactile).<br>
+            Clic sur une poignée puis <kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd> : ajustement fin (0.001).<br>
+            <kbd>Maj</kbd> + flèches : pas de 0.01.<br>
+            La déformation appliquée ici est la <b>vraie homographie</b> du moteur.
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= MEDIA ================= -->
+  <section class="page" id="page-media">
+    <div class="drop">⬆ &nbsp;Dépose des fichiers ici ou clique pour parcourir — conversion optimale proposée à l'import (HEVC pour 4K)</div>
+    <div class="card" style="padding:0">
+      <table>
+        <thead><tr><th>Fichier</th><th>Format</th><th>Durée</th><th>Taille</th><th></th></tr></thead>
+        <tbody>
+          <tr><td>boucle_fond.mp4 <span class="badge" style="margin-left:6px;color:var(--good)">en lecture</span></td><td>1080p60 · HEVC</td><td>02:34</td><td>412 Mo</td><td class="act"><button>Lire</button> <button class="ghost">⋯</button></td></tr>
+          <tr><td>intro_expo.mp4</td><td>1080p30 · H.264</td><td>01:12</td><td>188 Mo</td><td class="act"><button>Lire</button> <button class="ghost">⋯</button></td></tr>
+          <tr><td>mire_4k.mp4 <span class="badge" style="margin-left:6px;color:var(--warning)">à convertir</span></td><td>2160p30 · H.264</td><td>00:30</td><td>301 Mo</td><td class="act"><button>Convertir</button> <button class="ghost">⋯</button></td></tr>
+          <tr><td>fond_neutre.png</td><td>1920×1080</td><td>—</td><td>2,1 Mo</td><td class="act"><button>Lire</button> <button class="ghost">⋯</button></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ================= COULEUR ================= -->
+  <section class="page" id="page-color">
+    <div class="grid" style="grid-template-columns: 1fr 1fr;">
+      <div class="card">
+        <h3>Correction couleur</h3>
+        <div class="slider"><label>Luminosité</label><input type="range" min="0" max="2" step="0.01" value="1" data-p="brightness"><output>1.00</output></div>
+        <div class="slider"><label>Contraste</label><input type="range" min="0" max="2" step="0.01" value="1" data-p="contrast"><output>1.00</output></div>
+        <div class="slider"><label>Gamma</label><input type="range" min="0.2" max="4" step="0.01" value="1" data-p="gamma"><output>1.00</output></div>
+        <div class="slider"><label>Saturation</label><input type="range" min="0" max="2" step="0.01" value="1" data-p="saturation"><output>1.00</output></div>
+        <div class="slider"><label>Teinte</label><input type="range" min="-180" max="180" step="1" value="0" data-p="hue"><output>0°</output></div>
+        <div style="display:flex; gap:8px; margin-top:14px">
+          <button onclick="resetColor()">Neutre</button>
+          <button class="primary" onclick="alert('Preset sauvegardé (démo)')">Sauver preset</button>
+        </div>
+        <div class="hint">Chaque réglage est aussi pilotable en OSC : <code>/color/gamma 1.2</code></div>
+      </div>
+      <div class="card">
+        <h3>Aperçu (approximation navigateur)</h3>
+        <canvas id="colorprev" style="width:100%; border-radius:8px; background:#000"></canvas>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= SEQUENCEUR ================= -->
+  <section class="page" id="page-seq">
+    <div class="card" style="text-align:center; padding:60px; color:var(--muted)">
+      <div style="font-size:40px; margin-bottom:14px">≡</div>
+      <b style="color:var(--ink-2)">Séquenceur / timeline — phase 3</b>
+      <p style="margin-top:10px; max-width:460px; margin-inline:auto; line-height:1.6">
+        Cues horodatées ou déclenchées (OSC, MIDI, manuel), actions = commandes du node,
+        crossfade entre presets. Cette page montre l'emplacement prévu dans la navigation.
+      </p>
+    </div>
+  </section>
+
+  <!-- ================= LOGS ================= -->
+  <section class="page" id="page-logs">
+    <div class="logbar">
+      <span style="color:var(--muted); font-size:12px">Niveau :</span>
+      <button class="chip on" data-lv="DEBUG">debug</button>
+      <button class="chip on" data-lv="INFO">info</button>
+      <button class="chip on" data-lv="WARN">warn</button>
+      <button class="chip on" data-lv="ERROR">error</button>
+      <span style="flex:1"></span>
+      <button class="chip" id="pauselog">⏸ Pause</button>
+      <button class="chip" onclick="alert('diagnostic_vp-01_20260709.zip (démo)')">⬇ Export diagnostic</button>
+    </div>
+    <div id="logview"></div>
+  </section>
+
+  <!-- ================= REGLAGES ================= -->
+  <section class="page" id="page-settings">
+    <div class="grid" style="grid-template-columns: 1fr 1fr;">
+      <div class="card">
+        <h3>Node</h3>
+        <div class="setrow"><div class="lab"><b>Nom du node</b><span>visible sur le réseau (mDNS)</span></div><input type="text" value="vp-01" style="width:120px"></div>
+        <div class="setrow"><div class="lab"><b>Résolution de sortie</b><span>1080p par défaut, configurable</span></div>
+          <select><option>Auto (natif écran)</option><option selected>1920 × 1080</option><option>3840 × 2160</option><option>1280 × 720</option></select></div>
+        <div class="setrow"><div class="lab"><b>Fréquence</b><span>doit suivre le framerate des médias</span></div><select><option selected>60 Hz</option><option>50 Hz</option><option>30 Hz</option></select></div>
+        <div class="setrow"><div class="lab"><b>Démarrage auto</b><span>preset chargé au boot (mode kiosque)</span></div><select><option selected>scene_01</option><option>aucun</option></select></div>
+      </div>
+      <div class="card">
+        <h3>Modules</h3>
+        <div class="setrow"><div class="lab"><b>OSC</b><span>port 9000</span></div><div class="toggle on" onclick="this.classList.toggle('on')"><i></i></div></div>
+        <div class="setrow"><div class="lab"><b>MIDI</b><span>déclenchements notes/CC</span></div><div class="toggle" onclick="this.classList.toggle('on')"><i></i></div></div>
+        <div class="setrow"><div class="lab"><b>Sync multi-node</b><span>phase 2</span></div><div class="toggle" onclick="this.classList.toggle('on')"><i></i></div></div>
+        <div class="setrow"><div class="lab"><b>NDI (plugin)</b><span>licence SDK à accepter</span></div><div class="toggle" onclick="this.classList.toggle('on')"><i></i></div></div>
+        <div class="setrow"><div class="lab"><b>Tailscale</b><span>accès distant sécurisé</span></div><div class="toggle on" onclick="this.classList.toggle('on')"><i></i></div></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+/* ---------- Navigation ---------- */
+const titles = { dashboard:"Dashboard", mapping:"Mapping", media:"Médias", color:"Couleur", seq:"Séquenceur", logs:"Logs", settings:"Réglages" };
+document.querySelectorAll("nav a").forEach(a => a.addEventListener("click", () => {
+  document.querySelectorAll("nav a").forEach(x => x.classList.remove("active"));
+  a.classList.add("active");
+  const p = a.dataset.page;
+  document.querySelectorAll(".page").forEach(s => s.classList.toggle("visible", s.id === "page-" + p));
+  document.getElementById("pagetitle").textContent = titles[p];
+  if (p === "mapping") sizeStage();
+}));
+
+/* ---------- Homographie (même math que le moteur / homography_ref.py) ---------- */
+function homography(corners) {
+  const U = [[0,0],[1,0],[1,1],[0,1]], A = [], B = [];
+  for (let k = 0; k < 4; k++) {
+    const [u,v] = U[k], [x,y] = corners[k];
+    A.push([u,v,1,0,0,0,-u*x,-v*x]); B.push(x);
+    A.push([0,0,0,u,v,1,-u*y,-v*y]); B.push(y);
+  }
+  const M = A.map((r,i) => [...r, B[i]]), n = 8;
+  for (let c = 0; c < n; c++) {
+    let p = c;
+    for (let r = c; r < n; r++) if (Math.abs(M[r][c]) > Math.abs(M[p][c])) p = r;
+    [M[c], M[p]] = [M[p], M[c]];
+    if (Math.abs(M[c][c]) < 1e-12) return null;
+    for (let r = c+1; r < n; r++) { const f = M[r][c]/M[c][c]; for (let j = c; j <= n; j++) M[r][j] -= f*M[c][j]; }
+  }
+  const h = new Array(n).fill(0);
+  for (let r = n-1; r >= 0; r--) { let s = M[r][n]; for (let j = r+1; j < n; j++) s -= M[r][j]*h[j]; h[r] = s/M[r][r]; }
+  return [[h[0],h[1],h[2]],[h[3],h[4],h[5]],[h[6],h[7],1]];
+}
+
+/* ---------- Éditeur mapping : mire warpée par la vraie matrice ---------- */
+const stage = document.getElementById("mapstage");
+const warpCanvas = document.getElementById("warp");
+const wctx = warpCanvas.getContext("2d");
+let corners = [[0,0],[1,0],[1,1],[0,1]];
+let selected = null;
+
+const pattern = document.createElement("canvas");
+function makePattern() {
+  const W = 640, H = 360; pattern.width = W; pattern.height = H;
+  const c = pattern.getContext("2d");
+  c.fillStyle = "#151516"; c.fillRect(0,0,W,H);
+  c.strokeStyle = "#3987e5"; c.lineWidth = 1;
+  for (let x = 0; x <= W; x += 40) { c.beginPath(); c.moveTo(x,0); c.lineTo(x,H); c.stroke(); }
+  for (let y = 0; y <= H; y += 40) { c.beginPath(); c.moveTo(0,y); c.lineTo(W,y); c.stroke(); }
+  c.strokeStyle = "#ffffff"; c.lineWidth = 2;
+  c.beginPath(); c.moveTo(W/2,0); c.lineTo(W/2,H); c.moveTo(0,H/2); c.lineTo(W,H/2); c.stroke();
+  c.beginPath(); c.arc(W/2, H/2, 80, 0, Math.PI*2); c.stroke();
+  c.fillStyle = "#fff"; c.font = "700 26px system-ui"; c.textAlign = "center";
+  c.fillText("TOOLBOX · MIRE", W/2, H/2 - 100);
+  c.font = "700 22px system-ui";
+  [[24,30,"1"],[W-24,30,"2"],[W-24,H-14,"3"],[24,H-14,"4"]].forEach(([x,y,t]) => c.fillText(t,x,y));
+}
+makePattern();
+
+function drawWarp() {
+  const W = warpCanvas.width, H = warpCanvas.height;
+  wctx.fillStyle = "#000"; wctx.fillRect(0,0,W,H);
+  const Hm = homography(corners);
+  if (!Hm) return;
+  // Dessin par petites cellules texturées (approximation visuelle suffisante
+  // pour la maquette ; le moteur fait ça par pixel en GLSL).
+  const N = 24, sw = pattern.width/N, sh = pattern.height/N;
+  const P = (u,v) => { const w = Hm[2][0]*u + Hm[2][1]*v + 1;
+    return [ (Hm[0][0]*u+Hm[0][1]*v+Hm[0][2])/w*W, (Hm[1][0]*u+Hm[1][1]*v+Hm[1][2])/w*H ]; };
+  for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
+    const p0 = P(i/N, j/N), p1 = P((i+1)/N, j/N), p2 = P(i/N, (j+1)/N);
+    wctx.save();
+    wctx.setTransform((p1[0]-p0[0])/sw, (p1[1]-p0[1])/sw, (p2[0]-p0[0])/sh, (p2[1]-p0[1])/sh, p0[0], p0[1]);
+    wctx.drawImage(pattern, i*sw, j*sh, sw+1, sh+1, 0, 0, sw+1, sh+1);
+    wctx.restore();
+  }
+}
+
+function sizeStage() {
+  warpCanvas.width = stage.clientWidth; warpCanvas.height = stage.clientHeight;
+  syncHandles(); drawWarp();
+}
+function syncHandles() {
+  document.querySelectorAll(".corner").forEach(el => {
+    const [x,y] = corners[el.dataset.i];
+    el.style.left = x*100 + "%"; el.style.top = y*100 + "%";
+  });
+  corners.forEach(([x,y],i) =>
+    document.getElementById("c"+i).textContent = x.toFixed(3) + " , " + y.toFixed(3));
+}
+function resetCorners() { corners = [[0,0],[1,0],[1,1],[0,1]]; syncHandles(); drawWarp(); }
+
+document.querySelectorAll(".corner").forEach(el => {
+  el.addEventListener("pointerdown", e => {
+    selected = +el.dataset.i; el.setPointerCapture(e.pointerId);
+    const move = ev => {
+      const r = stage.getBoundingClientRect();
+      corners[selected] = [
+        Math.min(1.5, Math.max(-0.5, (ev.clientX - r.left)/r.width)),
+        Math.min(1.5, Math.max(-0.5, (ev.clientY - r.top)/r.height)),
+      ];
+      syncHandles(); drawWarp();
+    };
+    const up = () => { el.removeEventListener("pointermove", move); el.removeEventListener("pointerup", up); };
+    el.addEventListener("pointermove", move); el.addEventListener("pointerup", up);
+  });
+});
+document.addEventListener("keydown", e => {
+  if (selected === null || !document.getElementById("page-mapping").classList.contains("visible")) return;
+  const step = e.shiftKey ? 0.01 : 0.001;
+  const d = { ArrowLeft:[-step,0], ArrowRight:[step,0], ArrowUp:[0,-step], ArrowDown:[0,step] }[e.key];
+  if (!d) return;
+  e.preventDefault();
+  corners[selected] = [corners[selected][0]+d[0], corners[selected][1]+d[1]];
+  syncHandles(); drawWarp();
+});
+new ResizeObserver(sizeStage).observe(stage);
+
+/* ---------- Aperçu couleur ---------- */
+const prev = document.getElementById("colorprev"), pctx = prev.getContext("2d");
+const colorState = { brightness:1, contrast:1, gamma:1, saturation:1, hue:0 };
+function drawColorPreview() {
+  prev.width = prev.clientWidth || 400; prev.height = prev.width * 9/16;
+  pctx.filter = `brightness(${colorState.brightness}) contrast(${colorState.contrast}) saturate(${colorState.saturation}) hue-rotate(${colorState.hue}deg)`;
+  pctx.drawImage(pattern, 0, 0, prev.width, prev.height);
+  pctx.filter = "none";
+  if (colorState.gamma !== 1) { // gamma approximé par calque (le moteur fait pow() exact)
+    pctx.globalCompositeOperation = colorState.gamma > 1 ? "screen" : "multiply";
+    pctx.globalAlpha = Math.min(0.6, Math.abs(colorState.gamma - 1) * 0.5);
+    pctx.fillStyle = colorState.gamma > 1 ? "#888" : "#000";
+    pctx.fillRect(0,0,prev.width,prev.height);
+    pctx.globalAlpha = 1; pctx.globalCompositeOperation = "source-over";
+  }
+}
+document.querySelectorAll(".slider input").forEach(inp => inp.addEventListener("input", () => {
+  colorState[inp.dataset.p] = +inp.value;
+  inp.nextElementSibling.value = inp.dataset.p === "hue" ? inp.value + "°" : (+inp.value).toFixed(2);
+  drawColorPreview();
+}));
+function resetColor() {
+  Object.assign(colorState, { brightness:1, contrast:1, gamma:1, saturation:1, hue:0 });
+  document.querySelectorAll(".slider input").forEach(inp => {
+    inp.value = inp.dataset.p === "hue" ? 0 : 1;
+    inp.nextElementSibling.value = inp.dataset.p === "hue" ? "0°" : "1.00";
+  });
+  drawColorPreview();
+}
+new ResizeObserver(drawColorPreview).observe(prev);
+
+/* ---------- Logs (flux simulé) ---------- */
+const logview = document.getElementById("logview");
+const levels = { DEBUG:true, INFO:true, WARN:true, ERROR:true };
+let paused = false;
+const samples = [
+  ["INFO","bus","commande appliquée source=osc cmd=Seek{58.0}"],
+  ["INFO","engine","frame pacing stable, 60.00 fps"],
+  ["DEBUG","http","GET /api/state 200 (2 ms)"],
+  ["DEBUG","osc","rx /seek 58.0 depuis 192.168.1.20:53211"],
+  ["INFO","media","scan media/ : 4 fichiers, 27.3 Go"],
+  ["WARN","system","température SoC 71°C (seuil throttle 80°C)"],
+  ["DEBUG","ws","état diffusé à 2 clients"],
+  ["INFO","preset","preset 'scene_01' chargé en 3 ms"],
+  ["ERROR","osc","commande refusée : /corner/7 (index invalide)"],
+];
+function addLog() {
+  if (paused) return;
+  const [lv, md, msg] = samples[Math.floor(Math.random()*samples.length)];
+  if (!levels[lv]) return;
+  const t = new Date().toTimeString().slice(0,8) + "." + String(Date.now()%1000).padStart(3,"0");
+  const div = document.createElement("div");
+  div.className = "lg"; div.dataset.lv = lv;
+  div.innerHTML = `<span class="t">${t}</span><span class="lv ${lv}">${lv}</span><span class="md">${md}</span><span class="msg">${msg}</span>`;
+  logview.appendChild(div);
+  while (logview.children.length > 400) logview.removeChild(logview.firstChild);
+  logview.scrollTop = logview.scrollHeight;
+}
+setInterval(addLog, 700);
+for (let i = 0; i < 12; i++) addLog();
+
+document.querySelectorAll(".chip[data-lv]").forEach(ch => ch.addEventListener("click", () => {
+  ch.classList.toggle("on");
+  levels[ch.dataset.lv] = ch.classList.contains("on");
+  logview.querySelectorAll(".lg").forEach(l => l.style.display = levels[l.dataset.lv] ? "" : "none");
+}));
+document.getElementById("pauselog").addEventListener("click", function() {
+  paused = !paused;
+  this.textContent = paused ? "▶ Reprendre" : "⏸ Pause";
+  this.classList.toggle("on", paused);
+});
+
+/* ---------- init ---------- */
+sizeStage(); drawColorPreview();
+</script>
+</body>
+</html>

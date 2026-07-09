@@ -1,0 +1,13 @@
+[package]
+name = "toolbox-engine"
+description = "Moteur de rendu : mapping (homographie), couleur, effets. La partie GStreamer arrive en phase 1."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+toolbox-core = { path = "../core" }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true
