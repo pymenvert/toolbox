@@ -25,24 +25,17 @@ jobs:
         run: |
           set -o pipefail
           cargo clippy --workspace --all-targets -- -D warnings 2>&1 | tee clippy.log || {
-            {
-              echo "### Clippy — erreurs"
-              echo '```'
-              tail -n 120 clippy.log
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
+            # Les annotations ::error:: sont lisibles publiquement sur la page du run.
+            grep -B1 -A3 -E '^(error|warning)(\[|:)' clippy.log | head -n 40 \
+              | while IFS= read -r line; do echo "::error::${line}"; done
             exit 1
           }
       - name: Tests
         run: |
           set -o pipefail
           cargo test --workspace 2>&1 | tee tests.log || {
-            {
-              echo "### Tests — échecs"
-              echo '```'
-              tail -n 120 tests.log
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
+            grep -B2 -A6 -E '(^error|FAILED|panicked)' tests.log | head -n 40 \
+              | while IFS= read -r line; do echo "::error::${line}"; done
             exit 1
           }
 
@@ -82,5 +75,4 @@ jobs:
               cat sc.log
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
-            exit 1
-          }
+     
