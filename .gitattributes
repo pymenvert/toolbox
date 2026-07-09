@@ -1,0 +1,12 @@
+# Fins de ligne : LF partout dans le repo (les scripts tournent sur Pi/Linux,
+# les CRLF Windows cassent bash et shellcheck). Git sur Windows convertira
+# à l'affichage si besoin, mais le contenu committé reste LF.
+* text=auto eol=lf
+
+# Fichiers binaires : jamais de conversion.
+*.png binary
+*.jpg binary
+*.mp4 binary
+*.mov binary
+*.zip binary
+*.gz binary
