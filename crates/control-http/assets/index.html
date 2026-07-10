@@ -1402,7 +1402,7 @@ $("#presetName").addEventListener("keydown", e => { if (e.key === "Enter") $("#p
 /* ===================== Fonctions (interrupteurs) ===================== */
 const featureDefs = [
   ["player", "Lecteur vidéo", "Décodage et lecture des médias. Coupé : écran noir, pipeline vidéo libéré."],
-  ["output", "Fenêtre de sortie", "La projection elle-même. Bascule appliquée au prochain démarrage du node (mise en sommeil à chaud : bientôt)."],
+  ["output", "Fenêtre de sortie", "La projection elle-même. Coupée : fenêtre masquée, rendu suspendu, surface GPU libérée (0 % CPU/GPU) ; réveillée à chaud."],
   ["osc", "Contrôle OSC", "Réception des commandes OSC (Chataigne…). Coupé : la socket UDP est fermée."],
   ["oscquery", "Auto-découverte OSCQuery", "Le serveur qui décrit les paramètres à Chataigne (port 8081) et son annonce réseau."],
   ["osc_feedback", "Retour d'état OSC", "Renvoi des changements vers l'hôte configuré ([osc] feedback). Sans cible configurée, l'interrupteur est sans effet."],

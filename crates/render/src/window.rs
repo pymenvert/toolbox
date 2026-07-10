@@ -57,6 +57,10 @@ pub struct OutputChannels {
     /// Frames réellement présentées par seconde, publiées pour l'UI
     /// (indicateur de fluidité du rendu, rafraîchi ~1 fois/s).
     pub fps: watch::Sender<f32>,
+    /// Interrupteur « fenêtre de sortie » (onglet Fonctions) : à `false`,
+    /// la fenêtre est masquée et le peintre détruit (surface GPU rendue,
+    /// aucun redraw — 0 % CPU/GPU) ; à `true`, tout est recréé à chaud.
+    pub enabled: watch::Receiver<bool>,
     /// Signal d'arrêt du node.
     pub shutdown: watch::Receiver<bool>,
 }
@@ -68,6 +72,8 @@ enum Wake {
     Redraw,
     /// Réglages de sortie modifiés : déplacer/basculer la fenêtre.
     SettingsChanged,
+    /// Interrupteur de la fonction basculé : sommeil ou réveil.
+    EnabledChanged,
     /// Arrêt du node : fermer la fenêtre et sortir de la boucle.
     Quit,
 }
@@ -95,6 +101,7 @@ fn run_event_loop(config: WindowConfig, channels: OutputChannels) {
         settings,
         monitors,
         fps,
+        enabled,
         shutdown,
     } = channels;
 
@@ -120,12 +127,13 @@ fn run_event_loop(config: WindowConfig, channels: OutputChannels) {
         }
     };
 
-    // Relais : bus/vidéo/réglages/arrêt (async) → event loop (sync).
+    // Relais : bus/vidéo/réglages/interrupteur/arrêt (async) → event loop.
     spawn_wake_relay(
         event_loop.create_proxy(),
         state.clone(),
         video.clone(),
         settings.clone(),
+        enabled.clone(),
         shutdown,
     );
 
@@ -136,6 +144,7 @@ fn run_event_loop(config: WindowConfig, channels: OutputChannels) {
         settings,
         monitors,
         fps,
+        enabled,
         frames_since: 0,
         fps_window_start: std::time::Instant::now(),
         started_at: std::time::Instant::now(),
@@ -154,6 +163,7 @@ fn spawn_wake_relay(
     mut state: watch::Receiver<NodeState>,
     mut video: watch::Receiver<Option<VideoFrame>>,
     mut settings: watch::Receiver<OutputSettings>,
+    mut enabled: watch::Receiver<bool>,
     mut shutdown: watch::Receiver<bool>,
 ) {
     let relay = std::thread::Builder::new()
@@ -170,6 +180,7 @@ fn spawn_wake_relay(
                 // sans tuer le relais. État ou arrêt fermés = fin du node.
                 let mut video_alive = true;
                 let mut settings_alive = true;
+                let mut enabled_alive = true;
                 loop {
                     let wake = tokio::select! {
                         changed = state.changed() => {
@@ -186,6 +197,13 @@ fn spawn_wake_relay(
                             Ok(()) => Wake::SettingsChanged,
                             Err(_) => {
                                 settings_alive = false;
+                                continue;
+                            }
+                        },
+                        changed = enabled.changed(), if enabled_alive => match changed {
+                            Ok(()) => Wake::EnabledChanged,
+                            Err(_) => {
+                                enabled_alive = false;
                                 continue;
                             }
                         },
@@ -211,6 +229,8 @@ struct OutputApp {
     settings: watch::Receiver<OutputSettings>,
     monitors: watch::Sender<Vec<MonitorInfo>>,
     fps: watch::Sender<f32>,
+    /// Interrupteur de la fonction (onglet Fonctions).
+    enabled: watch::Receiver<bool>,
     /// Frames présentées depuis le début de la fenêtre de mesure courante.
     frames_since: u32,
     fps_window_start: std::time::Instant,
@@ -284,7 +304,63 @@ impl OutputApp {
         }
     }
 
+    /// Fabrique le peintre (GPU si demandé, CPU en secours). `None` si aucun
+    /// contexte d'affichage n'est possible.
+    fn creer_peintre(&self, window: &Arc<Window>) -> Option<Painter> {
+        if self.config.gpu {
+            match GpuPainter::new(window.clone()) {
+                Ok(gpu) => return Some(Painter::Gpu(Box::new(gpu))),
+                Err(err) => {
+                    warn!(%err, "rendu GPU indisponible — repli sur le rendu CPU");
+                }
+            }
+        } else {
+            info!("rendu GPU désactivé par la config ([output] gpu = false)");
+        }
+        let context = match softbuffer::Context::new(window.clone()) {
+            Ok(context) => context,
+            Err(err) => {
+                error!(%err, "contexte d'affichage indisponible");
+                return None;
+            }
+        };
+        match softbuffer::Surface::new(&context, window.clone()) {
+            Ok(surface) => Some(Painter::Cpu(surface)),
+            Err(err) => {
+                error!(%err, "surface d'affichage indisponible");
+                None
+            }
+        }
+    }
+
+    /// Sommeil/réveil de la fonction : masque la fenêtre et détruit le
+    /// peintre (surface GPU rendue, plus aucun redraw), ou recrée tout.
+    fn apply_enabled(&mut self, event_loop: &ActiveEventLoop) {
+        let enabled = *self.enabled.borrow();
+        let Some(window) = self.window.clone() else {
+            return;
+        };
+        if enabled {
+            if self.painter.is_none() {
+                self.painter = self.creer_peintre(&window);
+            }
+            window.set_visible(true);
+            self.apply_settings(event_loop);
+            window.request_redraw();
+            info!("fenêtre de sortie réveillée");
+        } else {
+            self.painter = None; // libère la surface (GPU comprise)
+            window.set_visible(false);
+            self.fps.send_replace(0.0);
+            info!("fenêtre de sortie en sommeil (0 rendu, surface libérée)");
+        }
+    }
+
     fn redraw(&mut self) {
+        // Fonction coupée : aucun rendu, quel que soit l'événement.
+        if !*self.enabled.borrow() {
+            return;
+        }
         let (Some(window), Some(painter)) = (&self.window, &mut self.painter) else {
             return;
         };
@@ -351,12 +427,16 @@ impl ApplicationHandler<Wake> for OutputApp {
         if self.window.is_some() {
             return;
         }
+        let enabled = *self.enabled.borrow();
         let settings = *self.settings.borrow();
         let monitor = self.refresh_monitors(event_loop, settings.monitor);
         let mut attributes = Window::default_attributes()
             .with_title(self.config.title.clone())
-            .with_inner_size(LogicalSize::new(960.0, 540.0));
-        if settings.fullscreen {
+            .with_inner_size(LogicalSize::new(960.0, 540.0))
+            // Fonction coupée au démarrage : fenêtre créée cachée, sans
+            // peintre (aucune surface allouée) — dormante jusqu'au réveil.
+            .with_visible(enabled);
+        if settings.fullscreen && enabled {
             attributes = attributes.with_fullscreen(Some(Fullscreen::Borderless(monitor)));
         } else if let Some(monitor) = monitor {
             // Fenêtré mais sur le bon écran.
@@ -370,44 +450,19 @@ impl ApplicationHandler<Wake> for OutputApp {
                 return;
             }
         };
-        // Peintre GPU d'abord (si activé), CPU en secours — la fenêtre
-        // s'ouvre dans tous les cas.
-        let painter = if self.config.gpu {
-            match GpuPainter::new(window.clone()) {
-                Ok(gpu) => Some(Painter::Gpu(Box::new(gpu))),
-                Err(err) => {
-                    warn!(%err, "rendu GPU indisponible — repli sur le rendu CPU");
-                    None
-                }
-            }
+        self.window = Some(window.clone());
+        if enabled {
+            let Some(painter) = self.creer_peintre(&window) else {
+                event_loop.exit();
+                return;
+            };
+            self.painter = Some(painter);
+            info!("fenêtre de sortie ouverte (F11 : plein écran)");
         } else {
-            info!("rendu GPU désactivé par la config ([output] gpu = false)");
-            None
-        };
-        let painter = match painter {
-            Some(painter) => painter,
-            None => {
-                let context = match softbuffer::Context::new(window.clone()) {
-                    Ok(context) => context,
-                    Err(err) => {
-                        error!(%err, "contexte d'affichage indisponible");
-                        event_loop.exit();
-                        return;
-                    }
-                };
-                match softbuffer::Surface::new(&context, window.clone()) {
-                    Ok(surface) => Painter::Cpu(surface),
-                    Err(err) => {
-                        error!(%err, "surface d'affichage indisponible");
-                        event_loop.exit();
-                        return;
-                    }
-                }
-            }
-        };
-        info!("fenêtre de sortie ouverte (F11 : plein écran)");
-        self.painter = Some(painter);
-        self.window = Some(window);
+            info!(
+                "fenêtre de sortie dormante (fonction coupée — onglet Fonctions pour la réveiller)"
+            );
+        }
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: Wake) {
@@ -418,6 +473,7 @@ impl ApplicationHandler<Wake> for OutputApp {
                 }
             }
             Wake::SettingsChanged => self.apply_settings(event_loop),
+            Wake::EnabledChanged => self.apply_enabled(event_loop),
             Wake::Quit => event_loop.exit(),
         }
     }

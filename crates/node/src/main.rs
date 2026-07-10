@@ -279,28 +279,35 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
 
     // Fenêtre de sortie : mires et vidéo warpées en direct.
     // Thread dédié ; si l'environnement graphique manque, le node continue.
-    // (La bascule à chaud de la fenêtre arrive dans un lot dédié : ici,
-    // l'interrupteur « output » s'applique au démarrage.)
+    // L'interrupteur « fenêtre de sortie » (onglet Fonctions) est relayé en
+    // canal bool dédié : coupée = fenêtre masquée + peintre détruit (zéro
+    // rendu), réveillée à chaud. Le fil winit reste dormant entre deux.
+    let (output_enabled_tx, output_enabled_rx) = watch::channel(initial_features.output);
+    {
+        let mut changes = features_rx.clone();
+        tokio::spawn(async move {
+            while changes.changed().await.is_ok() {
+                let flags = *changes.borrow_and_update();
+                let _ = output_enabled_tx.send(flags.output);
+            }
+        });
+    }
     #[cfg(feature = "render")]
-    let render_thread = if initial_features.output {
-        Some(toolbox_render::spawn(
-            toolbox_render::WindowConfig {
-                title: format!("Toolbox — sortie ({node_name})"),
-                gpu: config.output.gpu,
-            },
-            toolbox_render::OutputChannels {
-                state: handle.state_watch(),
-                video: video_rx,
-                settings: output_settings_rx,
-                monitors: monitors_tx,
-                fps: fps_tx,
-                shutdown: shutdown_rx.clone(),
-            },
-        ))
-    } else {
-        info!("fenêtre de sortie désactivée par la config ([output] enabled = false)");
-        None
-    };
+    let render_thread = Some(toolbox_render::spawn(
+        toolbox_render::WindowConfig {
+            title: format!("Toolbox — sortie ({node_name})"),
+            gpu: config.output.gpu,
+        },
+        toolbox_render::OutputChannels {
+            state: handle.state_watch(),
+            video: video_rx,
+            settings: output_settings_rx,
+            monitors: monitors_tx,
+            fps: fps_tx,
+            enabled: output_enabled_rx,
+            shutdown: shutdown_rx.clone(),
+        },
+    ));
     #[cfg(not(feature = "render"))]
     {
         // Pas de fenêtre dans ce binaire : canaux de sortie sans consommateur.
@@ -308,6 +315,7 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
         drop(output_settings_rx);
         drop(monitors_tx);
         drop(fps_tx);
+        drop(output_enabled_rx);
         if initial_features.output {
             warn!("fenêtre de sortie demandée mais ce binaire est compilé sans (feature `render`)");
         }

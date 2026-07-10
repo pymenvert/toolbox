@@ -5,6 +5,10 @@
 
 ## [Non publié]
 
+- **Fenêtre de sortie dormante** : l'interrupteur « Fenêtre de sortie »
+  agit maintenant à chaud — coupée, la fenêtre est masquée, le rendu
+  suspendu et la surface (GPU comprise) libérée : 0 % CPU/GPU ; réveillée,
+  tout est recréé immédiatement, sans relancer le node.
 - **Onglet « Fonctions »** (début de la V2) : un interrupteur par fonction
   du node — lecteur vidéo, OSC, OSCQuery, retour d'état, MIDI, parc mDNS,
   fondus, aperçu. Désactivée = la fonction est **réellement arrêtée** à
