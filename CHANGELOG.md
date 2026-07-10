@@ -5,6 +5,19 @@
 
 ## [Non publié]
 
+- **Synchronisation multi-node niveau 2 — verrouillage à la frame** :
+  `[sync] role = "maitre"|"suiveur"` dans node.toml. Les suiveurs
+  s'annoncent d'eux-mêmes au maître (rien à configurer côté maître), qui
+  leur publie son horloge de lecture à 5 Hz. Le suiveur suit le média et
+  le transport du maître, lisse la dérive (médiane, robuste aux paquets
+  retardés) et corrige : micro-ajustement de vitesse ±3 % (invisible)
+  jusqu'au seuil, resync dur au-delà (`tolerance_ms`, 80 par défaut).
+  Mesuré en réel avec deux nodes : 2,3 s de décalage résorbées, dérive
+  stabilisée sous 2 ms — bien en dessous d'une frame. Horloges des
+  machines à synchroniser en NTP ; GStreamer applique la vitesse sans
+  coupure (instant rate change, à valider sur matériel).
+- **Vitesse de lecture** : commande `set_rate` (0.25×..4×), OSC `/rate` —
+  utilisée par la synchro, disponible partout.
 - **Fenêtre de sortie dormante** : l'interrupteur « Fenêtre de sortie »
   agit maintenant à chaud — coupée, la fenêtre est masquée, le rendu
   suspendu et la surface (GPU comprise) libérée : 0 % CPU/GPU ; réveillée,

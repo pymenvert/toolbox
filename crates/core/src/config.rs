@@ -182,6 +182,47 @@ pub struct OscSettings {
     pub feedback: Option<String>,
 }
 
+/// Rôle du node dans la synchronisation multi-machines.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncRole {
+    /// Pas de synchro (défaut).
+    #[default]
+    Aucun,
+    /// Ce node publie son horloge de lecture aux suiveurs.
+    Maitre,
+    /// Ce node se cale sur le maître (`[sync] maitre = "ip:port"`).
+    Suiveur,
+}
+
+/// Synchronisation multi-node niveau 2 : les suiveurs se verrouillent sur
+/// la position du maître (micro-ajustements de vitesse, resync dur au-delà
+/// du seuil). Les suiveurs s'annoncent d'eux-mêmes au maître : rien à
+/// configurer côté maître à part le rôle.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SyncSettings {
+    pub role: SyncRole,
+    /// Adresse du maître (`"10.0.0.2:9010"`) — suiveurs uniquement.
+    pub maitre: Option<String>,
+    /// Port UDP de l'horloge (écoute côté maître ET côté suiveur).
+    pub port: u16,
+    /// Dérive tolérée avant resync dur (au-delà : seek immédiat). En deçà,
+    /// la vitesse est micro-ajustée (±3 % max) — invisible à l'œil.
+    pub tolerance_ms: u64,
+}
+
+impl Default for SyncSettings {
+    fn default() -> Self {
+        Self {
+            role: SyncRole::Aucun,
+            maitre: None,
+            port: 9010,
+            tolerance_ms: 80,
+        }
+    }
+}
+
 /// Sécurité de l'interface web (P4.4). Sans mot de passe : réseau local de
 /// confiance, comportement historique.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -246,6 +287,7 @@ pub struct NodeConfig {
     pub output: Output,
     pub security: Security,
     pub osc: OscSettings,
+    pub sync: SyncSettings,
     pub limits: Limits,
     pub midi: MidiSettings,
 }

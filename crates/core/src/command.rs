@@ -54,6 +54,7 @@ pub enum TestPattern {
 /// | `load`             | `/load <path>`               |
 /// | `set_loop`         | `/loop <off|one|all>`        |
 /// | `set_volume`       | `/volume <f32 0..1>`         |
+/// | `set_rate`         | `/rate <f32 0.25..4>`        |
 /// | `playlist_set`     | `/playlist/set <p1> <p2> …`  |
 /// | `playlist_go`      | `/playlist/go <index>`       |
 /// | `playlist_next`    | `/playlist/next`             |
@@ -92,6 +93,11 @@ pub enum Command {
     },
     SetVolume {
         volume: f32,
+    },
+    /// Vitesse de lecture (1.0 = normale, 0.25..=4.0). Utilisée aussi par la
+    /// synchro multi-node pour rattraper la dérive en douceur.
+    SetRate {
+        rate: f32,
     },
     /// Remplace la playlist entière (liste vide = effacer). Ne charge rien :
     /// enchaîner avec `playlist_go` pour démarrer.
@@ -381,6 +387,10 @@ mod tests {
                 })
                 .expect("ser"),
                 r#"{"cmd":"mapping_fade","name":"salon","seconds":1.5}"#,
+            ),
+            (
+                serde_json::to_string(&Command::SetRate { rate: 1.25 }).expect("ser"),
+                r#"{"cmd":"set_rate","rate":1.25}"#,
             ),
         ];
         for (got, want) in cases {

@@ -164,6 +164,7 @@ pub fn event_to_osc(event: &toolbox_core::Event) -> Option<OscMessage> {
         ),
         Event::MediaLoaded { path } => message("/media", vec![OscType::String(path.clone())]),
         Event::VolumeChanged { volume } => message("/volume", vec![OscType::Float(*volume)]),
+        Event::RateChanged { rate } => message("/rate", vec![OscType::Float(*rate)]),
         Event::LoopChanged { mode } => message(
             "/loop",
             vec![OscType::String(
@@ -316,6 +317,9 @@ pub fn map_message(addr: &str, args: &[OscType]) -> Result<Command, MapError> {
         "/volume" => float_arg(args, 0)
             .map(|volume| Command::SetVolume { volume })
             .ok_or_else(|| bad("attendu : volume (float 0..1)")),
+        "/rate" => float_arg(args, 0)
+            .map(|rate| Command::SetRate { rate })
+            .ok_or_else(|| bad("attendu : vitesse (float 0.25..4)")),
         "/loop" => parse_loop_mode(args).ok_or_else(|| bad("attendu : off|one|all ou 0|1|2")),
         "/playlist/set" => {
             let items: Option<Vec<String>> = (0..args.len()).map(|i| string_arg(args, i)).collect();

@@ -69,6 +69,16 @@ gpu = true         # rendu par la carte graphique (repli CPU automatique en cas 
 max_upload_mb = 2048   # taille max d'un média déposé via la web UI
 log_buffer = 1000      # entrées gardées par la page de logs
 
+[sync]
+# Synchronisation multi-machines niveau 2 : les suiveurs se verrouillent sur
+# la position du maître (à la frame près — mesuré < 2 ms en local). Les
+# horloges des machines doivent être en NTP. Les suiveurs s'annoncent
+# d'eux-mêmes : côté maître, le rôle suffit.
+#role = "maitre"            # ou "suiveur" (défaut : "aucun")
+#maitre = "10.0.0.2:9010"   # suiveurs uniquement : adresse du maître
+#port = 9010                # port UDP de l'horloge
+#tolerance_ms = 80          # au-delà : resync dur (seek) ; en deçà : vitesse ±3 %
+
 [osc]
 # Retour d'état : chaque changement (volume, coins, couleur…) est renvoyé en
 # OSC à cette adresse — les curseurs de Chataigne suivent le node.

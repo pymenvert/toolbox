@@ -23,6 +23,7 @@ mod bascules;
 mod fleet;
 mod journal;
 mod supervision;
+mod sync;
 
 use supervision::spawn_service;
 
@@ -319,6 +320,42 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
         if initial_features.output {
             warn!("fenêtre de sortie demandée mais ce binaire est compilé sans (feature `render`)");
         }
+    }
+
+    // Synchro multi-node niveau 2 : le maître publie son horloge de
+    // lecture, les suiveurs se verrouillent dessus (voir module sync).
+    match config.sync.role {
+        toolbox_core::SyncRole::Maitre => {
+            services.push((
+                "sync-maitre",
+                spawn_service(
+                    "sync-maitre",
+                    shutdown_rx.clone(),
+                    sync::maitre(
+                        config.sync.clone(),
+                        handle.clone(),
+                        position_rx.clone(),
+                        shutdown_rx.clone(),
+                    ),
+                ),
+            ));
+        }
+        toolbox_core::SyncRole::Suiveur => {
+            services.push((
+                "sync-suiveur",
+                spawn_service(
+                    "sync-suiveur",
+                    shutdown_rx.clone(),
+                    sync::suiveur(
+                        config.sync.clone(),
+                        handle.clone(),
+                        position_rx.clone(),
+                        shutdown_rx.clone(),
+                    ),
+                ),
+            ));
+        }
+        toolbox_core::SyncRole::Aucun => {}
     }
 
     // Mode kiosque (P1.9) : preset de démarrage + lecture automatique.

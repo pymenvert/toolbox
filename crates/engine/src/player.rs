@@ -56,6 +56,12 @@ pub trait PlayerBackend: Send {
     /// via `about-to-finish`) n'émet alors plus de fin de média ; les autres
     /// ignorent l'indication et le player reboucle par seek (petit hoquet).
     fn set_gapless_loop(&mut self, _enabled: bool) {}
+    /// Vitesse de lecture (1.0 = normale). Les micro-corrections de synchro
+    /// (±3 %) passent par ici : un backend qui ne sait pas faire ignore
+    /// l'appel — la synchro retombe alors sur les resyncs durs (seek).
+    fn set_rate(&mut self, _rate: f64) -> Result<(), PlayerError> {
+        Ok(())
+    }
 }
 
 /// Position de lecture publiée pour l'UI (WebSocket/REST).
@@ -127,6 +133,9 @@ impl<B: PlayerBackend> Player<B> {
 
         if let Err(err) = self.backend.set_volume(state.player.volume) {
             warn!(%err, "volume non appliqué");
+        }
+        if let Err(err) = self.backend.set_rate(f64::from(state.player.rate)) {
+            warn!(%err, "vitesse non appliquée");
         }
         match &state.player.media {
             Some(rel) => {
@@ -217,6 +226,11 @@ impl<B: PlayerBackend> Player<B> {
             Event::VolumeChanged { volume } => {
                 if let Err(err) = self.backend.set_volume(*volume) {
                     error!(%err, volume, "volume refusé");
+                }
+            }
+            Event::RateChanged { rate } => {
+                if let Err(err) = self.backend.set_rate(f64::from(*rate)) {
+                    error!(%err, rate, "vitesse refusée");
                 }
             }
             Event::LoopChanged { mode } => {
@@ -327,6 +341,9 @@ pub struct MemoryBackend {
     started_at: Option<std::time::Instant>,
     duration: f64,
     volume: f32,
+    /// Vitesse de lecture simulée (1.0 = normale) — la position avance à
+    /// cette allure, comme un vrai backend : la synchro est testable.
+    rate: f64,
     pending: Vec<BackendEvent>,
     /// Les fichiers doivent-ils exister sur disque ? (true dans le node,
     /// false dans les tests purs)
@@ -346,6 +363,7 @@ impl MemoryBackend {
             started_at: None,
             duration: duration_seconds.max(0.1),
             volume: 1.0,
+            rate: 1.0,
             pending: Vec::new(),
             check_files,
             eos_emitted: false,
@@ -358,7 +376,7 @@ impl MemoryBackend {
             .started_at
             .map(|t| t.elapsed().as_secs_f64())
             .unwrap_or(0.0);
-        (self.base_position + elapsed).min(self.duration)
+        (self.base_position + elapsed * self.rate).min(self.duration)
     }
 
     /// Force la fin de média (tests).
@@ -471,6 +489,17 @@ impl PlayerBackend for MemoryBackend {
 
     fn set_gapless_loop(&mut self, enabled: bool) {
         self.gapless = enabled;
+    }
+
+    fn set_rate(&mut self, rate: f64) -> Result<(), PlayerError> {
+        // Rebase : la position déjà parcourue reste acquise, la nouvelle
+        // vitesse s'applique à partir de maintenant.
+        self.base_position = self.current_position();
+        if self.playing {
+            self.started_at = Some(std::time::Instant::now());
+        }
+        self.rate = rate.clamp(0.25, 4.0);
+        Ok(())
     }
 }
 

@@ -3072,6 +3072,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "toml 0.8.23",
  "toolbox-control-http",
  "toolbox-control-midi",
  "toolbox-control-osc",

@@ -437,6 +437,14 @@ footer { margin-top: 60px; padding-top: 24px; border-top: 1px solid var(--lisere
   chaque node, envoie <code>/sync/arm</code> à tous, puis
   <code>/sync/startAt</code> avec la même heure — chaque node part
   précisément à l'échéance sur son horloge (NTP conseillé).</p>
+  <h3>Verrouillage à la frame (sync niveau 2)</h3>
+  <p>Pour rester calés en continu : un node <b>maître</b>
+  (<code>[sync] role = "maitre"</code>) et des <b>suiveurs</b>
+  (<code>role = "suiveur"</code> + <code>maitre = "ip:9010"</code>). Les
+  suiveurs chargent le média du maître, suivent lecture/pause et corrigent
+  leur dérive en douceur (vitesse ±3 %, invisible) — resync dur seulement
+  au-delà de <code>tolerance_ms</code>. Mesuré : dérive sous 2 ms, très en
+  dessous d'une frame. Horloges des machines en NTP obligatoire.</p>
   <p class="note">La même grammaire existe en JSON sur <code>POST /api/command</code>
   et sur le WebSocket <code>/ws</code> — voir la table dans
   <code>crates/core/src/command.rs</code>.</p>

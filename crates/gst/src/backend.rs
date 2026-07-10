@@ -277,6 +277,35 @@ impl PlayerBackend for GstBackend {
         Ok(())
     }
 
+    fn set_rate(&mut self, rate: f64) -> Result<(), PlayerError> {
+        match &self.source {
+            None => Err(PlayerError::Backend("vitesse sans média".into())),
+            // Une source live n'a pas de vitesse ; la synchro n'a de toute
+            // façon pas de sens dessus — appel ignoré sans erreur.
+            Some(source) if source.is_live() => Ok(()),
+            Some(_) => {
+                // INSTANT_RATE_CHANGE (GStreamer ≥ 1.18) : la vitesse change
+                // SANS flush ni coupure d'image — exactement ce qu'il faut
+                // pour les micro-corrections de synchro (±3 %).
+                let seek = gst::event::Seek::new(
+                    rate.clamp(0.25, 4.0),
+                    gst::SeekFlags::INSTANT_RATE_CHANGE,
+                    gst::SeekType::None,
+                    gst::ClockTime::NONE,
+                    gst::SeekType::None,
+                    gst::ClockTime::NONE,
+                );
+                if self.active().send_event(seek) {
+                    Ok(())
+                } else {
+                    Err(PlayerError::Backend(
+                        "changement de vitesse refusé par le pipeline".into(),
+                    ))
+                }
+            }
+        }
+    }
+
     fn position_seconds(&self) -> Option<f64> {
         self.query_seconds(true)
     }

@@ -203,6 +203,10 @@ pub struct PlayerState {
     pub loop_mode: LoopMode,
     /// Volume 0.0..=1.0.
     pub volume: f32,
+    /// Vitesse de lecture 0.25..=4.0 (1.0 = normale). La synchro multi-node
+    /// s'en sert pour les micro-corrections de dérive (±2 %).
+    #[serde(default = "vitesse_normale")]
+    pub rate: f32,
     /// Playlist : chemins relatifs au dossier `media/`.
     #[serde(default)]
     pub playlist: Vec<String>,
@@ -220,10 +224,15 @@ impl Default for PlayerState {
             // Piège terrain évité : un node fraîchement démarré ne doit pas
             // jouer en silence. Le défaut est plein volume, pas muet.
             volume: 1.0,
+            rate: 1.0,
             playlist: Vec::new(),
             playlist_index: None,
         }
     }
+}
+
+fn vitesse_normale() -> f32 {
+    1.0
 }
 
 /// Effets appliqués après la correction couleur (brief 3.3). Chaque effet a
@@ -325,6 +334,11 @@ pub enum Event {
     },
     VolumeChanged {
         volume: f32,
+    },
+    /// Vitesse de lecture changée (1.0 = normale). Les micro-corrections de
+    /// la synchro passent aussi par là — visibles donc dans les logs.
+    RateChanged {
+        rate: f32,
     },
     PlaylistChanged {
         items: Vec<String>,
@@ -480,6 +494,11 @@ impl NodeState {
                 check_range("volume", *volume, 0.0, 1.0)?;
                 self.player.volume = *volume;
                 Ok(vec![Event::VolumeChanged { volume: *volume }])
+            }
+            Command::SetRate { rate } => {
+                check_range("rate", *rate, 0.25, 4.0)?;
+                self.player.rate = *rate;
+                Ok(vec![Event::RateChanged { rate: *rate }])
             }
             Command::PlaylistSet { items } => {
                 for item in items {
@@ -696,6 +715,7 @@ impl NodeState {
     /// un fichier trafiqué ou corrompu ne doit jamais devenir l'état du node.
     pub fn validate(&self) -> Result<(), CoreError> {
         check_range("player.volume", self.player.volume, 0.0, 1.0)?;
+        check_range("player.rate", self.player.rate, 0.25, 4.0)?;
         if let Some(media) = &self.player.media {
             validate_media_path(media)?;
         }
