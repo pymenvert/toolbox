@@ -491,6 +491,15 @@
       &laquo; Identifier &raquo; affiche la mire coins 4 secondes sur SA sortie &mdash;
       pour savoir quel projecteur appartient &agrave; quel node.</div>
     </div>
+    <div class="card" style="margin-top:14px;max-width:720px">
+      <h3>Alimentation de la machine</h3>
+      <div class="rowbtns">
+        <button id="sysReboot" class="danger">Red&eacute;marrer la machine</button>
+        <button id="sysShutdown" class="danger">&Eacute;teindre la machine</button>
+      </div>
+      <div class="hint">Pour les installations pilot&eacute;es &agrave; distance. Le node
+      red&eacute;marre avec la machine (d&eacute;marrage automatique / systemd).</div>
+    </div>
   </section>
 </main>
 
@@ -1401,6 +1410,14 @@ function tile(k, v, unit, sub, warn) {
     esc(v) + (unit ? '<small>' + esc(unit) + '</small>' : "") + '</div>' +
     (sub ? '<div class="sub" style="font-size:11px;color:var(--muted);margin-top:4px">' + esc(sub) + '</div>' : "") + '</div>';
 }
+/* Alimentation machine : double confirmation native. */
+function powerAction(url, label) {
+  if (!confirm(label + " — la machine, pas seulement le logiciel. Continuer ?")) return;
+  api(url, { method: "POST" }).then(() => toast(label + " dans 5 secondes")).catch(() => {});
+}
+$("#sysReboot").addEventListener("click", () => powerAction("/api/system/reboot", "Redémarrage"));
+$("#sysShutdown").addEventListener("click", () => powerAction("/api/system/shutdown", "Extinction"));
+
 /* Parc de nodes (mDNS). */
 async function loadFleet() {
   let fleet = [];
@@ -1464,6 +1481,10 @@ async function loadSystem() {
   }
   if (sys.temperature_c != null)
     html += tile("Température", sys.temperature_c.toFixed(1), "°C", sys.temperature_c >= 75 ? "surveiller (throttle proche)" : "", sys.temperature_c >= 75);
+  if (sys.disk_free_gb != null)
+    html += tile("Disque libre", sys.disk_free_gb.toFixed(1), "/ " + (sys.disk_total_gb || 0).toFixed(0) + " Go",
+      sys.disk_free_gb < 5 ? "espace faible" : "", sys.disk_free_gb < 5);
+  if (sys.tailscale != null) html += tile("Tailscale", sys.tailscale, "", "");
   html += tile("Plateforme", (sys.os || "?") + " / " + (sys.arch || "?"), "", "");
   if (healthInfo) html += tile("Node", healthInfo.name || "Toolbox", "", (healthInfo.version ? "v" + healthInfo.version : "") + " · " + (healthInfo.status || ""));
   g.innerHTML = html;

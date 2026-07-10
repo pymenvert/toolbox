@@ -203,6 +203,8 @@ pub fn router(app: AppState) -> Router {
         .route("/api/output", post(output_set))
         .route("/api/fleet", get(fleet_get))
         .route("/api/identify", post(identify))
+        .route("/api/system/reboot", post(system_reboot))
+        .route("/api/system/shutdown", post(system_shutdown))
         .route("/ws", get(ws_events_upgrade))
         .route("/ws/logs", get(ws_logs_upgrade))
         .with_state(app)
@@ -408,6 +410,37 @@ async fn logs_snapshot(State(app): State<AppState>) -> Json<Vec<toolbox_core::Lo
 
 async fn system_stats(State(app): State<AppState>) -> Json<monitor::SystemStats> {
     Json(monitor::collect(app.started_at))
+}
+
+/// Redémarre la MACHINE (pas seulement le node) — pour les installations
+/// permanentes pilotées à distance. Confirmé côté UI.
+async fn system_reboot() -> StatusCode {
+    warn!("redémarrage machine demandé via l'API");
+    machine_power(true)
+}
+
+/// Éteint la machine. Confirmé côté UI.
+async fn system_shutdown() -> StatusCode {
+    warn!("extinction machine demandée via l'API");
+    machine_power(false)
+}
+
+fn machine_power(reboot: bool) -> StatusCode {
+    #[cfg(target_os = "windows")]
+    let result = std::process::Command::new("shutdown")
+        .args([if reboot { "/r" } else { "/s" }, "/t", "5"])
+        .spawn();
+    #[cfg(not(target_os = "windows"))]
+    let result = std::process::Command::new("systemctl")
+        .arg(if reboot { "reboot" } else { "poweroff" })
+        .spawn();
+    match result {
+        Ok(_) => StatusCode::ACCEPTED,
+        Err(err) => {
+            warn!(%err, "commande d'alimentation impossible");
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+    }
 }
 
 /// Parc de nodes découverts en mDNS (ce node inclus).
