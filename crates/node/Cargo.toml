@@ -29,6 +29,7 @@ toolbox-engine = { path = "../engine" }
 toolbox-render = { path = "../render", optional = true }
 toolbox-gst = { path = "../gst", optional = true }
 toolbox-control-http = { path = "../control-http" }
+toolbox-artnet = { path = "../artnet" }
 toolbox-control-osc = { path = "../control-osc" }
 toolbox-control-midi = { path = "../control-midi", optional = true }
 # Découverte réseau des autres nodes (page fleet) : mDNS pur Rust.

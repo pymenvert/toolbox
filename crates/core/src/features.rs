@@ -51,6 +51,10 @@ pub struct FeatureFlags {
     /// Aperçu de la sortie dans le Dashboard (`/api/preview.png`).
     #[serde(default = "vrai")]
     pub preview: bool,
+    /// Lumières Art-Net (page Lumières). Coupé : plus aucune trame émise,
+    /// socket fermée — l'édition de la console reste possible.
+    #[serde(default = "vrai")]
+    pub artnet: bool,
 }
 
 impl Default for FeatureFlags {
@@ -65,6 +69,7 @@ impl Default for FeatureFlags {
             fleet: true,
             fader: true,
             preview: true,
+            artnet: true,
         }
     }
 }
@@ -102,6 +107,7 @@ impl FeatureFlags {
             fleet: true,
             fader: true,
             preview: true,
+            artnet: true,
         }
     }
 }
@@ -145,7 +151,7 @@ mod tests {
         let json = serde_json::to_string(&FeatureFlags::default()).expect("ser");
         assert_eq!(
             json,
-            r#"{"player":true,"output":true,"osc":true,"oscquery":true,"osc_feedback":true,"midi":true,"fleet":true,"fader":true,"preview":true}"#
+            r#"{"player":true,"output":true,"osc":true,"oscquery":true,"osc_feedback":true,"midi":true,"fleet":true,"fader":true,"preview":true,"artnet":true}"#
         );
     }
 

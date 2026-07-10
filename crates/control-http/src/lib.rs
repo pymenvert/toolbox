@@ -129,6 +129,9 @@ pub struct AppState {
     /// observe le même canal.
     features: watch::Receiver<FeatureFlags>,
     features_tx: std::sync::Arc<watch::Sender<FeatureFlags>>,
+    /// Console lumières Art-Net (page Lumières). `None` = binaire assemblé
+    /// sans le service (tests partiels).
+    lumieres: Option<toolbox_artnet::LumieresHandle>,
 }
 
 impl AppState {
@@ -167,7 +170,15 @@ impl AppState {
             // services — via `with_features`.
             features: features_rx,
             features_tx: std::sync::Arc::new(features_tx),
+            lumieres: None,
         }
+    }
+
+    /// Branche la console lumières Art-Net (page Lumières).
+    #[must_use]
+    pub fn with_lumieres(mut self, handle: toolbox_artnet::LumieresHandle) -> Self {
+        self.lumieres = Some(handle);
+        self
     }
 
     /// Branche les interrupteurs de fonctions du node (canal partagé avec
@@ -256,6 +267,7 @@ pub fn router(app: AppState) -> Router {
         .route("/api/features", get(features_get).post(features_set))
         .route("/api/fleet/media", get(fleet_media))
         .route("/api/fleet/push", post(fleet_push))
+        .route("/api/dmx", get(dmx_get).post(dmx_commande))
         .route("/ws", get(ws_events_upgrade))
         .route("/ws/logs", get(ws_logs_upgrade))
         .layer(axum::middleware::from_fn_with_state(
@@ -915,6 +927,34 @@ async fn diagnostic_zip(State(app): State<AppState>) -> Result<Response, ApiErro
         zip.finish(),
     )
         .into_response())
+}
+
+/// Console lumières : l'état complet (faders, scènes, chasers, master).
+async fn dmx_get(
+    State(app): State<AppState>,
+) -> Result<Json<toolbox_artnet::EtatLumieres>, ApiError> {
+    let handle = app
+        .lumieres
+        .as_ref()
+        .ok_or_else(|| CoreError::InvalidCommand("console lumières non montée".into()))?;
+    Ok(Json(handle.etat.borrow().clone()))
+}
+
+/// Console lumières : une commande (fader, master, scène, chaser…).
+async fn dmx_commande(
+    State(app): State<AppState>,
+    Json(commande): Json<toolbox_artnet::CommandeLumieres>,
+) -> Result<StatusCode, ApiError> {
+    let handle = app
+        .lumieres
+        .as_ref()
+        .ok_or_else(|| CoreError::InvalidCommand("console lumières non montée".into()))?;
+    handle
+        .commandes
+        .send(commande)
+        .await
+        .map_err(|_| CoreError::InvalidCommand("console lumières arrêtée".into()))?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// Interrupteurs de fonctions : état effectif courant.

@@ -5,6 +5,16 @@
 
 ## [Non publié]
 
+- **Page Lumières — console DMX Art-Net** : des faders nommés créés à la
+  volée (univers + canal, couleur d'étiquette), un master, des **scènes**
+  (instantanés rappelables) et des **chasers** (enchaînements de scènes
+  avec fondu et tenue par pas, boucle ou one-shot), à la manière des
+  consoles (Chataigne/QLC+). Émission ArtDMX continue à 30 trames/s vers
+  l'IP configurée (broadcast par défaut), trame complète par univers.
+  Persistance `lumieres.json` ; interrupteur dans Fonctions (coupé : plus
+  aucune trame, socket fermée, l'édition reste possible). API
+  `GET/POST /api/dmx`. Vérifié en réel : trames décodées conformes, fondu
+  de chaser mesuré rampe par rampe.
 - **Fichiers du parc** : depuis l'onglet Médias, voir les médias de chaque
   node du réseau, envoyer un fichier à un node précis ou **à tout le parc
   d'un coup** — l'envoi passe de node à node en flux direct (jamais le

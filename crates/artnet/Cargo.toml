@@ -1,0 +1,20 @@
+[package]
+name = "toolbox-artnet"
+description = "Lumières Art-Net : faders DMX, scènes et chasers émis en UDP (page Lumières)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+toolbox-core = { path = "../core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

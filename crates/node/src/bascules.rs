@@ -91,6 +91,9 @@ pub async fn controleur(
         fleet: false,
         fader: false,
         preview: false,
+        // L'émission Art-Net est gérée par son service (canal `actif`
+        // dérivé des drapeaux), pas par le contrôleur.
+        artnet: false,
     };
     info!("contrôleur de fonctions prêt");
     loop {
@@ -386,6 +389,7 @@ mod tests {
             fleet: false,
             fader: true,
             preview: false,
+            artnet: false,
         };
         let (flags_tx, flags_rx) = watch::channel(flags);
         let (_shutdown_tx, shutdown_rx) = watch::channel(false);

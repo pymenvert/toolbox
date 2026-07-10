@@ -126,6 +126,16 @@
   .plAddRow { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
   .plAddRow select { flex: 1; min-width: 140px; }
   .empty { color: var(--muted); font-size: 13px; padding: 12px 4px; }
+  /* ---------- Lumières (faders DMX) ---------- */
+  .fadersRow { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 14px; align-items: flex-end; }
+  .vfader { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 62px;
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 4px 8px; }
+  .vfader .dot { width: 26px; height: 5px; border-radius: 3px; }
+  .vfader input[type=range] { writing-mode: vertical-lr; direction: rtl; height: 150px; width: 26px; margin: 2px 0; }
+  .vfader .nomf { font-size: 11px; color: var(--ink-2); max-width: 58px; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  .vfader .val { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .vfader .mini { min-height: 22px; padding: 0 6px; font-size: 11px; }
   /* ---------- Mapping ---------- */
   .maplayout { display: grid; grid-template-columns: minmax(0,1fr) 300px; gap: 14px; align-items: start; }
   #mapstage {
@@ -253,6 +263,7 @@
   <a data-page="color"><span class="ic">&#9680;</span><span>Couleur</span></a>
   <a data-page="media"><span class="ic">&#9636;</span><span>M&eacute;dias</span></a>
   <a data-page="presets"><span class="ic">&#9733;</span><span>Presets</span></a>
+  <a data-page="lights"><span class="ic">&#9728;</span><span>Lumi&egrave;res</span></a>
   <a data-page="logs"><span class="ic">&#9776;</span><span>Logs</span></a>
   <a data-page="features"><span class="ic">&#9211;</span><span>Fonctions</span></a>
   <a data-page="system"><span class="ic">&#9881;</span><span>Syst&egrave;me</span></a>
@@ -512,6 +523,60 @@
     <div id="logview"></div>
   </section>
 
+  <!-- ================= LUMIERES ================= -->
+  <section class="page" id="page-lights">
+    <div class="card">
+      <h3>Console</h3>
+      <div class="presetRow" style="align-items:center">
+        <label class="muted" style="font-size:.85em">Destination Art-Net</label>
+        <input type="text" id="dmxCible" style="width:170px" placeholder="255.255.255.255">
+        <label class="muted" style="font-size:.85em;margin-left:12px">Master</label>
+        <input type="range" id="dmxMaster" min="0" max="255" value="255" style="flex:1;min-width:120px">
+        <span id="dmxMasterVal" style="font-variant-numeric:tabular-nums;width:34px;text-align:right">255</span>
+      </div>
+      <div class="fadersRow" id="dmxFaders"></div>
+      <div class="presetRow" style="margin-top:10px">
+        <input type="text" id="dmxNom" placeholder="Nom (ex. Face jardin)" style="flex:1;min-width:110px" maxlength="24">
+        <input type="number" id="dmxUnivers" placeholder="Univers" title="Univers" value="0" min="0" max="32767" style="width:78px">
+        <input type="number" id="dmxCanal" placeholder="Canal" title="Canal DMX" value="1" min="1" max="512" style="width:70px">
+        <input type="color" id="dmxCouleur" value="#5b8cff" title="Couleur d'&eacute;tiquette" style="flex:0 0 42px;width:42px;height:34px;padding:2px">
+        <button id="dmxAjoute" class="primary">Ajouter un fader</button>
+      </div>
+      <div class="hint">Chaque fader pilote un canal DMX, &eacute;mis en Art-Net en continu
+      (30 trames/s, comme une console). Interrupteur global dans l'onglet Fonctions.</div>
+    </div>
+    <div class="cols2" style="margin-top:14px;display:grid;grid-template-columns:1fr 1fr;gap:14px">
+      <div class="card">
+        <h3>Sc&egrave;nes</h3>
+        <div class="presetRow">
+          <input type="text" id="dmxSceneNom" placeholder="Nom de la sc&egrave;ne" maxlength="24">
+          <button id="dmxSceneSave" class="primary">Enregistrer l'&eacute;tat</button>
+        </div>
+        <ul class="plist" id="dmxScenes"></ul>
+      </div>
+      <div class="card">
+        <h3>Chasers</h3>
+        <div class="presetRow">
+          <input type="text" id="dmxChaserNom" placeholder="Nom du chaser" maxlength="24" style="flex:1">
+          <label class="chk" style="white-space:nowrap"><input type="checkbox" id="dmxChaserBoucle" checked> boucle</label>
+        </div>
+        <ul class="plist" id="dmxChaserPas"></ul>
+        <div class="presetRow">
+          <select id="dmxPasScene" style="flex:1"></select>
+          <input type="number" id="dmxPasFondu" value="500" min="0" step="100" title="Fondu (ms)" style="width:80px">
+          <input type="number" id="dmxPasTenue" value="1000" min="0" step="100" title="Tenue (ms)" style="width:80px">
+          <button id="dmxPasAjoute" class="mini">+ pas</button>
+        </div>
+        <div class="presetRow">
+          <button id="dmxChaserSave" class="primary">Enregistrer le chaser</button>
+        </div>
+        <ul class="plist" id="dmxChasers"></ul>
+        <div class="hint">Un pas = une sc&egrave;ne cible, un fondu pour y aller, une tenue.
+        Fondu / tenue en millisecondes.</div>
+      </div>
+    </div>
+  </section>
+
   <!-- ================= FONCTIONS ================= -->
   <section class="page" id="page-features">
     <div class="card" style="max-width:720px">
@@ -727,7 +792,8 @@ function onEvent(m) {
 
 /* ===================== Navigation ===================== */
 const pageTitles = { dashboard: "Dashboard", mapping: "Mapping", color: "Couleur",
-  media: "Médias", presets: "Presets", logs: "Logs", features: "Fonctions", system: "Système" };
+  media: "Médias", presets: "Presets", lights: "Lumières", logs: "Logs",
+  features: "Fonctions", system: "Système" };
 $$("nav a").forEach(a => a.addEventListener("click", () => {
   $$("nav a").forEach(x => x.classList.remove("active"));
   a.classList.add("active");
@@ -736,6 +802,7 @@ $$("nav a").forEach(a => a.addEventListener("click", () => {
   $("#pagetitle").textContent = pageTitles[p];
   if (p === "mapping") sizeStage();
   if (p === "features") loadFeatures();
+  if (p === "lights") loadDmx();
 }));
 
 /* Curseurs generiques : throttle + valeur finale + pas de recalage pendant le drag */
@@ -1477,6 +1544,147 @@ $("#presetSave").addEventListener("click", () => {
 });
 $("#presetName").addEventListener("keydown", e => { if (e.key === "Enter") $("#presetSave").click(); });
 
+/* ===================== Lumières (Art-Net) ===================== */
+let dmx = null, dmxDragging = false;
+async function dmxCmd(c) {
+  try {
+    await api("/api/dmx", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(c) });
+  } catch (e) { toast("Console lumières indisponible", "err"); }
+}
+async function loadDmx() {
+  if (dmxDragging) return;
+  try { dmx = await api("/api/dmx"); } catch (e) { return; }
+  renderDmx();
+}
+function renderDmx() {
+  if (!dmx || dmxDragging) return;
+  if (document.activeElement !== $("#dmxCible")) $("#dmxCible").value = dmx.cible;
+  $("#dmxMaster").value = dmx.master;
+  $("#dmxMasterVal").textContent = dmx.master;
+
+  const row = $("#dmxFaders");
+  row.innerHTML = "";
+  if (!dmx.faders.length) {
+    row.innerHTML = '<div class="empty">Aucun fader — crée le premier ci-dessous.</div>';
+  }
+  dmx.faders.forEach(f => {
+    const col = document.createElement("div"); col.className = "vfader";
+    const dot = document.createElement("div"); dot.className = "dot";
+    dot.style.background = f.couleur || "var(--accent)";
+    const nom = document.createElement("div"); nom.className = "nomf";
+    nom.textContent = f.nom; nom.title = f.nom + " — univers " + f.univers + ", canal " + f.canal;
+    const range = document.createElement("input");
+    range.type = "range"; range.min = 0; range.max = 255; range.value = f.valeur;
+    const val = document.createElement("div"); val.className = "val"; val.textContent = f.valeur;
+    let dernierEnvoi = 0;
+    range.addEventListener("pointerdown", () => { dmxDragging = true; });
+    range.addEventListener("pointerup", () => { dmxDragging = false; });
+    range.addEventListener("input", () => {
+      val.textContent = range.value;
+      const t = Date.now();
+      if (t - dernierEnvoi > 60) { dernierEnvoi = t; dmxCmd({ cmd: "fader_valeur", id: f.id, valeur: +range.value }); }
+    });
+    range.addEventListener("change", () => dmxCmd({ cmd: "fader_valeur", id: f.id, valeur: +range.value }));
+    const suppr = document.createElement("button"); suppr.className = "mini danger"; suppr.textContent = "✕";
+    suppr.title = "Supprimer ce fader";
+    suppr.addEventListener("click", async () => { await dmxCmd({ cmd: "fader_supprime", id: f.id }); loadDmx(); });
+    col.appendChild(dot); col.appendChild(nom); col.appendChild(range); col.appendChild(val); col.appendChild(suppr);
+    row.appendChild(col);
+  });
+
+  const sc = $("#dmxScenes"); sc.innerHTML = "";
+  const nomsScenes = Object.keys(dmx.scenes || {});
+  if (!nomsScenes.length) sc.innerHTML = '<li class="empty" style="border:none">Aucune scène enregistrée.</li>';
+  nomsScenes.forEach(nom => {
+    const li = document.createElement("li");
+    const nm = document.createElement("span"); nm.className = "nm"; nm.textContent = nom;
+    const rap = document.createElement("button"); rap.className = "mini"; rap.textContent = "Rappeler";
+    rap.addEventListener("click", async () => { await dmxCmd({ cmd: "scene_rappelle", nom: nom }); loadDmx(); });
+    const del = document.createElement("button"); del.className = "mini danger"; del.textContent = "✕";
+    del.addEventListener("click", async () => { await dmxCmd({ cmd: "scene_supprime", nom: nom }); loadDmx(); });
+    li.appendChild(nm); li.appendChild(rap); li.appendChild(del);
+    sc.appendChild(li);
+  });
+  const sel = $("#dmxPasScene"); const old = sel.value; sel.innerHTML = "";
+  nomsScenes.forEach(nom => { const o = document.createElement("option"); o.value = o.textContent = nom; sel.appendChild(o); });
+  if (nomsScenes.includes(old)) sel.value = old;
+
+  const ch = $("#dmxChasers"); ch.innerHTML = "";
+  if (!(dmx.chasers || []).length) ch.innerHTML = '<li class="empty" style="border:none">Aucun chaser.</li>';
+  (dmx.chasers || []).forEach(c => {
+    const li = document.createElement("li");
+    const actif = dmx.chaser_actif === c.nom;
+    const nm = document.createElement("span"); nm.className = "nm";
+    nm.textContent = (actif ? "▶ " : "") + c.nom + " (" + c.pas.length + " pas" + (c.boucle ? ", boucle" : "") + ")";
+    if (actif) nm.style.color = "var(--accent)";
+    const go = document.createElement("button"); go.className = "mini"; go.textContent = actif ? "Stop" : "Lancer";
+    go.addEventListener("click", async () => {
+      await dmxCmd(actif ? { cmd: "chaser_arrete" } : { cmd: "chaser_demarre", nom: c.nom });
+      loadDmx();
+    });
+    const del = document.createElement("button"); del.className = "mini danger"; del.textContent = "✕";
+    del.addEventListener("click", async () => { await dmxCmd({ cmd: "chaser_supprime", nom: c.nom }); loadDmx(); });
+    li.appendChild(nm); li.appendChild(go); li.appendChild(del);
+    ch.appendChild(li);
+  });
+}
+let chaserPas = [];
+function renderChaserPas() {
+  const ul = $("#dmxChaserPas"); ul.innerHTML = "";
+  chaserPas.forEach((p, i) => {
+    const li = document.createElement("li");
+    const nm = document.createElement("span"); nm.className = "nm";
+    nm.textContent = (i + 1) + ". " + p.scene + " — fondu " + p.fondu_ms + " ms, tenue " + p.tenue_ms + " ms";
+    const del = document.createElement("button"); del.className = "mini danger"; del.textContent = "✕";
+    del.addEventListener("click", () => { chaserPas.splice(i, 1); renderChaserPas(); });
+    li.appendChild(nm); li.appendChild(del);
+    ul.appendChild(li);
+  });
+}
+$("#dmxAjoute").addEventListener("click", async () => {
+  const nom = $("#dmxNom").value.trim();
+  if (!nom) { toast("Donne un nom au fader", "err"); return; }
+  await dmxCmd({ cmd: "fader_ajoute", nom: nom, univers: +$("#dmxUnivers").value || 0,
+    canal: +$("#dmxCanal").value || 1, couleur: $("#dmxCouleur").value });
+  $("#dmxNom").value = ""; $("#dmxCanal").value = (+$("#dmxCanal").value || 1) + 1;
+  loadDmx();
+});
+$("#dmxSceneSave").addEventListener("click", async () => {
+  const nom = $("#dmxSceneNom").value.trim();
+  if (!nom) { toast("Donne un nom à la scène", "err"); return; }
+  await dmxCmd({ cmd: "scene_enregistre", nom: nom });
+  $("#dmxSceneNom").value = "";
+  loadDmx();
+});
+$("#dmxPasAjoute").addEventListener("click", () => {
+  const scene = $("#dmxPasScene").value;
+  if (!scene) { toast("Enregistre d'abord une scène", "err"); return; }
+  chaserPas.push({ scene: scene, fondu_ms: Math.max(0, +$("#dmxPasFondu").value || 0),
+    tenue_ms: Math.max(0, +$("#dmxPasTenue").value || 0) });
+  renderChaserPas();
+});
+$("#dmxChaserSave").addEventListener("click", async () => {
+  const nom = $("#dmxChaserNom").value.trim();
+  if (!nom) { toast("Donne un nom au chaser", "err"); return; }
+  if (!chaserPas.length) { toast("Ajoute au moins un pas", "err"); return; }
+  await dmxCmd({ cmd: "chaser_enregistre", nom: nom, pas: chaserPas,
+    boucle: $("#dmxChaserBoucle").checked });
+  chaserPas = []; renderChaserPas(); $("#dmxChaserNom").value = "";
+  loadDmx();
+});
+{
+  let dernierMaster = 0;
+  $("#dmxMaster").addEventListener("input", () => {
+    $("#dmxMasterVal").textContent = $("#dmxMaster").value;
+    const t = Date.now();
+    if (t - dernierMaster > 60) { dernierMaster = t; dmxCmd({ cmd: "master", valeur: +$("#dmxMaster").value }); }
+  });
+  $("#dmxMaster").addEventListener("change", () => dmxCmd({ cmd: "master", valeur: +$("#dmxMaster").value }));
+}
+$("#dmxCible").addEventListener("change", () => dmxCmd({ cmd: "cible", adresse: $("#dmxCible").value.trim() }));
+setInterval(() => { if ($("#page-lights").classList.contains("visible")) loadDmx(); }, 2500);
+
 /* ===================== Fonctions (interrupteurs) ===================== */
 const featureDefs = [
   ["player", "Lecteur vidéo", "Décodage et lecture des médias. Coupé : écran noir, pipeline vidéo libéré."],
@@ -1488,6 +1696,7 @@ const featureDefs = [
   ["fleet", "Parc réseau (mDNS)", "Annonce et découverte des autres nodes (page Système → Réseau). Coupé : le node disparaît du réseau."],
   ["fader", "Fondus", "Les transitions douces entre presets et mappings. Coupé : « Charger » reste disponible, « Fondu » ne fait rien."],
   ["preview", "Aperçu de la sortie", "L'image du Dashboard (rendu CPU à la demande). Coupé : aucun rendu d'aperçu, jamais."],
+  ["artnet", "Lumières (Art-Net)", "L'émission DMX de la page Lumières (30 trames/s). Coupé : plus aucune trame, socket fermée — l'édition de la console reste possible."],
 ];
 let featureFlags = null;
 async function loadFeatures() {

@@ -3213,6 +3213,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "756daf9b1013ebe47a8776667b466417e2d4c5679d441c26230efd9ef78692db"
 
 [[package]]
+name = "toolbox-artnet"
+version = "1.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "toolbox-core",
+ "tracing",
+]
+
+[[package]]
 name = "toolbox-control-http"
 version = "1.1.0"
 dependencies = [
@@ -3229,6 +3242,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "tokio-util",
+ "toolbox-artnet",
  "toolbox-core",
  "toolbox-engine",
  "tower",
@@ -3305,6 +3319,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "toml 0.8.23",
+ "toolbox-artnet",
  "toolbox-control-http",
  "toolbox-control-midi",
  "toolbox-control-osc",

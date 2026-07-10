@@ -236,6 +236,42 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
         ),
     ));
 
+    // Console lumières Art-Net (page Lumières). Le service vit toujours
+    // (l'édition reste possible) ; l'interrupteur « Lumières » coupe
+    // l'émission ET la socket via le canal `actif`.
+    let lumieres_handle = {
+        let (cmd_tx, cmd_rx) = tokio::sync::mpsc::channel(64);
+        let (etat_tx, etat_rx) = watch::channel(toolbox_artnet::EtatLumieres::default());
+        let (actif_tx, actif_rx) = watch::channel(initial_features.artnet);
+        {
+            let mut changes = features_rx.clone();
+            tokio::spawn(async move {
+                while changes.changed().await.is_ok() {
+                    let flags = *changes.borrow_and_update();
+                    let _ = actif_tx.send(flags.artnet);
+                }
+            });
+        }
+        services.push((
+            "lumieres",
+            spawn_service(
+                "lumieres",
+                shutdown_rx.clone(),
+                toolbox_artnet::service(
+                    std::path::PathBuf::from("lumieres.json"),
+                    cmd_rx,
+                    etat_tx,
+                    actif_rx,
+                    shutdown_rx.clone(),
+                ),
+            ),
+        ));
+        toolbox_artnet::LumieresHandle {
+            commandes: cmd_tx,
+            etat: etat_rx,
+        }
+    };
+
     // HTTP : REST + WebSocket + web UI + monitoring.
     if config.modules.http {
         let app = toolbox_control_http::AppState::new(
@@ -257,7 +293,8 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
             env!("CARGO_PKG_VERSION").to_string(),
         )
         .with_password(config.security.password.clone())
-        .with_features(features_tx.clone(), features_rx.clone());
+        .with_features(features_tx.clone(), features_rx.clone())
+        .with_lumieres(lumieres_handle.clone());
         if config.security.password.is_some() {
             info!("interface web protégée par mot de passe ([security])");
         }
