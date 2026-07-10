@@ -142,6 +142,9 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
         config.limits.max_upload_mb.saturating_mul(1024 * 1024),
     )?;
 
+    // Reste d'une mise à jour OTA réussie (ancien binaire, script) : nettoyé.
+    toolbox_control_http::ota::nettoyer_apres_demarrage();
+
     // Le bus, cœur du node.
     let bus = Bus::new(256, 1024)
         .with_presets(presets.clone())

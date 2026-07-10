@@ -5,6 +5,14 @@
 
 ## [Non publié]
 
+- **Mise à jour OTA (expérimental)** : page Système → « Mise à jour ».
+  Trois temps prudents : vérifier la dernière release GitHub, télécharger
+  le binaire de la plateforme À CÔTÉ (garde-fous : taille, format ;
+  rien n'est remplacé), puis appliquer — bascule avec conservation de
+  l'ancien binaire (`.precedent`) et redémarrage par le service
+  (systemd `Restart=always` / démarrage auto Windows). Un échec à
+  n'importe quelle étape laisse l'installation intacte. À valider en
+  conditions réelles lors de la prochaine release.
 - **Santé du système d'un coup d'œil** (page Système) : pastille par
   fonction (état des interrupteurs), tuile « Erreurs récentes » (compteur
   ERROR du journal, en rouge s'il y en a) et tuile « Dérive de synchro »

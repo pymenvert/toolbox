@@ -672,6 +672,19 @@
       quand on demande de l'aide. Aucun secret dedans.</div>
     </div>
     <div class="card" style="margin-top:14px;max-width:720px">
+      <h3>Mise &agrave; jour <span class="muted" style="font-size:.7em">(exp&eacute;rimental)</span></h3>
+      <div class="rowbtns">
+        <button id="majVerifie">V&eacute;rifier</button>
+        <button id="majTelecharge" style="display:none">T&eacute;l&eacute;charger</button>
+        <button id="majApplique" class="danger" style="display:none">Appliquer (red&eacute;marre le node)</button>
+        <span id="majEtat" class="muted" style="font-size:13px"></span>
+      </div>
+      <div class="hint">Trois temps prudents : v&eacute;rifier la derni&egrave;re version publi&eacute;e,
+      t&eacute;l&eacute;charger le binaire &agrave; c&ocirc;t&eacute; (rien n'est remplac&eacute;), puis appliquer —
+      le node red&eacute;marre sur la nouvelle version. En cas de p&eacute;pin &agrave; n'importe
+      quelle &eacute;tape, l'installation actuelle reste intacte.</div>
+    </div>
+    <div class="card" style="margin-top:14px;max-width:720px">
       <h3>Alimentation de la machine</h3>
       <div class="rowbtns">
         <button id="sysReboot" class="danger">Red&eacute;marrer la machine</button>
@@ -2004,6 +2017,37 @@ function powerAction(url, label) {
 }
 $("#sysReboot").addEventListener("click", () => powerAction("/api/system/reboot", "Redémarrage"));
 $("#sysShutdown").addEventListener("click", () => powerAction("/api/system/shutdown", "Extinction"));
+
+/* Mise à jour OTA : vérifier → télécharger → appliquer. */
+$("#majVerifie").addEventListener("click", async () => {
+  $("#majEtat").textContent = "Vérification…";
+  try {
+    const etat = await api("/api/update/check");
+    if (etat.plus_recente && etat.asset) {
+      $("#majEtat").textContent = "v" + etat.version_disponible + " disponible (actuelle : v" + etat.version_courante + ")";
+      $("#majTelecharge").style.display = "inline-block";
+    } else {
+      $("#majEtat").textContent = "À jour (v" + etat.version_courante + ")";
+      $("#majTelecharge").style.display = "none";
+      $("#majApplique").style.display = "none";
+    }
+  } catch (e) { $("#majEtat").textContent = "Vérification impossible (réseau ?)"; }
+});
+$("#majTelecharge").addEventListener("click", async () => {
+  $("#majEtat").textContent = "Téléchargement… (peut prendre une minute)";
+  try {
+    const r = await api("/api/update/download", { method: "POST" });
+    $("#majEtat").textContent = r.message;
+    $("#majApplique").style.display = "inline-block";
+  } catch (e) { $("#majEtat").textContent = "Téléchargement impossible."; }
+});
+$("#majApplique").addEventListener("click", async () => {
+  if (!confirm("Appliquer la mise à jour ? Le node redémarre — la lecture en cours s'arrête.")) return;
+  try {
+    const r = await api("/api/update/apply", { method: "POST" });
+    $("#majEtat").textContent = r.message + " Reconnexion automatique…";
+  } catch (e) { $("#majEtat").textContent = "Bascule impossible : rien n'a changé."; }
+});
 
 /* Parc de nodes (mDNS). */
 async function loadFleet() {

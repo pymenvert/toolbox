@@ -19,6 +19,7 @@
 
 pub mod monitor;
 pub mod oscquery;
+pub mod ota;
 mod zipper;
 
 use std::time::Instant;
@@ -290,6 +291,9 @@ pub fn router(app: AppState) -> Router {
         .route("/api/fleet/push", post(fleet_push))
         .route("/api/dmx", get(dmx_get).post(dmx_commande))
         .route("/api/cues", get(cues_get).post(cues_commande))
+        .route("/api/update/check", get(update_check))
+        .route("/api/update/download", post(update_download))
+        .route("/api/update/apply", post(update_apply))
         .route("/ws", get(ws_events_upgrade))
         .route("/ws/logs", get(ws_logs_upgrade))
         .layer(axum::middleware::from_fn_with_state(
@@ -998,6 +1002,42 @@ async fn dmx_commande(
         .await
         .map_err(|_| CoreError::InvalidCommand("console lumières arrêtée".into()))?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// OTA : compare la version courante à la dernière release GitHub.
+async fn update_check(State(app): State<AppState>) -> Result<Json<ota::EtatMiseAJour>, ApiError> {
+    let version = app.version.clone();
+    let etat = tokio::task::spawn_blocking(move || ota::verifier(&version))
+        .await
+        .map_err(|e| CoreError::InvalidCommand(format!("vérification interrompue : {e}")))?
+        .map_err(CoreError::InvalidCommand)?;
+    Ok(Json(etat))
+}
+
+/// OTA : télécharge et prépare le nouveau binaire (rien n'est remplacé).
+async fn update_download(
+    State(_app): State<AppState>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let message = tokio::task::spawn_blocking(ota::telecharger)
+        .await
+        .map_err(|e| CoreError::InvalidCommand(format!("téléchargement interrompu : {e}")))?
+        .map_err(CoreError::InvalidCommand)?;
+    Ok(Json(serde_json::json!({ "message": message })))
+}
+
+/// OTA : applique la bascule préparée puis redémarre le node (le service
+/// systemd / démarrage auto relance la nouvelle version).
+async fn update_apply(State(_app): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
+    let message = tokio::task::spawn_blocking(ota::appliquer)
+        .await
+        .map_err(|e| CoreError::InvalidCommand(format!("bascule interrompue : {e}")))?
+        .map_err(CoreError::InvalidCommand)?;
+    warn!("mise à jour appliquée : arrêt du node dans 1 s (redémarrage attendu)");
+    tokio::spawn(async {
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        std::process::exit(0);
+    });
+    Ok(Json(serde_json::json!({ "message": message })))
 }
 
 /// Séquenceur : l'état (cues, enchaînement en attente, dernière jouée).
