@@ -7,6 +7,9 @@ license.workspace = true
 
 [dependencies]
 toolbox-core = { path = "../core" }
+# Rendu CPU parallélisé par lignes : l'aperçu web et le repli sans GPU en
+# profitent (mesuré ~×nb-cœurs sur le banc bench_raster).
+rayon = "1"
 serde = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }

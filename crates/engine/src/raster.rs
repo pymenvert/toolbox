@@ -68,19 +68,26 @@ pub fn render_frame(
     let effects = state.effects;
     let blending = state.blending;
     let masques = &state.masques;
-    for (i, px) in out.iter_mut().enumerate().take(w * h) {
-        let (x, y) = (i % w, i / w);
-        let u = (x as f64 + 0.5) / w as f64;
-        let v = (y as f64 + 0.5) / h as f64;
-        // Masques : zones NOIRES en espace de sortie, avant tout calcul.
-        if dans_un_masque(masques, u, v) {
-            *px = 0;
-            continue;
-        }
-        let couleur = shade(&source, &warp_inv, &params, &effects, time, u, v);
-        // Fondu de bords : atténuation finale en espace de sortie.
-        *px = appliquer_blending(&blending, couleur, u, v);
-    }
+    // Parallélisé par lignes (rayon) : chaque pixel est indépendant — le
+    // repli CPU et l'aperçu web gagnent ~un facteur nb-de-cœurs.
+    use rayon::prelude::*;
+    out.par_chunks_mut(w)
+        .take(h)
+        .enumerate()
+        .for_each(|(y, ligne)| {
+            let v = (y as f64 + 0.5) / h as f64;
+            for (x, px) in ligne.iter_mut().enumerate() {
+                let u = (x as f64 + 0.5) / w as f64;
+                // Masques : zones NOIRES en espace de sortie, avant tout calcul.
+                if dans_un_masque(masques, u, v) {
+                    *px = 0;
+                    continue;
+                }
+                let couleur = shade(&source, &warp_inv, &params, &effects, time, u, v);
+                // Fondu de bords : atténuation finale en espace de sortie.
+                *px = appliquer_blending(&blending, couleur, u, v);
+            }
+        });
 }
 
 /// Le pixel (u, v) est-il couvert par un masque ? Test « même côté » sur les
