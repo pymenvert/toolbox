@@ -86,7 +86,7 @@ fn grid_color(u: f64, v: f64) -> [f32; 3] {
     const CELLS: f64 = 12.0;
     const LINE: f64 = 0.004;
     let near_line = |t: f64| (t * CELLS).fract().min(1.0 - (t * CELLS).fract()) < LINE * CELLS;
-    let border = u < LINE || u > 1.0 - LINE || v < LINE || v > 1.0 - LINE;
+    let border = !(LINE..=1.0 - LINE).contains(&u) || !(LINE..=1.0 - LINE).contains(&v);
     let cross = (u - 0.5).abs() < LINE || (v - 0.5).abs() < LINE;
     if border || cross {
         [1.0, 1.0, 1.0]
