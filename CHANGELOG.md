@@ -5,6 +5,9 @@
 
 ## [Non publié]
 
+- **Annonce OSCQuery en mDNS** (`_oscjson._tcp`) : Chataigne découvre le
+  node dans son module OSCQuery sans qu'on tape la moindre IP (l'annonce
+  suit le module OSC ; vérifiée avec un scanner mDNS local).
 - **Journal sur disque** : en plus de la page de logs (mémoire), le node
   écrit un fichier par jour dans `paths.logs`
   (`toolbox.log.AAAA-MM-JJ`, 14 jours gardés, purge au démarrage) —

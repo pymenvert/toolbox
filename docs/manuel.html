@@ -409,9 +409,10 @@ footer { margin-top: 60px; padding-top: 24px; border-top: 1px solid var(--lisere
     </tbody>
   </table></div>
   <h3>Auto-découverte OSCQuery (Chataigne)</h3>
-  <p>Dans Chataigne, ajoute un module <strong>OSCQuery</strong> avec l'IP du
-  node et le port <code>8081</code> : tous les paramètres apparaissent avec
-  leurs curseurs bornés et leurs valeurs courantes — aucune adresse à taper.</p>
+  <p>Dans Chataigne, ajoute un module <strong>OSCQuery</strong> : le node
+  s'annonce sur le réseau (mDNS <code>_oscjson._tcp</code>) et apparaît dans
+  la liste — sinon, IP du node et port <code>8081</code>. Tous les paramètres
+  arrivent avec leurs curseurs bornés et leurs valeurs courantes.</p>
   <h3>Retour d'état (feedback)</h3>
   <p>Avec <code>[osc] feedback = "10.0.0.5:9001"</code> dans
   <code>node.toml</code>, le node renvoie chaque changement en OSC à cette

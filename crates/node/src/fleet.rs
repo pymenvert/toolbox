@@ -12,6 +12,9 @@ use tokio::sync::watch;
 use tracing::{info, warn};
 
 pub const SERVICE_TYPE: &str = "_toolbox._tcp.local.";
+/// Type de service standard OSCQuery : Chataigne (et les autres hôtes
+/// compatibles) scannent celui-ci pour proposer les nodes sans taper d'IP.
+pub const OSCQUERY_SERVICE_TYPE: &str = "_oscjson._tcp.local.";
 
 /// Un node vu sur le réseau.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -30,12 +33,13 @@ pub struct FleetNode {
 pub fn spawn(
     node_name: String,
     http_port: u16,
+    oscquery_port: Option<u16>,
     version: String,
     nodes: watch::Sender<serde_json::Value>,
 ) {
     let thread = std::thread::Builder::new()
         .name("toolbox-fleet".into())
-        .spawn(move || run(node_name, http_port, version, &nodes));
+        .spawn(move || run(node_name, http_port, oscquery_port, version, &nodes));
     if let Err(err) = thread {
         warn!(%err, "découverte réseau non démarrée");
     }
@@ -44,6 +48,7 @@ pub fn spawn(
 fn run(
     node_name: String,
     http_port: u16,
+    oscquery_port: Option<u16>,
     version: String,
     nodes: &watch::Sender<serde_json::Value>,
 ) {
@@ -76,6 +81,30 @@ fn run(
             }
         }
         Err(err) => warn!(%err, "annonce mDNS invalide"),
+    }
+
+    // Annonce OSCQuery (standard `_oscjson._tcp`) : Chataigne liste le node
+    // dans son module OSCQuery sans qu'on tape la moindre IP.
+    if let Some(port) = oscquery_port {
+        let sans_props: &[(&str, &str)] = &[];
+        match ServiceInfo::new(
+            OSCQUERY_SERVICE_TYPE,
+            &instance,
+            &host,
+            (),
+            port,
+            sans_props,
+        ) {
+            Ok(info) => {
+                let info = info.enable_addr_auto();
+                if let Err(err) = daemon.register(info) {
+                    warn!(%err, "annonce OSCQuery mDNS refusée");
+                } else {
+                    info!(nom = %instance, port, "serveur OSCQuery annoncé en mDNS");
+                }
+            }
+            Err(err) => warn!(%err, "annonce OSCQuery mDNS invalide"),
+        }
     }
 
     // Écoute du parc.

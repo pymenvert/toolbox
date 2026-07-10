@@ -197,6 +197,8 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
     fleet::spawn(
         node_name.clone(),
         config.ports.http,
+        // L'annonce OSCQuery (`_oscjson._tcp`) suit le module OSC.
+        config.modules.osc.then_some(config.ports.oscquery),
         env!("CARGO_PKG_VERSION").to_string(),
         fleet_tx,
     );
