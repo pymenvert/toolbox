@@ -16,4 +16,4 @@ pub mod raster;
 pub mod window;
 
 pub use raster::render_frame;
-pub use window::{spawn, WindowConfig};
+pub use window::{spawn, OutputChannels, WindowConfig};

@@ -2,10 +2,12 @@
 //!
 //! L'event loop tourne hors du thread principal (`with_any_thread`, Windows
 //! et Linux X11/Wayland — les cibles du node ; macOS n'est pas supporté ici).
-//! Un relais forwarde les changements d'état du bus vers l'event loop via
-//! [`winit::event_loop::EventLoopProxy`] : chaque mutation (coin déplacé,
-//! mire changée…) déclenche un redraw. Raccourcis : F11 bascule le plein
-//! écran, Échap le quitte. Fermer la fenêtre n'arrête pas le node.
+//! Un relais forwarde vers l'event loop (via
+//! [`winit::event_loop::EventLoopProxy`]) : les mutations d'état du bus et
+//! les frames vidéo (redraw), les réglages de sortie (changement d'écran ou
+//! de plein écran à chaud, depuis l'UI web) et le signal d'arrêt. La fenêtre
+//! publie en retour la liste des écrans détectés. Raccourcis : F11 bascule
+//! le plein écran, Échap le quitte. Fermer la fenêtre n'arrête pas le node.
 
 use std::num::NonZeroU32;
 use std::sync::Arc;
@@ -19,26 +21,40 @@ use winit::event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy};
 use winit::keyboard::{Key, NamedKey};
 use winit::window::{Fullscreen, Window, WindowId};
 
-use toolbox_core::NodeState;
+use toolbox_core::{MonitorInfo, NodeState, OutputSettings};
+use toolbox_engine::VideoFrame;
 
 use crate::raster::render_frame;
 
-/// Réglages de la fenêtre (issus de `[output]` dans node.toml).
+/// Réglages fixes de la fenêtre (les réglages à chaud passent par
+/// [`OutputChannels::settings`]).
 #[derive(Debug, Clone)]
 pub struct WindowConfig {
-    /// Écran cible, par index dans la liste détectée (0 = premier).
-    pub monitor: usize,
-    /// Démarre en plein écran sans bordure sur l'écran cible.
-    pub fullscreen: bool,
     /// Titre de la fenêtre (nom du node).
     pub title: String,
+}
+
+/// Les canaux qui relient la fenêtre au reste du node.
+pub struct OutputChannels {
+    /// État du node (bus) : chaque mutation redessine.
+    pub state: watch::Receiver<NodeState>,
+    /// Dernière frame vidéo décodée (`None` sans backend vidéo).
+    pub video: watch::Receiver<Option<VideoFrame>>,
+    /// Réglages de sortie appliqués à chaud (écran cible, plein écran).
+    pub settings: watch::Receiver<OutputSettings>,
+    /// Liste des écrans détectés, publiée pour l'API `/api/outputs`.
+    pub monitors: watch::Sender<Vec<MonitorInfo>>,
+    /// Signal d'arrêt du node.
+    pub shutdown: watch::Receiver<bool>,
 }
 
 /// Événements injectés dans l'event loop depuis le monde async.
 #[derive(Debug)]
 enum Wake {
-    /// L'état du node a changé : re-dessiner.
-    StateChanged,
+    /// État ou frame vidéo : re-dessiner.
+    Redraw,
+    /// Réglages de sortie modifiés : déplacer/basculer la fenêtre.
+    SettingsChanged,
     /// Arrêt du node : fermer la fenêtre et sortir de la boucle.
     Quit,
 }
@@ -48,14 +64,10 @@ enum Wake {
 /// Ne bloque pas ; en cas d'échec (pas de serveur graphique…), l'erreur est
 /// tracée et le node continue sans fenêtre — la sortie est un service, pas
 /// une condition de démarrage.
-pub fn spawn(
-    config: WindowConfig,
-    state: watch::Receiver<NodeState>,
-    shutdown: watch::Receiver<bool>,
-) -> std::thread::JoinHandle<()> {
+pub fn spawn(config: WindowConfig, channels: OutputChannels) -> std::thread::JoinHandle<()> {
     std::thread::Builder::new()
         .name("toolbox-sortie".into())
-        .spawn(move || run_event_loop(config, state, shutdown))
+        .spawn(move || run_event_loop(config, channels))
         .unwrap_or_else(|err| {
             error!(%err, "impossible de créer le thread de la fenêtre de sortie");
             // Thread de repli déjà terminé : join() immédiat côté appelant.
@@ -63,11 +75,15 @@ pub fn spawn(
         })
 }
 
-fn run_event_loop(
-    config: WindowConfig,
-    state: watch::Receiver<NodeState>,
-    shutdown: watch::Receiver<bool>,
-) {
+fn run_event_loop(config: WindowConfig, channels: OutputChannels) {
+    let OutputChannels {
+        state,
+        video,
+        settings,
+        monitors,
+        shutdown,
+    } = channels;
+
     let mut builder = EventLoop::<Wake>::with_user_event();
     // L'event loop vit dans ce thread, pas le principal.
     #[cfg(target_os = "windows")]
@@ -90,12 +106,21 @@ fn run_event_loop(
         }
     };
 
-    // Relais : bus/arrêt (async) → event loop (sync). Runtime minimal dédié.
-    spawn_wake_relay(event_loop.create_proxy(), state.clone(), shutdown);
+    // Relais : bus/vidéo/réglages/arrêt (async) → event loop (sync).
+    spawn_wake_relay(
+        event_loop.create_proxy(),
+        state.clone(),
+        video.clone(),
+        settings.clone(),
+        shutdown,
+    );
 
     let mut app = OutputApp {
         config,
         state,
+        video,
+        settings,
+        monitors,
         window: None,
         surface: None,
     };
@@ -105,10 +130,12 @@ fn run_event_loop(
     info!("fenêtre de sortie fermée");
 }
 
-/// Forwarde chaque changement d'état (et l'arrêt) vers l'event loop.
+/// Forwarde chaque signal async vers l'event loop. Runtime minimal dédié.
 fn spawn_wake_relay(
     proxy: EventLoopProxy<Wake>,
     mut state: watch::Receiver<NodeState>,
+    mut video: watch::Receiver<Option<VideoFrame>>,
+    mut settings: watch::Receiver<OutputSettings>,
     mut shutdown: watch::Receiver<bool>,
 ) {
     let relay = std::thread::Builder::new()
@@ -119,17 +146,36 @@ fn spawn_wake_relay(
                 return;
             };
             runtime.block_on(async move {
+                // Chaque canal peut se fermer indépendamment (pas de backend
+                // vidéo → canal frames fermé d'office, module http absent →
+                // canal réglages fermé) : on désactive la branche concernée
+                // sans tuer le relais. État ou arrêt fermés = fin du node.
+                let mut video_alive = true;
+                let mut settings_alive = true;
                 loop {
-                    tokio::select! {
+                    let wake = tokio::select! {
                         changed = state.changed() => {
-                            if changed.is_err() || proxy.send_event(Wake::StateChanged).is_err() {
-                                break;
+                            if changed.is_err() { Wake::Quit } else { Wake::Redraw }
+                        }
+                        changed = video.changed(), if video_alive => match changed {
+                            Ok(()) => Wake::Redraw,
+                            Err(_) => {
+                                video_alive = false;
+                                continue;
                             }
-                        }
-                        _ = shutdown.changed() => {
-                            let _ = proxy.send_event(Wake::Quit);
-                            break;
-                        }
+                        },
+                        changed = settings.changed(), if settings_alive => match changed {
+                            Ok(()) => Wake::SettingsChanged,
+                            Err(_) => {
+                                settings_alive = false;
+                                continue;
+                            }
+                        },
+                        _ = shutdown.changed() => Wake::Quit,
+                    };
+                    let quit = matches!(wake, Wake::Quit);
+                    if proxy.send_event(wake).is_err() || quit {
+                        break;
                     }
                 }
             });
@@ -143,36 +189,65 @@ fn spawn_wake_relay(
 struct OutputApp {
     config: WindowConfig,
     state: watch::Receiver<NodeState>,
+    video: watch::Receiver<Option<VideoFrame>>,
+    settings: watch::Receiver<OutputSettings>,
+    monitors: watch::Sender<Vec<MonitorInfo>>,
     window: Option<Arc<Window>>,
     surface: Option<softbuffer::Surface<Arc<Window>, Arc<Window>>>,
 }
 
 impl OutputApp {
-    fn target_monitor(
+    /// Détecte les écrans, publie la liste pour l'API et retourne la cible.
+    fn refresh_monitors(
         &self,
         event_loop: &ActiveEventLoop,
+        target: usize,
     ) -> Option<winit::monitor::MonitorHandle> {
         let monitors: Vec<_> = event_loop.available_monitors().collect();
-        for (i, m) in monitors.iter().enumerate() {
+        let infos: Vec<MonitorInfo> = monitors
+            .iter()
+            .enumerate()
+            .map(|(index, m)| MonitorInfo {
+                index,
+                name: m.name().unwrap_or_else(|| format!("écran {index}")),
+                width: m.size().width,
+                height: m.size().height,
+            })
+            .collect();
+        for info in &infos {
             info!(
-                ecran = i,
-                nom = m.name().unwrap_or_else(|| "?".into()),
-                largeur = m.size().width,
-                hauteur = m.size().height,
+                ecran = info.index,
+                nom = %info.name,
+                largeur = info.width,
+                hauteur = info.height,
                 "écran détecté"
             );
         }
-        if self.config.monitor > 0 && self.config.monitor >= monitors.len() {
+        self.monitors.send_replace(infos);
+        if target > 0 && target >= monitors.len() {
             warn!(
-                demande = self.config.monitor,
+                demande = target,
                 detectes = monitors.len(),
                 "écran demandé introuvable : premier écran utilisé"
             );
         }
-        monitors
-            .get(self.config.monitor)
-            .or_else(|| monitors.first())
-            .cloned()
+        monitors.get(target).or_else(|| monitors.first()).cloned()
+    }
+
+    /// Applique les réglages courants : écran cible + plein écran.
+    fn apply_settings(&self, event_loop: &ActiveEventLoop) {
+        let settings = *self.settings.borrow();
+        let monitor = self.refresh_monitors(event_loop, settings.monitor);
+        let Some(window) = &self.window else { return };
+        if settings.fullscreen {
+            window.set_fullscreen(Some(Fullscreen::Borderless(monitor)));
+        } else {
+            window.set_fullscreen(None);
+            if let Some(monitor) = monitor {
+                window.set_outer_position(monitor.position());
+            }
+        }
+        window.request_redraw();
     }
 
     fn toggle_fullscreen(&self) {
@@ -200,7 +275,8 @@ impl OutputApp {
         match surface.buffer_mut() {
             Ok(mut buffer) => {
                 let snapshot = self.state.borrow().clone();
-                render_frame(&snapshot, w.get(), h.get(), &mut buffer);
+                let video = self.video.borrow().clone();
+                render_frame(&snapshot, video.as_ref(), w.get(), h.get(), &mut buffer);
                 if let Err(err) = buffer.present() {
                     warn!(%err, "frame de sortie non présentée");
                 }
@@ -215,11 +291,12 @@ impl ApplicationHandler<Wake> for OutputApp {
         if self.window.is_some() {
             return;
         }
-        let monitor = self.target_monitor(event_loop);
+        let settings = *self.settings.borrow();
+        let monitor = self.refresh_monitors(event_loop, settings.monitor);
         let mut attributes = Window::default_attributes()
             .with_title(self.config.title.clone())
             .with_inner_size(LogicalSize::new(960.0, 540.0));
-        if self.config.fullscreen {
+        if settings.fullscreen {
             attributes = attributes.with_fullscreen(Some(Fullscreen::Borderless(monitor)));
         } else if let Some(monitor) = monitor {
             // Fenêtré mais sur le bon écran.
@@ -256,11 +333,12 @@ impl ApplicationHandler<Wake> for OutputApp {
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: Wake) {
         match event {
-            Wake::StateChanged => {
+            Wake::Redraw => {
                 if let Some(window) = &self.window {
                     window.request_redraw();
                 }
             }
+            Wake::SettingsChanged => self.apply_settings(event_loop),
             Wake::Quit => event_loop.exit(),
         }
     }

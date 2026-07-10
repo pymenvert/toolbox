@@ -14,12 +14,14 @@
 pub mod homography;
 pub mod player;
 pub mod render;
+pub mod video;
 
 pub use homography::{HomographyError, Mat3};
 pub use player::{
     BackendEvent, MemoryBackend, PlaybackPosition, Player, PlayerBackend, PlayerError,
 };
 pub use render::{ColorUniforms, RenderParams};
+pub use video::VideoFrame;
 
 /// Sources GLSL embarquées (GLES 3.0). Un seul endroit à modifier.
 pub mod shaders {

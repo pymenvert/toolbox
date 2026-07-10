@@ -9,24 +9,43 @@
 //! 4. correction couleur (gains RVB, luminosité, contraste, gamma,
 //!    saturation, teinte).
 //!
-//! Sans mire sélectionnée la sortie est noire : un vidéoprojecteur de
-//! spectacle ne doit jamais afficher de contenu par défaut.
+//! La source échantillonnée est, par priorité :
+//! 1. la mire de test si une est sélectionnée (le calibrage prime) ;
+//! 2. la dernière frame vidéo décodée, si un média est chargé et que le
+//!    transport n'est pas à l'arrêt ;
+//! 3. sinon noir — un vidéoprojecteur de spectacle n'affiche rien par défaut.
 
 use toolbox_core::command::TestPattern;
-use toolbox_core::state::NodeState;
-use toolbox_engine::{Mat3, RenderParams};
+use toolbox_core::state::{NodeState, Transport};
+use toolbox_engine::{Mat3, RenderParams, VideoFrame};
 use tracing::warn;
+
+/// Ce que le pixel échantillonne : mire procédurale ou frame vidéo.
+enum Source<'a> {
+    Pattern(TestPattern),
+    Video(&'a VideoFrame),
+}
 
 /// Rend une frame `width`×`height` dans `out` (format softbuffer `0RGB`,
 /// une entrée `u32` par pixel, lignes de haut en bas).
 ///
 /// `out` est retaillé par l'appelant : la fonction ne panique jamais, elle
 /// s'arrête à `out.len()`.
-pub fn render_frame(state: &NodeState, width: u32, height: u32, out: &mut [u32]) {
-    // Pas de mire : noir immédiat (chemin rapide, cas nominal en show).
-    let Some(pattern) = state.test_pattern else {
-        out.fill(0);
-        return;
+pub fn render_frame(
+    state: &NodeState,
+    video: Option<&VideoFrame>,
+    width: u32,
+    height: u32,
+    out: &mut [u32],
+) {
+    let source = match (state.test_pattern, video) {
+        (Some(pattern), _) => Source::Pattern(pattern),
+        (None, Some(frame)) if state.player.transport != Transport::Stopped => Source::Video(frame),
+        // Ni mire ni vidéo en cours : noir immédiat (cas nominal en show).
+        _ => {
+            out.fill(0);
+            return;
+        }
     };
     let params = match RenderParams::from_state(state) {
         Ok(params) => params,
@@ -49,12 +68,12 @@ pub fn render_frame(state: &NodeState, width: u32, height: u32, out: &mut [u32])
         let (x, y) = (i % w, i / w);
         let u = (x as f64 + 0.5) / w as f64;
         let v = (y as f64 + 0.5) / h as f64;
-        *px = shade(pattern, &warp_inv, &params, u, v);
+        *px = shade(&source, &warp_inv, &params, u, v);
     }
 }
 
 /// Couleur d'un pixel de sortie, packée en `0RGB`.
-fn shade(pattern: TestPattern, warp_inv: &Mat3, params: &RenderParams, u: f64, v: f64) -> u32 {
+fn shade(source: &Source<'_>, warp_inv: &Mat3, params: &RenderParams, u: f64, v: f64) -> u32 {
     // 1. Warp inverse : hors du quad de mapping, rien n'est projeté.
     let (qu, qv) = warp_inv.apply(u, v);
     if !(0.0..=1.0).contains(&qu) || !(0.0..=1.0).contains(&qv) {
@@ -65,11 +84,27 @@ fn shade(pattern: TestPattern, warp_inv: &Mat3, params: &RenderParams, u: f64, v
     if !(0.0..=1.0).contains(&tu) || !(0.0..=1.0).contains(&tv) {
         return 0;
     }
-    // 3. Mire procédurale.
-    let rgb = pattern_color(pattern, tu, tv);
+    // 3. Échantillonnage de la source.
+    let rgb = match source {
+        Source::Pattern(pattern) => pattern_color(*pattern, tu, tv),
+        Source::Video(frame) => sample_video(frame, tu, tv),
+    };
     // 4. Correction couleur.
     let rgb = apply_color(&params.color, rgb);
     pack(rgb)
+}
+
+/// Échantillonnage plus proche voisin de la frame vidéo (rapide ; le
+/// filtrage bilinéaire viendra avec la passe GPU).
+fn sample_video(frame: &VideoFrame, u: f64, v: f64) -> [f32; 3] {
+    let x = ((u * f64::from(frame.width)) as usize).min(frame.width as usize - 1);
+    let y = ((v * f64::from(frame.height)) as usize).min(frame.height as usize - 1);
+    let i = (y * frame.width as usize + x) * 4;
+    [
+        f32::from(frame.rgba[i]) / 255.0,
+        f32::from(frame.rgba[i + 1]) / 255.0,
+        f32::from(frame.rgba[i + 2]) / 255.0,
+    ]
 }
 
 /// Couleur de la mire au point `(u, v)` de la source, en RVB linéaire 0..1.
@@ -228,8 +263,20 @@ mod tests {
 
     fn frame(state: &NodeState, w: u32, h: u32) -> Vec<u32> {
         let mut out = vec![0xDEAD_BEEF; (w * h) as usize];
-        render_frame(state, w, h, &mut out);
+        render_frame(state, None, w, h, &mut out);
         out
+    }
+
+    /// Frame 2×2 : rouge, vert / bleu, blanc — un quadrant par couleur.
+    fn test_video() -> VideoFrame {
+        let rgba: Vec<u8> = [
+            [255u8, 0, 0, 255],
+            [0, 255, 0, 255],
+            [0, 0, 255, 255],
+            [255, 255, 255, 255],
+        ]
+        .concat();
+        VideoFrame::new(2, 2, rgba.into()).expect("frame")
     }
 
     fn px(buf: &[u32], w: u32, x: u32, y: u32) -> u32 {
@@ -359,11 +406,85 @@ mod tests {
     }
 
     #[test]
+    fn video_shows_when_playing_and_not_when_stopped() {
+        let mut state = state_with(&[Command::Load {
+            path: "clips/a.mp4".into(),
+        }]);
+        let video = test_video();
+
+        // Transport à l'arrêt : pas de vidéo, sortie noire.
+        let mut out = vec![0xDEAD_BEEF; 64 * 64];
+        render_frame(&state, Some(&video), 64, 64, &mut out);
+        assert!(out.iter().all(|&p| p == 0), "stoppé = noir");
+
+        // En lecture : chaque quadrant échantillonne sa couleur.
+        state.apply(&Command::Play).expect("play");
+        render_frame(&state, Some(&video), 64, 64, &mut out);
+        assert_eq!(px(&out, 64, 10, 10), 0x00FF_0000, "haut-gauche rouge");
+        assert_eq!(px(&out, 64, 50, 10), 0x0000_FF00, "haut-droit vert");
+        assert_eq!(px(&out, 64, 10, 50), 0x0000_00FF, "bas-gauche bleu");
+        assert_eq!(px(&out, 64, 50, 50), 0x00FF_FFFF, "bas-droit blanc");
+
+        // En pause : la dernière frame reste affichée.
+        state.apply(&Command::Pause).expect("pause");
+        render_frame(&state, Some(&video), 64, 64, &mut out);
+        assert_eq!(px(&out, 64, 10, 10), 0x00FF_0000);
+    }
+
+    #[test]
+    fn pattern_takes_priority_over_video() {
+        let state = state_with(&[
+            Command::Load {
+                path: "clips/a.mp4".into(),
+            },
+            Command::Play,
+            Command::SetTestPattern {
+                pattern: Some(toolbox_core::TestPattern::Checker),
+            },
+        ]);
+        let video = test_video();
+        let mut out = vec![0u32; 64 * 64];
+        render_frame(&state, Some(&video), 64, 64, &mut out);
+        // Damier gris, pas les couleurs saturées de la vidéo.
+        let p = px(&out, 64, 4, 4);
+        let (r, g, b) = (p >> 16 & 0xFF, p >> 8 & 0xFF, p & 0xFF);
+        assert_eq!(r, g);
+        assert_eq!(g, b);
+    }
+
+    #[test]
+    fn video_is_warped_by_mapping() {
+        // Quad rétréci : la vidéo n'apparaît qu'au centre.
+        let mut cmds = vec![
+            Command::Load {
+                path: "clips/a.mp4".into(),
+            },
+            Command::Play,
+        ];
+        for (i, (x, y)) in [(0.25, 0.25), (0.75, 0.25), (0.75, 0.75), (0.25, 0.75)]
+            .iter()
+            .enumerate()
+        {
+            cmds.push(Command::CornerSet {
+                index: u8::try_from(i).expect("index"),
+                x: *x as f32,
+                y: *y as f32,
+            });
+        }
+        let state = state_with(&cmds);
+        let video = test_video();
+        let mut out = vec![0u32; 64 * 64];
+        render_frame(&state, Some(&video), 64, 64, &mut out);
+        assert_eq!(px(&out, 64, 2, 2), 0, "hors quad : noir");
+        assert_ne!(px(&out, 64, 30, 30), 0, "vidéo visible dans le quad");
+    }
+
+    #[test]
     fn buffer_shorter_than_frame_never_panics() {
         let state = state_with(&[Command::SetTestPattern {
             pattern: Some(toolbox_core::TestPattern::Grid),
         }]);
         let mut out = vec![0u32; 10]; // bien plus court que 64×64
-        render_frame(&state, 64, 64, &mut out);
+        render_frame(&state, None, 64, 64, &mut out);
     }
 }

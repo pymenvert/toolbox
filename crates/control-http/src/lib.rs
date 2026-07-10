@@ -37,8 +37,8 @@ use tracing::{info, warn};
 use toolbox_core::media::validate_upload_name;
 use toolbox_core::state::Event;
 use toolbox_core::{
-    BusHandle, Command, CoreError, LogBuffer, MappingStore, MediaInfo, MediaLibrary, PresetStore,
-    Source,
+    BusHandle, Command, CoreError, LogBuffer, MappingStore, MediaInfo, MediaLibrary, MonitorInfo,
+    OutputSettings, PresetStore, Source,
 };
 use toolbox_engine::PlaybackPosition;
 
@@ -65,6 +65,28 @@ pub struct HttpConfig {
     pub version: String,
 }
 
+/// Contrôle de la fenêtre de sortie : écrans détectés (publiés par la
+/// fenêtre) et réglages appliqués à chaud (écran cible, plein écran).
+/// Sans module de rendu, la liste reste vide et les réglages sont inertes.
+#[derive(Clone)]
+pub struct OutputControl {
+    pub monitors: watch::Receiver<Vec<MonitorInfo>>,
+    pub settings: std::sync::Arc<watch::Sender<OutputSettings>>,
+}
+
+impl OutputControl {
+    /// Contrôle inerte (module de rendu absent) : aucun écran, réglages sans
+    /// destinataire. Utilisé aussi par les tests.
+    pub fn disconnected() -> Self {
+        let (_, monitors) = watch::channel(Vec::new());
+        let (settings, _) = watch::channel(OutputSettings::default());
+        Self {
+            monitors,
+            settings: std::sync::Arc::new(settings),
+        }
+    }
+}
+
 /// Dépendances partagées par tous les handlers.
 #[derive(Clone)]
 pub struct AppState {
@@ -77,6 +99,7 @@ pub struct AppState {
     /// Signal d'arrêt : les WebSockets ouverts se ferment dessus, sinon le
     /// graceful shutdown d'axum attendrait indéfiniment une UI affichée.
     shutdown: watch::Receiver<bool>,
+    output: OutputControl,
     started_at: Instant,
     node_name: String,
     version: String,
@@ -92,6 +115,7 @@ impl AppState {
         logs: LogBuffer,
         position: watch::Receiver<PlaybackPosition>,
         shutdown: watch::Receiver<bool>,
+        output: OutputControl,
         node_name: String,
         version: String,
     ) -> Self {
@@ -103,6 +127,7 @@ impl AppState {
             logs,
             position,
             shutdown,
+            output,
             started_at: Instant::now(),
             node_name,
             version,
@@ -159,6 +184,8 @@ pub fn router(app: AppState) -> Router {
         .route("/api/media-rename", post(media_rename))
         .route("/api/logs", get(logs_snapshot))
         .route("/api/system", get(system_stats))
+        .route("/api/outputs", get(outputs_get))
+        .route("/api/output", post(output_set))
         .route("/ws", get(ws_events_upgrade))
         .route("/ws/logs", get(ws_logs_upgrade))
         .with_state(app)
@@ -364,6 +391,37 @@ async fn logs_snapshot(State(app): State<AppState>) -> Json<Vec<toolbox_core::Lo
 
 async fn system_stats(State(app): State<AppState>) -> Json<monitor::SystemStats> {
     Json(monitor::collect(app.started_at))
+}
+
+/// Écrans détectés + réglages courants de la fenêtre de sortie.
+async fn outputs_get(State(app): State<AppState>) -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "monitors": *app.output.monitors.borrow(),
+        "settings": *app.output.settings.borrow(),
+    }))
+}
+
+/// Applique des réglages de sortie à chaud (écran cible, plein écran).
+/// L'index d'écran est validé contre la liste détectée.
+async fn output_set(
+    State(app): State<AppState>,
+    Json(settings): Json<OutputSettings>,
+) -> Result<StatusCode, ApiError> {
+    let monitors = app.output.monitors.borrow().len();
+    if monitors > 0 && settings.monitor >= monitors {
+        return Err(CoreError::InvalidCommand(format!(
+            "écran {} inconnu ({} détecté(s))",
+            settings.monitor, monitors
+        ))
+        .into());
+    }
+    app.output.settings.send_replace(settings);
+    info!(
+        ecran = settings.monitor,
+        plein_ecran = settings.fullscreen,
+        "réglages de sortie appliqués via l'API"
+    );
+    Ok(StatusCode::NO_CONTENT)
 }
 
 // ---------------------------------------------------------------------------
@@ -579,6 +637,7 @@ mod tests {
             logs,
             position_rx,
             shutdown_rx,
+            OutputControl::disconnected(),
             "test-node".into(),
             "0.0.0-test".into(),
         );
@@ -756,6 +815,7 @@ mod tests {
             logs,
             prx,
             srx,
+            OutputControl::disconnected(),
             "t".into(),
             "0".into(),
         );
@@ -913,6 +973,104 @@ mod tests {
         assert!(json["os"].is_string());
     }
 
+    /// L'API de sortie liste les écrans publiés par la fenêtre et applique
+    /// les réglages via le canal watch (index validé contre la liste).
+    #[tokio::test]
+    async fn output_api_lists_monitors_and_applies_settings() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let presets = PresetStore::open(dir.path().join("presets")).expect("presets");
+        let mapping_presets =
+            MappingStore::open(dir.path().join("presets").join("mapping")).expect("mappings");
+        let media = MediaLibrary::open(dir.path().join("media"), 1024).expect("media");
+        let logs = LogBuffer::new(16);
+        let bus = Bus::new(16, 16);
+        let handle = bus.handle();
+        tokio::spawn(bus.run());
+        let (_ptx, prx) = watch::channel(PlaybackPosition::default());
+        let (_stx, srx) = watch::channel(false);
+        // Deux écrans « publiés par la fenêtre ».
+        let (_monitors_tx, monitors_rx) = watch::channel(vec![
+            MonitorInfo {
+                index: 0,
+                name: "principal".into(),
+                width: 2560,
+                height: 1600,
+            },
+            MonitorInfo {
+                index: 1,
+                name: "VP".into(),
+                width: 1920,
+                height: 1080,
+            },
+        ]);
+        let (settings_tx, mut settings_rx) = watch::channel(OutputSettings::default());
+        let output = OutputControl {
+            monitors: monitors_rx,
+            settings: std::sync::Arc::new(settings_tx),
+        };
+        let app = AppState::new(
+            handle,
+            presets,
+            mapping_presets,
+            media,
+            logs,
+            prx,
+            srx,
+            output,
+            "t".into(),
+            "0".into(),
+        );
+        let router = router(app);
+
+        // GET : les deux écrans et les réglages par défaut.
+        let response = router
+            .clone()
+            .oneshot(
+                HttpRequest::get("/api/outputs")
+                    .body(Body::empty())
+                    .expect("req"),
+            )
+            .await
+            .expect("resp");
+        let json = body_json(response).await;
+        assert_eq!(json["monitors"].as_array().map(Vec::len), Some(2));
+        assert_eq!(json["monitors"][1]["name"], "VP");
+        assert_eq!(json["settings"]["monitor"], 0);
+
+        // POST valide : le canal reçoit les réglages.
+        let response = router
+            .clone()
+            .oneshot(
+                HttpRequest::post("/api/output")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"monitor":1,"fullscreen":true}"#))
+                    .expect("req"),
+            )
+            .await
+            .expect("resp");
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        assert!(settings_rx.has_changed().expect("canal vivant"));
+        let applied = *settings_rx.borrow_and_update();
+        assert_eq!(applied.monitor, 1);
+        assert!(applied.fullscreen);
+
+        // POST hors bornes : refusé, canal intact. (`router` reste vivant :
+        // il porte l'émetteur des réglages via AppState.)
+        let response = router
+            .clone()
+            .oneshot(
+                HttpRequest::post("/api/output")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"monitor":7,"fullscreen":false}"#))
+                    .expect("req"),
+            )
+            .await
+            .expect("resp");
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert!(!settings_rx.has_changed().expect("canal vivant"));
+        drop(router);
+    }
+
     /// L'arrêt du node ferme les WebSockets ouverts : sans cela, le graceful
     /// shutdown d'axum attendrait indéfiniment qu'une UI affichée se ferme
     /// d'elle-même (5 s d'« arrêt forcé » à chaque extinction).
@@ -937,6 +1095,7 @@ mod tests {
             logs,
             prx,
             shutdown_rx.clone(),
+            OutputControl::disconnected(),
             "t".into(),
             "0".into(),
         );
