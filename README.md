@@ -8,15 +8,22 @@ Cibles : Raspberry Pi 4/5, Linux, Windows.
 > Cadrage complet (décisions, plan, architecture, recherches) : dossier
 > `Toolbox/docs/` du projet — ce repo ne contient que le code.
 
-## État — V1
+## État — v1.1.0
 
-La chaîne complète est fonctionnelle et testée (150+ tests, CI Linux +
+La chaîne complète est fonctionnelle et testée (160+ tests, CI Linux +
 Windows + check ARM64) : **lecture vidéo réelle** (GStreamer, boucle sans
-coupure), **fenêtre de sortie** avec warp/mires/couleur calculés par le
-**GPU** (wgpu/Vulkan, repli CPU automatique), sélection d'écran et plein
-écran depuis l'UI, compteur d'images/seconde, mappings enregistrés,
+coupure), **fenêtre de sortie** avec warp/mires/couleur/effets calculés par
+le **GPU** (wgpu/Vulkan, repli CPU automatique), sources externes (capture,
+RTSP/SRT/HTTP, NDI optionnel, images), sélection d'écran et plein écran
+depuis l'UI, mappings et presets enregistrés — **rechargeables en fondu**
+(coins, couleur, effets et volume glissent sans couper la lecture),
 démarrage automatique. Sans GStreamer sur la machine, un backend simulé
 prend le relais : l'UI, l'OSC et le MIDI restent démontrables partout.
+
+Côté exploitation : **retour d'état OSC** (les curseurs de Chataigne
+suivent le node), auto-découverte **OSCQuery + mDNS** (aucune IP à taper),
+**export diagnostic ZIP**, journal quotidien sur disque, supervision des
+services, arrêt propre `systemctl stop`, mot de passe optionnel de l'UI.
 
 📖 **[Manuel utilisateur](docs/manuel.html)** — démarrage rapide,
 calibrage pas à pas, référence OSC/MIDI/config, dépannage.
@@ -56,7 +63,11 @@ Une commande = un JSON, identique partout (REST, WebSocket, MIDI) avec un
 | Rotation / flip / crop | `set_rotation`, `set_flip`, `set_crop` | `/rotation 90` `/flip 1 0` `/crop …` |
 | Couleur (8 paramètres) | `{"cmd":"color_set","param":"gamma","value":1.2}` | `/color/gamma 1.2` |
 | Mires de test | `{"cmd":"set_test_pattern","pattern":"grid"}` | `/pattern grid` |
+| Effets (5 shaders) | `{"cmd":"effect_set","param":"pixelate","value":0.5}` | `/effect/pixelate 0.5` |
 | Presets | `preset_save` / `preset_load` | `/preset/save nom` |
+| Fondu vers un preset | `{"cmd":"preset_fade","name":"scene","seconds":2}` | `/preset/fade scene 2` |
+| Fondu de mapping | `{"cmd":"mapping_fade","name":"salon","seconds":2}` | `/mapping/fade salon 2` |
+| Synchro multi-node | `sync_arm` puis `sync_start_at` | `/sync/arm` `/sync/startAt` |
 
 Détails : table complète dans `crates/core/src/command.rs` (contrat figé par
 tests) ; événements temps réel sur `GET /ws`.
