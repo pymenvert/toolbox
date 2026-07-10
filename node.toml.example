@@ -36,9 +36,10 @@ shaders = "shaders"
 logs = "logs"
 
 [output]
-# Fenêtre de sortie : affiche les mires de test (onglet Mapping) déformées en
-# direct par le mapping — le calibrage projecteur avant même le moteur vidéo.
-# Sans mire sélectionnée, la sortie est noire. F11 : plein écran, Échap : le quitte.
+# Fenêtre de sortie : mires de test et vidéo déformées en direct par le
+# mapping. Sans mire ni lecture, la sortie est noire. F11 : plein écran,
+# Échap : le quitte. NB : l'écran et le plein écran choisis dans l'UI web
+# sont persistés dans sortie.json et priment sur ces valeurs au démarrage.
 enabled = true
 monitor = 0        # index de l'écran cible ; la liste détectée est dans les logs
 fullscreen = false # true = plein écran sans bordure sur l'écran cible

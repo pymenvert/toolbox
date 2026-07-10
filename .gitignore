@@ -3,6 +3,8 @@ Cargo.lock.orig
 tools/bench/media/
 tools/bench/results/
 node.toml
+# Réglages de sortie persistés par le node (écran/plein écran choisis dans l'UI).
+sortie.json
 /media/
 /presets/
 /logs/

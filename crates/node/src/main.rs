@@ -119,11 +119,28 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
     // réglages à chaud (API web → fenêtre, initialisés depuis [output]) et
     // écrans détectés (fenêtre → API web).
     let (video_tx, video_rx) = watch::channel::<Option<toolbox_engine::VideoFrame>>(None);
-    let (output_settings_tx, output_settings_rx) = watch::channel(OutputSettings {
+    // Réglages de sortie : les changements faits dans l'UI sont persistés
+    // dans sortie.json (à côté de node.toml) et repris au démarrage —
+    // sinon défauts de la section [output].
+    let output_settings_path = std::path::PathBuf::from("sortie.json");
+    let initial_output = OutputSettings::load(&output_settings_path).unwrap_or(OutputSettings {
         monitor: config.output.monitor,
         fullscreen: config.output.fullscreen,
     });
+    let (output_settings_tx, output_settings_rx) = watch::channel(initial_output);
     let output_settings_tx = std::sync::Arc::new(output_settings_tx);
+    {
+        let mut changes = output_settings_rx.clone();
+        let path = output_settings_path.clone();
+        tokio::spawn(async move {
+            while changes.changed().await.is_ok() {
+                let settings = *changes.borrow_and_update();
+                if let Err(err) = settings.save(&path) {
+                    warn!(%err, "réglages de sortie non persistés");
+                }
+            }
+        });
+    }
     let (monitors_tx, monitors_rx) = watch::channel(Vec::new());
     let (fps_tx, fps_rx) = watch::channel(0.0f32);
 

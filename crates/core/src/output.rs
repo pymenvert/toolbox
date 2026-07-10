@@ -29,9 +29,53 @@ pub struct OutputSettings {
     pub fullscreen: bool,
 }
 
+impl OutputSettings {
+    /// Relit les réglages persistés (`sortie.json` à côté de `node.toml`).
+    /// `None` si le fichier est absent ou illisible — l'appelant retombe
+    /// alors sur `[output]` de la config.
+    pub fn load(path: &std::path::Path) -> Option<Self> {
+        let bytes = std::fs::read(path).ok()?;
+        serde_json::from_slice(&bytes).ok()
+    }
+
+    /// Persiste les réglages (écriture atomique : un crash ne corrompt pas
+    /// le fichier existant). Les changements faits dans l'UI web survivent
+    /// ainsi au redémarrage du node.
+    pub fn save(&self, path: &std::path::Path) -> Result<(), crate::CoreError> {
+        let json = serde_json::to_vec_pretty(self)?;
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, &json)
+            .map_err(|e| crate::CoreError::io(tmp.display().to_string(), e))?;
+        std::fs::rename(&tmp, path).map_err(|e| crate::CoreError::io(path.display().to_string(), e))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn settings_persist_and_survive_corruption() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("sortie.json");
+
+        // Absent : rien à charger.
+        assert_eq!(OutputSettings::load(&path), None);
+
+        // Aller-retour.
+        let settings = OutputSettings {
+            monitor: 1,
+            fullscreen: true,
+        };
+        settings.save(&path).expect("save");
+        assert_eq!(OutputSettings::load(&path), Some(settings));
+        // Pas de fichier temporaire restant.
+        assert!(!path.with_extension("json.tmp").exists());
+
+        // Fichier corrompu : ignoré proprement (retour aux défauts config).
+        std::fs::write(&path, b"{pas du json").expect("corrupt");
+        assert_eq!(OutputSettings::load(&path), None);
+    }
 
     /// Formats JSON exposés par l'API `/api/outputs` : figés par test.
     #[test]
