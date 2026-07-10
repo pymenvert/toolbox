@@ -15,7 +15,9 @@ toolbox-core = { path = "../core" }
 toolbox-engine = { path = "../engine" }
 tokio = { workspace = true }
 tracing = { workspace = true }
-gstreamer = { version = "0.24", optional = true }
+# v1_18 : INSTANT_RATE_CHANGE (vitesse sans coupure, pour la synchro) —
+# exige GStreamer ≥ 1.18 au runtime (pack Windows 1.26, Pi bookworm 1.22).
+gstreamer = { version = "0.24", optional = true, features = ["v1_18"] }
 gstreamer-app = { version = "0.24", optional = true }
 gstreamer-video = { version = "0.24", optional = true }
 
