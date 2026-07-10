@@ -5,6 +5,16 @@
 
 ## [Non publié]
 
+- **Onglet « Fonctions »** (début de la V2) : un interrupteur par fonction
+  du node — lecteur vidéo, OSC, OSCQuery, retour d'état, MIDI, parc mDNS,
+  fondus, aperçu. Désactivée = la fonction est **réellement arrêtée** à
+  chaud (socket fermée, port MIDI relâché, pipeline vidéo libéré, annonce
+  réseau retirée) : zéro ressource consommée. Réactivée = redémarrage
+  immédiat, sans relancer le node. Choix mémorisés dans `fonctions.json`
+  (priment sur `[modules]` au démarrage). API `GET/POST /api/features`.
+  La fenêtre de sortie s'applique au prochain démarrage (mise en sommeil
+  à chaud dans un prochain lot) ; l'UI web reste non désactivable depuis
+  elle-même.
 - **Téléphone : la barre d'onglets réapparaît**. Sur écran étroit, elle
   était écrasée à la hauteur de sa barre de défilement (onglets rognés,
   intapables) — revue mobile complète en 375 px au passage : aucune autre

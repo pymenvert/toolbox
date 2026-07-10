@@ -27,39 +27,66 @@ pub struct FleetNode {
     pub soi_meme: bool,
 }
 
+/// Poignée du service : l'arrêt éteint le daemon mDNS — les annonces sont
+/// retirées du réseau et le fil de découverte se termine (zéro ressource).
+pub struct FleetHandle {
+    daemon: ServiceDaemon,
+}
+
+impl FleetHandle {
+    pub fn arreter(self) {
+        if let Err(err) = self.daemon.shutdown() {
+            warn!(%err, "arrêt mDNS incomplet");
+        }
+        info!("découverte réseau retirée (mDNS éteint)");
+    }
+}
+
 /// Annonce ce node et alimente `nodes` avec le parc découvert (JSON prêt
 /// pour `/api/fleet`). Toute erreur est tracée : le node fonctionne sans
-/// mDNS (réseau filtré…).
+/// mDNS (réseau filtré…) — `None` si le service n'a pas pu démarrer.
 pub fn spawn(
     node_name: String,
     http_port: u16,
     oscquery_port: Option<u16>,
     version: String,
     nodes: watch::Sender<serde_json::Value>,
-) {
+) -> Option<FleetHandle> {
+    let daemon = match ServiceDaemon::new() {
+        Ok(daemon) => daemon,
+        Err(err) => {
+            warn!(%err, "mDNS indisponible — pas de découverte réseau");
+            return None;
+        }
+    };
+    let daemon_thread = daemon.clone();
     let thread = std::thread::Builder::new()
         .name("toolbox-fleet".into())
-        .spawn(move || run(node_name, http_port, oscquery_port, version, &nodes));
+        .spawn(move || {
+            run(
+                &daemon_thread,
+                node_name,
+                http_port,
+                oscquery_port,
+                version,
+                &nodes,
+            )
+        });
     if let Err(err) = thread {
         warn!(%err, "découverte réseau non démarrée");
+        return None;
     }
+    Some(FleetHandle { daemon })
 }
 
 fn run(
+    daemon: &ServiceDaemon,
     node_name: String,
     http_port: u16,
     oscquery_port: Option<u16>,
     version: String,
     nodes: &watch::Sender<serde_json::Value>,
 ) {
-    let daemon = match ServiceDaemon::new() {
-        Ok(daemon) => daemon,
-        Err(err) => {
-            warn!(%err, "mDNS indisponible — pas de découverte réseau");
-            return;
-        }
-    };
-
     // Annonce de ce node (l'IP est résolue automatiquement).
     let instance = sanitize_instance(&node_name);
     let host = format!("{instance}.local.");
@@ -152,6 +179,8 @@ fn run(
             _ => {}
         }
     }
+    // Service coupé : liste vidée pour l'UI (sinon elle montrerait un parc figé).
+    let _ = nodes.send(serde_json::Value::Array(Vec::new()));
     info!("découverte réseau arrêtée");
 }
 

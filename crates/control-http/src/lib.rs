@@ -39,8 +39,8 @@ use tracing::{info, warn};
 use toolbox_core::media::validate_upload_name;
 use toolbox_core::state::Event;
 use toolbox_core::{
-    BusHandle, Command, CoreError, LogBuffer, MappingStore, MediaInfo, MediaLibrary, MonitorInfo,
-    OutputSettings, PresetStore, Source,
+    BusHandle, Command, CoreError, FeatureFlags, LogBuffer, MappingStore, MediaInfo, MediaLibrary,
+    MonitorInfo, OutputSettings, PresetStore, Source,
 };
 use toolbox_engine::PlaybackPosition;
 
@@ -124,6 +124,11 @@ pub struct AppState {
     /// et les requêtes concurrentes attendent le même rendu au lieu d'en
     /// lancer chacune un (important sur Pi).
     preview: std::sync::Arc<tokio::sync::Mutex<PreviewCache>>,
+    /// Interrupteurs de fonctions (onglet « Fonctions ») : lecture pour
+    /// l'état effectif, écriture pour les bascules — le contrôleur du node
+    /// observe le même canal.
+    features: watch::Receiver<FeatureFlags>,
+    features_tx: std::sync::Arc<watch::Sender<FeatureFlags>>,
 }
 
 impl AppState {
@@ -141,6 +146,7 @@ impl AppState {
         node_name: String,
         version: String,
     ) -> Self {
+        let (features_tx, features_rx) = watch::channel(FeatureFlags::default());
         Self {
             bus,
             presets,
@@ -156,7 +162,25 @@ impl AppState {
             node_name,
             version,
             preview: std::sync::Arc::new(tokio::sync::Mutex::new(PreviewCache::default())),
+            // Canal autonome par défaut (tests, assemblages partiels) : le
+            // binaire branche le vrai canal — partagé avec le contrôleur de
+            // services — via `with_features`.
+            features: features_rx,
+            features_tx: std::sync::Arc::new(features_tx),
         }
+    }
+
+    /// Branche les interrupteurs de fonctions du node (canal partagé avec
+    /// le contrôleur de services du binaire).
+    #[must_use]
+    pub fn with_features(
+        mut self,
+        tx: std::sync::Arc<watch::Sender<FeatureFlags>>,
+        rx: watch::Receiver<FeatureFlags>,
+    ) -> Self {
+        self.features = rx;
+        self.features_tx = tx;
+        self
     }
 
     /// Active le mot de passe HTTP Basic (tout identifiant, ce mot de passe).
@@ -229,6 +253,7 @@ pub fn router(app: AppState) -> Router {
         .route("/api/system/shutdown", post(system_shutdown))
         .route("/api/preview.png", get(preview_png))
         .route("/api/diagnostic.zip", get(diagnostic_zip))
+        .route("/api/features", get(features_get).post(features_set))
         .route("/ws", get(ws_events_upgrade))
         .route("/ws/logs", get(ws_logs_upgrade))
         .layer(axum::middleware::from_fn_with_state(
@@ -576,6 +601,14 @@ async fn preview_png(
     State(app): State<AppState>,
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> Response {
+    // Fonction coupée : pas de rendu du tout (zéro ressource), 404 propre.
+    if !app.features.borrow().preview {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "aperçu désactivé (onglet Fonctions)" })),
+        )
+            .into_response();
+    }
     // 1920 max : le clic sur l'aperçu sert de snapshot pleine résolution.
     let width: u32 = params
         .get("w")
@@ -717,6 +750,21 @@ async fn diagnostic_zip(State(app): State<AppState>) -> Result<Response, ApiErro
         zip.finish(),
     )
         .into_response())
+}
+
+/// Interrupteurs de fonctions : état effectif courant.
+async fn features_get(State(app): State<AppState>) -> Json<FeatureFlags> {
+    Json(*app.features.borrow())
+}
+
+/// Bascule les interrupteurs : le contrôleur du node arrête/démarre les
+/// services correspondants À CHAUD, et le choix est persisté
+/// (fonctions.json). La fenêtre de sortie s'applique au prochain démarrage
+/// tant que sa mise en sommeil à chaud n'est pas livrée.
+async fn features_set(State(app): State<AppState>, Json(flags): Json<FeatureFlags>) -> StatusCode {
+    app.features_tx.send_replace(flags);
+    info!(?flags, "interrupteurs de fonctions appliqués via l'API");
+    StatusCode::NO_CONTENT
 }
 
 /// Écrans détectés + réglages courants de la fenêtre de sortie.

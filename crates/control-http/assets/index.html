@@ -254,6 +254,7 @@
   <a data-page="media"><span class="ic">&#9636;</span><span>M&eacute;dias</span></a>
   <a data-page="presets"><span class="ic">&#9733;</span><span>Presets</span></a>
   <a data-page="logs"><span class="ic">&#9776;</span><span>Logs</span></a>
+  <a data-page="features"><span class="ic">&#9211;</span><span>Fonctions</span></a>
   <a data-page="system"><span class="ic">&#9881;</span><span>Syst&egrave;me</span></a>
   <div class="spacer"></div>
   <div class="nodecard" id="nodecard">Toolbox</div>
@@ -500,6 +501,22 @@
     <div id="logview"></div>
   </section>
 
+  <!-- ================= FONCTIONS ================= -->
+  <section class="page" id="page-features">
+    <div class="card" style="max-width:720px">
+      <h3>Fonctions du node</h3>
+      <div class="hint" style="margin-bottom:10px">Une fonction d&eacute;sactiv&eacute;e est
+      <b>r&eacute;ellement arr&ecirc;t&eacute;e</b> (socket ferm&eacute;e, port lib&eacute;r&eacute;, pipeline
+      vid&eacute;o rel&acirc;ch&eacute;) : elle ne consomme plus rien. R&eacute;activ&eacute;e, elle
+      red&eacute;marre imm&eacute;diatement, sans relancer le node. Les choix sont
+      m&eacute;moris&eacute;s (<code>fonctions.json</code>) et survivent au red&eacute;marrage.</div>
+      <ul class="plist" id="featureList"><li class="empty" style="border:none">Chargement&hellip;</li></ul>
+      <div class="hint">L'interface web elle-m&ecirc;me n'est pas d&eacute;sactivable ici
+      (on ne se coupe pas la main qui tient l'interrupteur) &mdash;
+      <code>node.toml</code> le permet.</div>
+    </div>
+  </section>
+
   <!-- ================= SYSTEME ================= -->
   <section class="page" id="page-system">
     <div class="grid tiles" id="sysGrid"></div>
@@ -699,7 +716,7 @@ function onEvent(m) {
 
 /* ===================== Navigation ===================== */
 const pageTitles = { dashboard: "Dashboard", mapping: "Mapping", color: "Couleur",
-  media: "Médias", presets: "Presets", logs: "Logs", system: "Système" };
+  media: "Médias", presets: "Presets", logs: "Logs", features: "Fonctions", system: "Système" };
 $$("nav a").forEach(a => a.addEventListener("click", () => {
   $$("nav a").forEach(x => x.classList.remove("active"));
   a.classList.add("active");
@@ -707,6 +724,7 @@ $$("nav a").forEach(a => a.addEventListener("click", () => {
   $$(".page").forEach(s => s.classList.toggle("visible", s.id === "page-" + p));
   $("#pagetitle").textContent = pageTitles[p];
   if (p === "mapping") sizeStage();
+  if (p === "features") loadFeatures();
 }));
 
 /* Curseurs generiques : throttle + valeur finale + pas de recalage pendant le drag */
@@ -1380,6 +1398,55 @@ $("#presetSave").addEventListener("click", () => {
   $("#presetName").value = "";
 });
 $("#presetName").addEventListener("keydown", e => { if (e.key === "Enter") $("#presetSave").click(); });
+
+/* ===================== Fonctions (interrupteurs) ===================== */
+const featureDefs = [
+  ["player", "Lecteur vidéo", "Décodage et lecture des médias. Coupé : écran noir, pipeline vidéo libéré."],
+  ["output", "Fenêtre de sortie", "La projection elle-même. Bascule appliquée au prochain démarrage du node (mise en sommeil à chaud : bientôt)."],
+  ["osc", "Contrôle OSC", "Réception des commandes OSC (Chataigne…). Coupé : la socket UDP est fermée."],
+  ["oscquery", "Auto-découverte OSCQuery", "Le serveur qui décrit les paramètres à Chataigne (port 8081) et son annonce réseau."],
+  ["osc_feedback", "Retour d'état OSC", "Renvoi des changements vers l'hôte configuré ([osc] feedback). Sans cible configurée, l'interrupteur est sans effet."],
+  ["midi", "Contrôle MIDI", "Port MIDI et bindings de node.toml. Coupé : le port est rendu au système."],
+  ["fleet", "Parc réseau (mDNS)", "Annonce et découverte des autres nodes (page Système → Réseau). Coupé : le node disparaît du réseau."],
+  ["fader", "Fondus", "Les transitions douces entre presets et mappings. Coupé : « Charger » reste disponible, « Fondu » ne fait rien."],
+  ["preview", "Aperçu de la sortie", "L'image du Dashboard (rendu CPU à la demande). Coupé : aucun rendu d'aperçu, jamais."],
+];
+let featureFlags = null;
+async function loadFeatures() {
+  try { featureFlags = await api("/api/features"); } catch (e) { return; }
+  renderFeatures();
+}
+function renderFeatures() {
+  const ul = $("#featureList");
+  ul.innerHTML = "";
+  featureDefs.forEach(([key, nom, desc]) => {
+    const li = document.createElement("li");
+    li.style.alignItems = "flex-start";
+    const lab = document.createElement("label");
+    lab.className = "chk";
+    lab.style.cssText = "flex:1;display:flex;gap:10px;align-items:flex-start;cursor:pointer";
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = !!featureFlags[key];
+    cb.style.marginTop = "3px";
+    cb.addEventListener("change", async () => {
+      featureFlags[key] = cb.checked;
+      try {
+        await api("/api/features", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(featureFlags) });
+        toast(nom + (cb.checked ? " activé" : " désactivé"));
+      } catch (e) { cb.checked = !cb.checked; featureFlags[key] = cb.checked; }
+    });
+    const txt = document.createElement("div");
+    const t1 = document.createElement("div"); t1.textContent = nom; t1.style.fontWeight = "600";
+    const t2 = document.createElement("div"); t2.textContent = desc;
+    t2.style.cssText = "font-size:12px;color:var(--muted);line-height:1.5";
+    txt.appendChild(t1); txt.appendChild(t2);
+    lab.appendChild(cb); lab.appendChild(txt);
+    li.appendChild(lab);
+    ul.appendChild(li);
+  });
+}
 
 /* ===================== Logs ===================== */
 const logview = $("#logview");

@@ -14,11 +14,12 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
 use toolbox_core::{
-    Bus, BusHandle, Command, LogBuffer, MappingStore, MediaLibrary, NodeConfig, OutputSettings,
+    Bus, Command, FeatureFlags, LogBuffer, MappingStore, MediaLibrary, NodeConfig, OutputSettings,
     PresetStore, Source,
 };
-use toolbox_engine::{MemoryBackend, PlaybackPosition, Player, PlayerBackend};
+use toolbox_engine::PlaybackPosition;
 
+mod bascules;
 mod fleet;
 mod journal;
 mod supervision;
@@ -151,22 +152,6 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let mut services: Vec<(&'static str, tokio::task::JoinHandle<()>)> = Vec::new();
 
-    // Fader : mène les fondus entre presets (`preset_fade`) en commandes
-    // interpolées sur le bus.
-    services.push((
-        "fader",
-        spawn_service(
-            "fader",
-            shutdown_rx.clone(),
-            toolbox_core::fader::run(
-                handle.clone(),
-                presets.clone(),
-                mapping_presets.clone(),
-                shutdown_rx.clone(),
-            ),
-        ),
-    ));
-
     // Canaux de la sortie vidéo : frames décodées (backend → fenêtre),
     // réglages à chaud (API web → fenêtre, initialisés depuis [output]) et
     // écrans détectés (fenêtre → API web).
@@ -196,58 +181,59 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
     let (monitors_tx, monitors_rx) = watch::channel(Vec::new());
     let (fps_tx, fps_rx) = watch::channel(0.0f32);
 
-    // Découverte réseau du parc (mDNS) : annonce + écoute, liste publiée
-    // pour /api/fleet. Sans réseau multicast, le node fonctionne sans.
+    // Parc mDNS : la liste publiée pour /api/fleet (le service lui-même est
+    // démarré/arrêté par le contrôleur de fonctions).
     let (fleet_tx, fleet_rx) = watch::channel(serde_json::Value::Array(Vec::new()));
-    fleet::spawn(
-        node_name.clone(),
-        config.ports.http,
-        // L'annonce OSCQuery (`_oscjson._tcp`) suit le module OSC.
-        config.modules.osc.then_some(config.ports.oscquery),
-        env!("CARGO_PKG_VERSION").to_string(),
-        fleet_tx,
-    );
 
-    // Player. Backend GStreamer si compilé et disponible (vidéo réelle dans
-    // la fenêtre de sortie), sinon backend mémoire : position, durée
-    // (simulée à 10 s), fin de média, boucles et playlist fonctionnent
-    // réellement — seule l'image manque.
-    let position_rx = if config.modules.player {
-        #[cfg(feature = "gstreamer")]
-        {
-            match toolbox_gst::GstBackend::new(video_tx) {
-                Ok(backend) => {
-                    info!("module player actif (backend GStreamer)");
-                    spawn_player(backend, &handle, &config, &shutdown_rx, &mut services)
-                }
-                Err(err) => {
-                    error!(%err, "GStreamer indisponible — repli sur le backend simulé");
-                    spawn_player(
-                        MemoryBackend::new(10.0, true),
-                        &handle,
-                        &config,
-                        &shutdown_rx,
-                        &mut services,
-                    )
+    // Position de lecture : canal STABLE — le player courant y est ponté par
+    // le contrôleur, l'UI garde le même récepteur à travers les bascules.
+    let (position_tx, position_rx) = watch::channel(PlaybackPosition::default());
+
+    // Interrupteurs de fonctions (onglet « Fonctions ») : fonctions.json
+    // prime, sinon défauts de la config ([modules]/[output]). Persistés à
+    // chaque bascule, comme sortie.json.
+    let features_path = std::path::PathBuf::from("fonctions.json");
+    let initial_features =
+        FeatureFlags::load(&features_path).unwrap_or_else(|| FeatureFlags::from_config(&config));
+    let (features_tx, features_rx) = watch::channel(initial_features);
+    let features_tx = std::sync::Arc::new(features_tx);
+    {
+        let mut changes = features_rx.clone();
+        tokio::spawn(async move {
+            while changes.changed().await.is_ok() {
+                let flags = *changes.borrow_and_update();
+                if let Err(err) = flags.save(&features_path) {
+                    warn!(%err, "interrupteurs de fonctions non persistés");
                 }
             }
-        }
-        #[cfg(not(feature = "gstreamer"))]
-        {
-            drop(video_tx); // pas de producteur de frames dans ce binaire
-            info!("module player actif (backend simulé — compiler avec `gstreamer` pour la vidéo)");
-            spawn_player(
-                MemoryBackend::new(10.0, true),
-                &handle,
-                &config,
-                &shutdown_rx,
-                &mut services,
-            )
-        }
-    } else {
-        drop(video_tx);
-        watch::channel(PlaybackPosition::default()).1
-    };
+        });
+    }
+
+    // Contrôleur : démarre/arrête à chaud chaque service selon les
+    // interrupteurs (OSC, OSCQuery, retour d'état, MIDI, parc, fondus,
+    // player). Une fonction coupée est réellement arrêtée.
+    services.push((
+        "bascules",
+        spawn_service(
+            "bascules",
+            shutdown_rx.clone(),
+            bascules::controleur(
+                bascules::Contexte {
+                    handle: handle.clone(),
+                    config: config.clone(),
+                    node_name: node_name.clone(),
+                    version: env!("CARGO_PKG_VERSION").to_string(),
+                    presets: presets.clone(),
+                    mapping_presets: mapping_presets.clone(),
+                    video_tx,
+                    position_tx: std::sync::Arc::new(position_tx),
+                    fleet_tx,
+                },
+                features_rx.clone(),
+                shutdown_rx.clone(),
+            ),
+        ),
+    ));
 
     // HTTP : REST + WebSocket + web UI + monitoring.
     if config.modules.http {
@@ -269,7 +255,8 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
             node_name.clone(),
             env!("CARGO_PKG_VERSION").to_string(),
         )
-        .with_password(config.security.password.clone());
+        .with_password(config.security.password.clone())
+        .with_features(features_tx.clone(), features_rx.clone());
         if config.security.password.is_some() {
             info!("interface web protégée par mot de passe ([security])");
         }
@@ -290,64 +277,12 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
         ));
     }
 
-    // OSC + OSCQuery (auto-découverte des paramètres pour Chataigne).
-    if config.modules.osc {
-        let osc_config = toolbox_control_osc::OscConfig {
-            bind: config.ports.bind.clone(),
-            port: config.ports.osc,
-        };
-        let osc_bus = handle.clone();
-        let shutdown = shutdown_rx.clone();
-        services.push((
-            "osc",
-            spawn_service("osc", shutdown_rx.clone(), async move {
-                if let Err(err) = toolbox_control_osc::serve(osc_config, osc_bus, shutdown).await {
-                    error!(%err, "le serveur OSC s'est arrêté en erreur");
-                }
-            }),
-        ));
-
-        // Retour d'état vers Chataigne (les curseurs suivent le node).
-        if let Some(target) = config.osc.feedback.clone() {
-            let feedback_bus = handle.clone();
-            let shutdown = shutdown_rx.clone();
-            services.push((
-                "osc-feedback",
-                spawn_service("osc-feedback", shutdown_rx.clone(), async move {
-                    if let Err(err) =
-                        toolbox_control_osc::feedback(target, feedback_bus, shutdown).await
-                    {
-                        error!(%err, "le retour d'état OSC s'est arrêté en erreur");
-                    }
-                }),
-            ));
-        }
-
-        let oscquery_state = toolbox_control_http::oscquery::OscQueryState {
-            bus: handle.clone(),
-            node_name: node_name.clone(),
-            osc_port: config.ports.osc,
-        };
-        let bind = config.ports.bind.clone();
-        let port = config.ports.oscquery;
-        let shutdown = shutdown_rx.clone();
-        services.push((
-            "oscquery",
-            spawn_service("oscquery", shutdown_rx.clone(), async move {
-                if let Err(err) =
-                    toolbox_control_http::oscquery::serve(bind, port, oscquery_state, shutdown)
-                        .await
-                {
-                    error!(%err, "le serveur OSCQuery s'est arrêté en erreur");
-                }
-            }),
-        ));
-    }
-
     // Fenêtre de sortie : mires et vidéo warpées en direct.
     // Thread dédié ; si l'environnement graphique manque, le node continue.
+    // (La bascule à chaud de la fenêtre arrive dans un lot dédié : ici,
+    // l'interrupteur « output » s'applique au démarrage.)
     #[cfg(feature = "render")]
-    let render_thread = if config.output.enabled {
+    let render_thread = if initial_features.output {
         Some(toolbox_render::spawn(
             toolbox_render::WindowConfig {
                 title: format!("Toolbox — sortie ({node_name})"),
@@ -373,30 +308,9 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
         drop(output_settings_rx);
         drop(monitors_tx);
         drop(fps_tx);
-        if config.output.enabled {
+        if initial_features.output {
             warn!("fenêtre de sortie demandée mais ce binaire est compilé sans (feature `render`)");
         }
-    }
-
-    // MIDI (optionnel à la compilation : dépend d'ALSA sous Linux).
-    #[cfg(feature = "midi")]
-    let _midi = if config.modules.midi {
-        match toolbox_control_midi::connect(&config.midi, handle.clone()) {
-            Ok(service) => {
-                info!(port = %service.port_name, "module MIDI actif");
-                Some(service)
-            }
-            Err(err) => {
-                error!(%err, "MIDI indisponible — le node continue sans");
-                None
-            }
-        }
-    } else {
-        None
-    };
-    #[cfg(not(feature = "midi"))]
-    if config.modules.midi {
-        warn!("MIDI demandé dans la config mais ce binaire est compilé sans (feature `midi`)");
     }
 
     // Mode kiosque (P1.9) : preset de démarrage + lecture automatique.
@@ -417,10 +331,10 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
 
     info!(
         http = config.modules.http,
-        osc = config.modules.osc,
-        midi = config.modules.midi,
-        player = config.modules.player,
-        "prêt — Ctrl-C pour arrêter"
+        osc = initial_features.osc,
+        midi = initial_features.midi,
+        player = initial_features.player,
+        "prêt — Ctrl-C pour arrêter (onglet Fonctions pour les bascules)"
     );
     attendre_arret().await?;
     info!("arrêt demandé");
@@ -462,8 +376,6 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
     Ok(())
 }
 
-/// Monte un player (backend quelconque) sur le bus dans une tâche dédiée et
-/// retourne le canal de position de lecture.
 /// Attend une demande d'arrêt : Ctrl-C partout, plus SIGTERM sous Unix —
 /// c'est le signal qu'envoie systemd à `systemctl stop` ; sans lui, le
 /// service serait tué au timeout sans arrêt propre.
@@ -482,26 +394,4 @@ async fn attendre_arret() -> std::io::Result<()> {
     }
     #[cfg(not(unix))]
     tokio::signal::ctrl_c().await
-}
-
-fn spawn_player<B: PlayerBackend + 'static>(
-    backend: B,
-    handle: &BusHandle,
-    config: &NodeConfig,
-    shutdown_rx: &watch::Receiver<bool>,
-    services: &mut Vec<(&'static str, tokio::task::JoinHandle<()>)>,
-) -> watch::Receiver<PlaybackPosition> {
-    let player = Player::new(backend, handle.clone(), &config.paths.media);
-    let rx = player.position_watch();
-    let mut shutdown = shutdown_rx.clone();
-    services.push((
-        "player",
-        spawn_service("player", shutdown_rx.clone(), async move {
-            tokio::select! {
-                () = player.run() => {},
-                _ = shutdown.changed() => {},
-            }
-        }),
-    ));
-    rx
 }

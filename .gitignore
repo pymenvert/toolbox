@@ -5,6 +5,8 @@ tools/bench/results/
 node.toml
 # Réglages de sortie persistés par le node (écran/plein écran choisis dans l'UI).
 sortie.json
+# Interrupteurs de fonctions persistés par le node (onglet Fonctions).
+fonctions.json
 /media/
 /presets/
 /logs/

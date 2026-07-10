@@ -14,6 +14,11 @@ width = 1920
 height = 1080
 
 [modules]
+# NB : ces valeurs sont les défauts du PREMIER démarrage. Ensuite, l'onglet
+# « Fonctions » de l'UI web permet d'activer/désactiver chaque fonction à
+# chaud (réellement arrêtée = zéro ressource) ; les bascules sont mémorisées
+# dans fonctions.json et priment sur cette section. Seul `http` reste
+# uniquement pilotée ici.
 player = true      # lecture : GStreamer si le binaire l'embarque (feature `gstreamer`
                    # + runtime installé, voir deploy/README.md), sinon backend simulé
 http = true        # web UI + API REST/WebSocket
