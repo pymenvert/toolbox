@@ -59,12 +59,12 @@ Le binaire standard joue les médias « en silence » (backend simulé) et la
 fenêtre de sortie n'affiche que les mires. Pour la vraie vidéo, il faut le
 binaire compilé avec la feature `gstreamer` **et** le runtime GStreamer :
 
-- **Windows** : artefact CI `toolbox-node-windows-x64-gstreamer` (job
-  expérimental) ou compilation locale. Installez le runtime officiel MSVC
-  64 bits depuis https://gstreamer.freedesktop.org/download/ (installeur
-  `gstreamer-1.0-msvc-x86_64-*.msi`, mode « Complete »), puis ajoutez
-  `C:\gstreamer\1.0\msvc_x86_64\bin` au PATH (l'installeur propose de le
-  faire). Pour compiler : installez aussi le paquet *development*.
+- **Windows** : l'artefact CI `toolbox-node-windows-x64-gstreamer` est un
+  **pack autonome** — dézippez et lancez `toolbox-node.exe` (ou
+  `run-portable.bat`), les DLL et plugins GStreamer sont inclus, rien à
+  installer. Pour compiler localement en revanche : runtime + paquet
+  *development* MSVC 64 bits depuis
+  https://gstreamer.freedesktop.org/download/ et `pkg-config` dans le PATH.
 - **Ubuntu / Raspberry Pi OS** :
 
   ```bash

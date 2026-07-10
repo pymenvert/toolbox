@@ -30,10 +30,32 @@ pub struct GstBackend {
     uri: Option<String>,
 }
 
+/// Mode portable : si les plugins GStreamer sont livrés à côté de l'exe
+/// (`lib/gstreamer-1.0`, cas du pack Windows autonome), on les déclare AVANT
+/// `gst::init()` — aucune installation système requise. Une variable
+/// `GST_PLUGIN_PATH` déjà posée par l'utilisateur reste prioritaire.
+fn declare_bundled_plugins() {
+    if std::env::var_os("GST_PLUGIN_PATH").is_some() {
+        return;
+    }
+    let Some(exe_dir) = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(std::path::Path::to_path_buf))
+    else {
+        return;
+    };
+    let plugins = exe_dir.join("lib").join("gstreamer-1.0");
+    if plugins.is_dir() {
+        info!(dossier = %plugins.display(), "plugins GStreamer embarqués détectés");
+        std::env::set_var("GST_PLUGIN_PATH", &plugins);
+    }
+}
+
 impl GstBackend {
     /// Initialise GStreamer et construit le pipeline. Échoue proprement si
-    /// le runtime GStreamer n'est pas installé sur la machine.
+    /// le runtime GStreamer n'est ni installé ni livré à côté de l'exe.
     pub fn new(frames: watch::Sender<Option<VideoFrame>>) -> Result<Self, PlayerError> {
+        declare_bundled_plugins();
         gst::init().map_err(|e| PlayerError::Backend(format!("gstreamer absent : {e}")))?;
 
         // playbin3 (sélection auto des décodeurs, accélération matérielle

@@ -185,8 +185,10 @@ jobs:
           path: ${{ matrix.binary }}
           if-no-files-found: error
 
-  # EXPÉRIMENTAL (continue-on-error) : binaire Windows avec le backend vidéo.
-  # Exige le runtime GStreamer MSVC installé sur la machine de l'utilisateur.
+  # Binaire Windows avec le backend vidéo, en PACK AUTONOME : les DLL et
+  # plugins GStreamer sont livrés dans le zip à côté de l'exe — dézipper et
+  # double-cliquer, aucune installation requise (continue-on-error : la
+  # chaîne chocolatey reste plus fragile que le reste de la CI).
   build-windows-gstreamer:
     needs: [check]
     runs-on: windows-latest
@@ -219,10 +221,19 @@ jobs:
           pkg-config --version 2>&1 | tee -a gstwin.log
           pkg-config --modversion gstreamer-1.0 2>&1 | tee -a gstwin.log
           cargo build --release -p toolbox-node --features gstreamer 2>&1 | tee -a gstwin.log
+          # Pack autonome : exe + DLL GStreamer + plugins (détectés par le
+          # node via lib/gstreamer-1.0 à côté de l'exe).
+          mkdir -p dist/lib
+          cp target/release/toolbox-node.exe dist/
+          cp deploy/run-portable.bat dist/
+          cp "$GST"/bin/*.dll dist/
+          cp -r "$GST"/lib/gstreamer-1.0 dist/lib/
+          rm -f dist/lib/gstreamer-1.0/*.pdb 2>/dev/null || true
+          du -sh dist 2>&1 | tee -a gstwin.log
       - uses: actions/upload-artifact@v4
         with:
           name: toolbox-node-windows-x64-gstreamer
-          path: target/release/toolbox-node.exe
+          path: dist
           if-no-files-found: error
       - name: Publier les logs en cas d'échec
         if: failure()

@@ -43,8 +43,10 @@ Propriétaire : Pym.
   feature `gstreamer` du node (HORS défaut : exige les libs système à la
   compilation, le runtime sur la machine — voir deploy/README.md §6). Sans
   runtime, repli automatique sur MemoryBackend. Vérifié par le job CI
-  `check-gstreamer` (Ubuntu) ; artefact Windows expérimental
-  `toolbox-node-windows-x64-gstreamer` (continue-on-error).
+  `check-gstreamer` (Ubuntu) ; artefact Windows
+  `toolbox-node-windows-x64-gstreamer` = pack AUTONOME (DLL + plugins
+  livrés à côté de l'exe, détectés via `lib/gstreamer-1.0` et
+  `GST_PLUGIN_PATH` posé avant `gst::init`), job en continue-on-error.
 - `crates/control-http` : axum 0.8 (REST + WebSocket `/ws` et `/ws/logs` + UI
   embarquée + monitoring `/proc`).
 - `crates/control-osc` : rosc/UDP.
