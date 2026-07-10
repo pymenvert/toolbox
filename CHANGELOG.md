@@ -3,7 +3,10 @@
 Évolutions notables du node Toolbox. Format inspiré de
 [Keep a Changelog](https://keepachangelog.com/fr/), versionnage SemVer.
 
-## [Non publié]
+## [1.1.0] — 2026-07-10
+
+Améliorations continues de l'après-midi/soirée : scènes en fondu,
+exploitation renforcée, intégration Chataigne complète.
 
 - **Arrêt propre sur SIGTERM** (Linux/Pi) : `systemctl stop` déclenche le
   même arrêt propre que Ctrl-C (services signalés, attente bornée) au lieu

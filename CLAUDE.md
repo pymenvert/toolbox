@@ -83,7 +83,7 @@ Sous Windows, aucune dépendance système (midir utilise WinMM).
 
 ## État (juillet 2026)
 
-- Workspace vert : build, 99 tests, clippy `-D warnings`, fmt — local
+- Workspace vert : build, 160 tests, clippy `-D warnings`, fmt — local
   (Windows) et CI.
 - Corrections post-v1 : dev-dependencies de test manquantes dans control-http
   (`http-body-util`, `tower`), tolérance f32 du test de crop,
@@ -105,11 +105,27 @@ Sous Windows, aucune dépendance système (midir utilise WinMM).
   vrai multi-machine. Reste V2 : mesh warp/edge blending, LUT, RTSP out,
   NDI out, upload multi-nodes, OTA, mot de passe UI, QR code, watch
   folder shaders.
-- Backend vidéo réel (GStreamer) pas encore commencé — attend le bench sur Pi.
+- v1.1.0 (2026-07-10, session autonome du soir) : retour d'état OSC
+  (`[osc] feedback`, `control-osc::feedback` + `event_to_osc` miroir),
+  fondus `preset_fade`/`mapping_fade` (service `core::fader` — `plan()`
+  pur testé, ~30 pas/s smoothstep, ne touche JAMAIS média/transport),
+  export diagnostic ZIP (`/api/diagnostic.zip`, écrivain ZIP maison
+  `control-http::zipper`, zéro dépendance), supervision des services
+  (`node::supervision` — fin/panique tracée en ERROR), journal sur disque
+  (`node::journal`, tracing-appender quotidien, 14 jours gardés), annonce
+  mDNS `_oscjson._tcp` (Chataigne auto-découvre l'OSCQuery), arrêt propre
+  sur SIGTERM (systemd), adresses de fondu dans le namespace OSCQuery.
+  Aperçu Dashboard, mot de passe optionnel et médias auto-rafraîchis y
+  sont aussi (post-v1.0.0). La revue WebSocket est faite : Lagged→resync,
+  ping, arrêt propre — rien à corriger.
+- La chaîne vidéo Pi (DRM/KMS) et le bench GStreamer sur matériel réel
+  attendent le retour de Pym.
 
 ## Prochaines étapes
 
-1. Revue de robustesse : cas limites WebSocket, arrêt propre.
+1. Au retour de Pym : tests matériels (Pi, capture HDMI, Chataigne réel,
+   multi-machine, `systemctl stop`) — liste dans
+   `../RAPPORT_V1_2026-07-10.md`.
 2. Petites améliorations UX de l'UI signalées par des TODO éventuels.
-3. Les grosses suites (backend GStreamer, sync multi-device, séquenceur)
+3. Les grosses suites (chaîne vidéo Pi, sync multi-device, séquenceur)
    attendent le matériel et les retours de Pym — **ne pas les entamer**.
