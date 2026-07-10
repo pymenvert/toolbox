@@ -224,6 +224,13 @@ pub fn map_message(addr: &str, args: &[OscType]) -> Result<Command, MapError> {
                     .map(|value| Command::ColorSet { param, value })
                     .ok_or_else(|| bad("attendu : valeur (float)"));
             }
+            if let Some(rest) = other.strip_prefix("/effect/") {
+                let param =
+                    parse_effect_param(rest).ok_or_else(|| bad("effet inconnu"))?;
+                return float_arg(args, 0)
+                    .map(|value| Command::EffectSet { param, value })
+                    .ok_or_else(|| bad("attendu : intensité (float 0..1)"));
+            }
             Err(MapError::UnknownAddress(other.to_string()))
         }
     }
@@ -239,6 +246,18 @@ fn parse_color_param(name: &str) -> Option<ColorParam> {
         "gain_r" => Some(ColorParam::GainR),
         "gain_g" => Some(ColorParam::GainG),
         "gain_b" => Some(ColorParam::GainB),
+        _ => None,
+    }
+}
+
+fn parse_effect_param(name: &str) -> Option<toolbox_core::state::EffectParam> {
+    use toolbox_core::state::EffectParam;
+    match name {
+        "pixelate" => Some(EffectParam::Pixelate),
+        "posterize" => Some(EffectParam::Posterize),
+        "noise" => Some(EffectParam::Noise),
+        "sharpen" => Some(EffectParam::Sharpen),
+        "mirror" => Some(EffectParam::Mirror),
         _ => None,
     }
 }
@@ -543,6 +562,29 @@ mod tests {
         // Argument manquant : erreur propre, pas de panique.
         assert!(matches!(
             map_message("/mapping/save", &[]),
+            Err(MapError::BadArguments { .. })
+        ));
+    }
+
+    #[test]
+    fn effect_addresses_map() {
+        use toolbox_core::state::EffectParam;
+        assert_eq!(
+            map_message("/effect/pixelate", &[OscType::Float(0.5)]),
+            Ok(Command::EffectSet {
+                param: EffectParam::Pixelate,
+                value: 0.5
+            })
+        );
+        assert_eq!(
+            map_message("/effect/mirror", &[OscType::Int(1)]),
+            Ok(Command::EffectSet {
+                param: EffectParam::Mirror,
+                value: 1.0
+            })
+        );
+        assert!(matches!(
+            map_message("/effect/inconnu", &[OscType::Float(0.5)]),
             Err(MapError::BadArguments { .. })
         ));
     }

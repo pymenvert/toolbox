@@ -138,6 +138,7 @@ fn run_event_loop(config: WindowConfig, channels: OutputChannels) {
         fps,
         frames_since: 0,
         fps_window_start: std::time::Instant::now(),
+        started_at: std::time::Instant::now(),
         window: None,
         painter: None,
     };
@@ -213,6 +214,8 @@ struct OutputApp {
     /// Frames présentées depuis le début de la fenêtre de mesure courante.
     frames_since: u32,
     fps_window_start: std::time::Instant,
+    /// Origine du temps des effets animés (bruit).
+    started_at: std::time::Instant,
     window: Option<Arc<Window>>,
     painter: Option<Painter>,
 }
@@ -291,10 +294,11 @@ impl OutputApp {
         };
         let snapshot = self.state.borrow().clone();
         let video = self.video.borrow().clone();
+        let time = self.started_at.elapsed().as_secs_f32();
         // L'emprunt du peintre doit se terminer avant de compter la frame
         // (le compteur emprunte `self` à son tour).
         let presented = match painter {
-            Painter::Gpu(gpu) => gpu.render(&snapshot, video.as_ref(), w.get(), h.get()),
+            Painter::Gpu(gpu) => gpu.render(&snapshot, video.as_ref(), time, w.get(), h.get()),
             Painter::Cpu(surface) => {
                 if let Err(err) = surface.resize(w, h) {
                     warn!(%err, "surface de sortie non retaillée");
@@ -302,7 +306,14 @@ impl OutputApp {
                 }
                 match surface.buffer_mut() {
                     Ok(mut buffer) => {
-                        render_frame(&snapshot, video.as_ref(), w.get(), h.get(), &mut buffer);
+                        render_frame(
+                            &snapshot,
+                            video.as_ref(),
+                            time,
+                            w.get(),
+                            h.get(),
+                            &mut buffer,
+                        );
                         match buffer.present() {
                             Ok(()) => true,
                             Err(err) => {

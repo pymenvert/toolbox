@@ -16,7 +16,7 @@
 //! 3. sinon noir — un vidéoprojecteur de spectacle n'affiche rien par défaut.
 
 use toolbox_core::command::TestPattern;
-use toolbox_core::state::{NodeState, Transport};
+use toolbox_core::state::{EffectsState, NodeState, Transport};
 use toolbox_engine::{Mat3, RenderParams, VideoFrame};
 use tracing::warn;
 
@@ -34,6 +34,7 @@ enum Source<'a> {
 pub fn render_frame(
     state: &NodeState,
     video: Option<&VideoFrame>,
+    time: f32,
     width: u32,
     height: u32,
     out: &mut [u32],
@@ -64,16 +65,25 @@ pub fn render_frame(
     };
 
     let (w, h) = (width.max(1) as usize, height.max(1) as usize);
+    let effects = state.effects;
     for (i, px) in out.iter_mut().enumerate().take(w * h) {
         let (x, y) = (i % w, i / w);
         let u = (x as f64 + 0.5) / w as f64;
         let v = (y as f64 + 0.5) / h as f64;
-        *px = shade(&source, &warp_inv, &params, u, v);
+        *px = shade(&source, &warp_inv, &params, &effects, time, u, v);
     }
 }
 
 /// Couleur d'un pixel de sortie, packée en `0RGB`.
-fn shade(source: &Source<'_>, warp_inv: &Mat3, params: &RenderParams, u: f64, v: f64) -> u32 {
+fn shade(
+    source: &Source<'_>,
+    warp_inv: &Mat3,
+    params: &RenderParams,
+    effects: &EffectsState,
+    time: f32,
+    u: f64,
+    v: f64,
+) -> u32 {
     // 1. Warp inverse : hors du quad de mapping, rien n'est projeté.
     let (qu, qv) = warp_inv.apply(u, v);
     if !(0.0..=1.0).contains(&qu) || !(0.0..=1.0).contains(&qv) {
@@ -84,14 +94,95 @@ fn shade(source: &Source<'_>, warp_inv: &Mat3, params: &RenderParams, u: f64, v:
     if !(0.0..=1.0).contains(&tu) || !(0.0..=1.0).contains(&tv) {
         return 0;
     }
-    // 3. Échantillonnage de la source.
-    let rgb = match source {
-        Source::Pattern(pattern) => pattern_color(*pattern, tu, tv),
-        Source::Video(frame) => sample_video(frame, tu, tv),
+    // 3. Effets géométriques (miroir, pixellisation), puis échantillonnage
+    //    (avec accentuation à 5 prélèvements si demandée).
+    let (tu, tv) = apply_uv_effects(effects, tu, tv);
+    let rgb = if effects.sharpen > 0.0 {
+        sharpen_sample(source, effects.sharpen, tu, tv)
+    } else {
+        sample_source(source, tu, tv)
     };
-    // 4. Correction couleur.
+    // 4. Correction couleur puis effets de teinte (postérisation, bruit).
     let rgb = apply_color(&params.color, rgb);
+    let rgb = apply_pixel_effects(effects, rgb, tu, tv, time);
     pack(rgb)
+}
+
+/// Échantillonne la source au point (u, v) — mire procédurale ou vidéo.
+fn sample_source(source: &Source<'_>, u: f64, v: f64) -> [f32; 3] {
+    match source {
+        Source::Pattern(pattern) => pattern_color(*pattern, u, v),
+        Source::Video(frame) => sample_video(frame, u, v),
+    }
+}
+
+/// Miroir kaléidoscope puis pixellisation, sur les coordonnées de texture.
+/// MÊMES formules que `warp.wgsl` — toute divergence est un bug.
+fn apply_uv_effects(effects: &EffectsState, mut u: f64, mut v: f64) -> (f64, f64) {
+    if effects.mirror > 0.0 {
+        let mirrored = (u * 2.0 - 1.0).abs();
+        u += f64::from(effects.mirror) * (mirrored - u);
+    }
+    if effects.pixelate > 0.0 {
+        // Intensité 0..1 → blocs de 256 (imperceptible) à 8 (très gros).
+        let blocks = 256.0 - f64::from(effects.pixelate) * 248.0;
+        u = ((u * blocks).floor() + 0.5) / blocks;
+        v = ((v * blocks).floor() + 0.5) / blocks;
+    }
+    (u.clamp(0.0, 1.0), v.clamp(0.0, 1.0))
+}
+
+/// Accentuation : 5 prélèvements en croix (décalage fixe en espace texture).
+fn sharpen_sample(source: &Source<'_>, amount: f32, u: f64, v: f64) -> [f32; 3] {
+    const OFFSET: f64 = 1.0 / 512.0;
+    let center = sample_source(source, u, v);
+    let mut neighbours = [0.0f32; 3];
+    for (du, dv) in [(-OFFSET, 0.0), (OFFSET, 0.0), (0.0, -OFFSET), (0.0, OFFSET)] {
+        let s = sample_source(source, (u + du).clamp(0.0, 1.0), (v + dv).clamp(0.0, 1.0));
+        for (n, c) in neighbours.iter_mut().zip(s) {
+            *n += c;
+        }
+    }
+    let k = amount * 0.8;
+    let mut out = [0.0f32; 3];
+    for i in 0..3 {
+        out[i] = center[i] * (1.0 + 4.0 * k) - neighbours[i] * k;
+    }
+    out
+}
+
+/// Postérisation puis bruit animé (après la correction couleur).
+fn apply_pixel_effects(
+    effects: &EffectsState,
+    mut rgb: [f32; 3],
+    u: f64,
+    v: f64,
+    time: f32,
+) -> [f32; 3] {
+    if effects.posterize > 0.0 {
+        // Intensité 0..1 → 64 niveaux (imperceptible) à 3 (très marqué).
+        let levels = 64.0 - effects.posterize * 61.0;
+        for c in &mut rgb {
+            *c = (c.clamp(0.0, 1.0) * levels).floor() / levels;
+        }
+    }
+    if effects.noise > 0.0 {
+        let n = hash2(
+            u as f32 * 311.7 + time.fract() * 17.0,
+            v as f32 * 173.3 + time.fract() * 29.0,
+        );
+        let grain = (n - 0.5) * effects.noise * 0.35;
+        for c in &mut rgb {
+            *c += grain;
+        }
+    }
+    rgb
+}
+
+/// Hachage pseudo-aléatoire stable (même formule que le shader).
+fn hash2(x: f32, y: f32) -> f32 {
+    let d = x * 12.9898 + y * 78.233;
+    (d.sin() * 43758.547).fract().abs()
 }
 
 /// Échantillonnage plus proche voisin de la frame vidéo (rapide ; le
@@ -263,7 +354,7 @@ mod tests {
 
     fn frame(state: &NodeState, w: u32, h: u32) -> Vec<u32> {
         let mut out = vec![0xDEAD_BEEF; (w * h) as usize];
-        render_frame(state, None, w, h, &mut out);
+        render_frame(state, None, 0.0, w, h, &mut out);
         out
     }
 
@@ -414,12 +505,12 @@ mod tests {
 
         // Transport à l'arrêt : pas de vidéo, sortie noire.
         let mut out = vec![0xDEAD_BEEF; 64 * 64];
-        render_frame(&state, Some(&video), 64, 64, &mut out);
+        render_frame(&state, Some(&video), 0.0, 64, 64, &mut out);
         assert!(out.iter().all(|&p| p == 0), "stoppé = noir");
 
         // En lecture : chaque quadrant échantillonne sa couleur.
         state.apply(&Command::Play).expect("play");
-        render_frame(&state, Some(&video), 64, 64, &mut out);
+        render_frame(&state, Some(&video), 0.0, 64, 64, &mut out);
         assert_eq!(px(&out, 64, 10, 10), 0x00FF_0000, "haut-gauche rouge");
         assert_eq!(px(&out, 64, 50, 10), 0x0000_FF00, "haut-droit vert");
         assert_eq!(px(&out, 64, 10, 50), 0x0000_00FF, "bas-gauche bleu");
@@ -427,7 +518,7 @@ mod tests {
 
         // En pause : la dernière frame reste affichée.
         state.apply(&Command::Pause).expect("pause");
-        render_frame(&state, Some(&video), 64, 64, &mut out);
+        render_frame(&state, Some(&video), 0.0, 64, 64, &mut out);
         assert_eq!(px(&out, 64, 10, 10), 0x00FF_0000);
     }
 
@@ -444,7 +535,7 @@ mod tests {
         ]);
         let video = test_video();
         let mut out = vec![0u32; 64 * 64];
-        render_frame(&state, Some(&video), 64, 64, &mut out);
+        render_frame(&state, Some(&video), 0.0, 64, 64, &mut out);
         // Damier gris, pas les couleurs saturées de la vidéo.
         let p = px(&out, 64, 4, 4);
         let (r, g, b) = (p >> 16 & 0xFF, p >> 8 & 0xFF, p & 0xFF);
@@ -474,9 +565,74 @@ mod tests {
         let state = state_with(&cmds);
         let video = test_video();
         let mut out = vec![0u32; 64 * 64];
-        render_frame(&state, Some(&video), 64, 64, &mut out);
+        render_frame(&state, Some(&video), 0.0, 64, 64, &mut out);
         assert_eq!(px(&out, 64, 2, 2), 0, "hors quad : noir");
         assert_ne!(px(&out, 64, 30, 30), 0, "vidéo visible dans le quad");
+    }
+
+    #[test]
+    fn effects_change_pixels_and_stay_off_at_zero() {
+        // Pixellisation sur la grille : ses lignes fines (0,004) disparaissent
+        // dans des blocs de 1/8 — l'image change forcément.
+        let mut grid = state_with(&[Command::SetTestPattern {
+            pattern: Some(toolbox_core::TestPattern::Grid),
+        }]);
+        let mut reference = vec![0u32; 64 * 64];
+        render_frame(&grid, None, 0.0, 64, 64, &mut reference);
+        grid.apply(&Command::EffectSet {
+            param: toolbox_core::state::EffectParam::Pixelate,
+            value: 1.0,
+        })
+        .expect("effet");
+        let mut pixelated = vec![0u32; 64 * 64];
+        render_frame(&grid, None, 0.0, 64, 64, &mut pixelated);
+        assert_ne!(reference, pixelated, "la pixellisation change l'image");
+        assert_eq!(
+            px(&pixelated, 64, 30, 10),
+            px(&pixelated, 64, 33, 10),
+            "les voisins du même bloc sont identiques"
+        );
+
+        let video = test_video();
+        let playing = state_with(&[
+            Command::Load {
+                path: "clips/a.mp4".into(),
+            },
+            Command::Play,
+        ]);
+        let mut reference = vec![0u32; 64 * 64];
+        render_frame(&playing, Some(&video), 0.0, 64, 64, &mut reference);
+
+        // Miroir à fond : symétrie gauche/droite.
+        let mut mirrored_state = state_with(&[
+            Command::Load {
+                path: "clips/a.mp4".into(),
+            },
+            Command::Play,
+            Command::EffectSet {
+                param: toolbox_core::state::EffectParam::Mirror,
+                value: 1.0,
+            },
+        ]);
+        mirrored_state.effects.pixelate = 0.0;
+        let mut mirrored = vec![0u32; 64 * 64];
+        render_frame(&mirrored_state, Some(&video), 0.0, 64, 64, &mut mirrored);
+        assert_eq!(
+            px(&mirrored, 64, 10, 10),
+            px(&mirrored, 64, 53, 10),
+            "miroir : symétrie horizontale"
+        );
+
+        // À zéro (défaut) : image strictement identique à la référence.
+        let neutral = state_with(&[
+            Command::Load {
+                path: "clips/a.mp4".into(),
+            },
+            Command::Play,
+        ]);
+        let mut out = vec![0u32; 64 * 64];
+        render_frame(&neutral, Some(&video), 123.0, 64, 64, &mut out);
+        assert_eq!(reference, out, "effets à zéro = aucun changement");
     }
 
     #[test]
@@ -485,6 +641,6 @@ mod tests {
             pattern: Some(toolbox_core::TestPattern::Grid),
         }]);
         let mut out = vec![0u32; 10]; // bien plus court que 64×64
-        render_frame(&state, None, 64, 64, &mut out);
+        render_frame(&state, None, 0.0, 64, 64, &mut out);
     }
 }

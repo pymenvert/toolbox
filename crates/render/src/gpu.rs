@@ -28,6 +28,10 @@ struct Uniforms {
     color_b: [f32; 4],
     /// largeur, hauteur, mode, inutilisé
     misc: [f32; 4],
+    /// pixellisation, postérisation, bruit, accentuation
+    fx_a: [f32; 4],
+    /// miroir, temps (secondes)
+    fx_b: [f32; 4],
 }
 
 /// Colonnes vec4 d'une matrice 3x3 exportée colonne-major (`to_gl`).
@@ -194,6 +198,7 @@ impl GpuPainter {
         &mut self,
         state: &NodeState,
         video: Option<&VideoFrame>,
+        time: f32,
         width: u32,
         height: u32,
     ) -> bool {
@@ -207,7 +212,7 @@ impl GpuPainter {
         if let Some(frame) = video {
             self.upload_video(frame);
         }
-        let u = self.uniforms_for(state, video.is_some(), width, height);
+        let u = self.uniforms_for(state, video.is_some(), time, width, height);
         self.queue
             .write_buffer(&self.uniforms, 0, bytemuck::bytes_of(&u));
 
@@ -304,6 +309,7 @@ impl GpuPainter {
         &self,
         state: &NodeState,
         has_video: bool,
+        time: f32,
         width: u32,
         height: u32,
     ) -> Uniforms {
@@ -355,6 +361,13 @@ impl GpuPainter {
                 color.gain[2],
             ],
             misc: [width as f32, height as f32, mode, 0.0],
+            fx_a: [
+                state.effects.pixelate,
+                state.effects.posterize,
+                state.effects.noise,
+                state.effects.sharpen,
+            ],
+            fx_b: [state.effects.mirror, time, 0.0, 0.0],
         }
     }
 }

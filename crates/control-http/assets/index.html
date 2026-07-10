@@ -400,6 +400,18 @@
         <div class="slider"><label>Teinte</label><input type="range" class="cs" data-p="hue" min="-180" max="180" step="1" value="0" data-fmt="deg"><output>0&deg;</output></div>
       </div>
       <div class="card">
+        <h3>Effets</h3>
+        <div class="slider"><label>Pixellisation</label><input type="range" class="fx" data-p="pixelate" min="0" max="1" step="0.01" value="0" data-fmt="f2"><output>0.00</output></div>
+        <div class="slider"><label>Post&eacute;risation</label><input type="range" class="fx" data-p="posterize" min="0" max="1" step="0.01" value="0" data-fmt="f2"><output>0.00</output></div>
+        <div class="slider"><label>Bruit</label><input type="range" class="fx" data-p="noise" min="0" max="1" step="0.01" value="0" data-fmt="f2"><output>0.00</output></div>
+        <div class="slider"><label>Nettet&eacute;</label><input type="range" class="fx" data-p="sharpen" min="0" max="1" step="0.01" value="0" data-fmt="f2"><output>0.00</output></div>
+        <div class="slider"><label>Miroir</label><input type="range" class="fx" data-p="mirror" min="0" max="1" step="0.01" value="0" data-fmt="f2"><output>0.00</output></div>
+        <div class="rowbtns" style="margin-top:14px">
+          <button id="fxReset" class="danger">Effets &agrave; z&eacute;ro</button>
+        </div>
+        <div class="hint">0 = inactif. Aussi en OSC : <code>/effect/pixelate</code> etc. (0..1).</div>
+      </div>
+      <div class="card">
         <h3>Gains RVB</h3>
         <div class="slider"><label style="color:#ff8f8f">Gain rouge</label><input type="range" class="cs" data-p="gain_r" min="0" max="2" step="0.01" value="1" data-fmt="f2"><output>1.00</output></div>
         <div class="slider"><label style="color:#8fd98f">Gain vert</label><input type="range" class="cs" data-p="gain_g" min="0" max="2" step="0.01" value="1" data-fmt="f2"><output>1.00</output></div>
@@ -625,6 +637,7 @@ function onEvent(m) {
     case "flip_changed": state.mapping.flip_h = m.horizontal; state.mapping.flip_v = m.vertical; renderMapping(); break;
     case "crop_changed": state.mapping.crop = { left: m.left, top: m.top, right: m.right, bottom: m.bottom }; renderMapping(); break;
     case "color_changed": state.color[m.param] = m.value; renderColor(); break;
+    case "effect_changed": if (!state.effects) state.effects = {}; state.effects[m.param] = m.value; renderEffects(); break;
     case "mapping_enabled_changed": state.mapping.enabled = m.enabled; renderMapping(); break;
     case "mapping_saved": toast("Mapping « " + m.name + " » enregistré"); loadMapPresets(); break;
     case "mapping_loaded": state.mapping = m.mapping; renderMapping(); toast("Mapping « " + m.name + " » chargé"); break;
@@ -1099,6 +1112,29 @@ function renderColor() {
   $$(".cs").forEach(inp => {
     if (sliderBusy(inp)) return;
     const v = state.color[inp.dataset.p];
+    if (v !== undefined) { inp.value = v; sliderOut(inp); }
+  });
+  renderEffects();
+}
+
+/* Effets (0 = inactif). */
+$$(".fx").forEach(inp => {
+  const p = inp.dataset.p;
+  bindSlider(inp, v => sendCmd({ cmd: "effect_set", param: p, value: v }));
+  inp.addEventListener("dblclick", () => {
+    inp.value = 0; sliderOut(inp);
+    sendCmd({ cmd: "effect_set", param: p, value: 0 });
+  });
+});
+$("#fxReset").addEventListener("click", () => {
+  $$(".fx").forEach(inp => sendCmd({ cmd: "effect_set", param: inp.dataset.p, value: 0 }));
+  toast("Effets remis à zéro");
+});
+function renderEffects() {
+  if (!state || !state.effects) return;
+  $$(".fx").forEach(inp => {
+    if (sliderBusy(inp)) return;
+    const v = state.effects[inp.dataset.p];
     if (v !== undefined) { inp.value = v; sliderOut(inp); }
   });
 }

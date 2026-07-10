@@ -226,12 +226,80 @@ impl Default for PlayerState {
     }
 }
 
+/// Effets appliqués après la correction couleur (brief 3.3). Chaque effet a
+/// une intensité 0..1 (0 = inactif) — pas de booléen séparé : un fader OSC
+/// ou MIDI suffit à l'activer et le doser.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct EffectsState {
+    /// Pixellisation (taille des blocs).
+    pub pixelate: f32,
+    /// Postérisation (réduction des niveaux).
+    pub posterize: f32,
+    /// Bruit animé.
+    pub noise: f32,
+    /// Accentuation de netteté.
+    pub sharpen: f32,
+    /// Miroir kaléidoscope au centre.
+    pub mirror: f32,
+}
+
+/// Paramètre d'effet adressable (`/effect/<param>` en OSC).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EffectParam {
+    Pixelate,
+    Posterize,
+    Noise,
+    Sharpen,
+    Mirror,
+}
+
+impl EffectsState {
+    pub fn get(&self, param: EffectParam) -> f32 {
+        match param {
+            EffectParam::Pixelate => self.pixelate,
+            EffectParam::Posterize => self.posterize,
+            EffectParam::Noise => self.noise,
+            EffectParam::Sharpen => self.sharpen,
+            EffectParam::Mirror => self.mirror,
+        }
+    }
+
+    fn set(&mut self, param: EffectParam, value: f32) {
+        match param {
+            EffectParam::Pixelate => self.pixelate = value,
+            EffectParam::Posterize => self.posterize = value,
+            EffectParam::Noise => self.noise = value,
+            EffectParam::Sharpen => self.sharpen = value,
+            EffectParam::Mirror => self.mirror = value,
+        }
+    }
+
+    /// Tous les invariants (chaque intensité dans 0..1).
+    pub fn validate(&self) -> Result<(), CoreError> {
+        for (name, value) in [
+            ("effect.pixelate", self.pixelate),
+            ("effect.posterize", self.posterize),
+            ("effect.noise", self.noise),
+            ("effect.sharpen", self.sharpen),
+            ("effect.mirror", self.mirror),
+        ] {
+            check_range(name, value, 0.0, 1.0)?;
+        }
+        Ok(())
+    }
+}
+
 /// L'état complet du node — LE document que l'on preset/exporte/clone.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct NodeState {
     pub player: PlayerState,
     pub mapping: MappingState,
     pub color: ColorState,
+    /// Effets (défauts serde : les presets anciens restent chargeables).
+    #[serde(default)]
+    pub effects: EffectsState,
     /// Mire de test affichée à la place du média (`None` = média normal).
     /// Sauvegardée dans les presets : un preset "réglage VP" est légitime.
     #[serde(default)]
@@ -286,6 +354,10 @@ pub enum Event {
     },
     ColorChanged {
         param: ColorParam,
+        value: f32,
+    },
+    EffectChanged {
+        param: EffectParam,
         value: f32,
     },
     MappingReset,
@@ -517,6 +589,14 @@ impl NodeState {
                     value: *value,
                 }])
             }
+            Command::EffectSet { param, value } => {
+                check_range("effect", *value, 0.0, 1.0)?;
+                self.effects.set(*param, *value);
+                Ok(vec![Event::EffectChanged {
+                    param: *param,
+                    value: *value,
+                }])
+            }
             Command::MappingReset => {
                 self.mapping = MappingState::default();
                 Ok(vec![Event::MappingReset])
@@ -616,6 +696,7 @@ impl NodeState {
             }
         }
         self.mapping.validate()?;
+        self.effects.validate()?;
         for (param, value) in [
             (ColorParam::Brightness, self.color.brightness),
             (ColorParam::Contrast, self.color.contrast),
@@ -890,6 +971,44 @@ mod tests {
         })
         .expect("chemin sain");
         assert_eq!(s.player.media.as_deref(), Some("clips/boucle_01.mp4"));
+    }
+
+    #[test]
+    fn effects_validate_and_apply() {
+        let mut s = NodeState::default();
+        assert_eq!(s.effects, EffectsState::default(), "tout à zéro par défaut");
+        let evs = s
+            .apply(&Command::EffectSet {
+                param: EffectParam::Pixelate,
+                value: 0.5,
+            })
+            .expect("effet");
+        assert_eq!(
+            evs,
+            vec![Event::EffectChanged {
+                param: EffectParam::Pixelate,
+                value: 0.5
+            }]
+        );
+        assert_eq!(s.effects.pixelate, 0.5);
+        // Hors bornes ou NaN : refusé, état intact.
+        assert!(s
+            .apply(&Command::EffectSet {
+                param: EffectParam::Noise,
+                value: 1.5
+            })
+            .is_err());
+        assert!(s
+            .apply(&Command::EffectSet {
+                param: EffectParam::Mirror,
+                value: f32::NAN
+            })
+            .is_err());
+        assert_eq!(s.effects.noise, 0.0);
+        // La validation d'un preset trafiqué attrape les effets aussi.
+        let mut t = NodeState::default();
+        t.effects.sharpen = 7.0;
+        assert!(t.validate().is_err());
     }
 
     #[test]

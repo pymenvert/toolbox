@@ -7,7 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::state::LoopMode;
+use crate::state::{EffectParam, LoopMode};
 
 /// Paramètre de correction couleur (tous normalisés, voir bornes dans `state`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -63,6 +63,7 @@ pub enum TestPattern {
 /// | `set_flip`         | `/flip <h 0|1> <v 0|1>`      |
 /// | `set_crop`         | `/crop <l> <t> <r> <b>`      |
 /// | `color_set`        | `/color/<param> <f32>`       |
+/// | `effect_set`       | `/effect/<param> <f32 0..1>` |
 /// | `mapping_reset`    | `/mapping/reset`             |
 /// | `set_mapping_enabled` | `/mapping/enabled <0|1>`  |
 /// | `mapping_save`     | `/mapping/save <name>`       |
@@ -126,6 +127,11 @@ pub enum Command {
     },
     ColorSet {
         param: ColorParam,
+        value: f32,
+    },
+    /// Intensité d'un effet (0..1, 0 = inactif). OSC : `/effect/<param>`.
+    EffectSet {
+        param: EffectParam,
         value: f32,
     },
     MappingReset,
@@ -334,6 +340,14 @@ mod tests {
             (
                 serde_json::to_string(&Command::SyncStartAt { at: 1234.5 }).expect("ser"),
                 r#"{"cmd":"sync_start_at","at":1234.5}"#,
+            ),
+            (
+                serde_json::to_string(&Command::EffectSet {
+                    param: EffectParam::Pixelate,
+                    value: 0.5,
+                })
+                .expect("ser"),
+                r#"{"cmd":"effect_set","param":"pixelate","value":0.5}"#,
             ),
         ];
         for (got, want) in cases {

@@ -232,6 +232,18 @@ pub fn namespace(state: &NodeState) -> Value {
                     { "MIN": 0.0, "MAX": 0.45 }, { "MIN": 0.0, "MAX": 0.45 },
                 ]))),
             "color": container("/color", Value::Object(colors)),
+            "effect": container("/effect", json!({
+                "pixelate": leaf("/effect/pixelate", "f", "Pixellisation",
+                    Some(json!([state.effects.pixelate])), Some(range01())),
+                "posterize": leaf("/effect/posterize", "f", "Postérisation",
+                    Some(json!([state.effects.posterize])), Some(range01())),
+                "noise": leaf("/effect/noise", "f", "Bruit animé",
+                    Some(json!([state.effects.noise])), Some(range01())),
+                "sharpen": leaf("/effect/sharpen", "f", "Accentuation",
+                    Some(json!([state.effects.sharpen])), Some(range01())),
+                "mirror": leaf("/effect/mirror", "f", "Miroir kaléidoscope",
+                    Some(json!([state.effects.mirror])), Some(range01())),
+            })),
             "mapping": container("/mapping", json!({
                 "reset": leaf("/mapping/reset", "", "Mapping aux valeurs neutres", None, None),
                 "enabled": leaf("/mapping/enabled", "i", "Mapping actif (0|1)",

@@ -17,6 +17,10 @@ struct Uniforms {
     color_b: vec4<f32>,
     // largeur, hauteur, mode (0 noir, 1 grille, 2 damier, 3 coins, 4 vidéo)
     misc: vec4<f32>,
+    // pixellisation, postérisation, bruit, accentuation (intensités 0..1)
+    fx_a: vec4<f32>,
+    // miroir, temps (secondes, pour le bruit animé)
+    fx_b: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
@@ -134,6 +138,54 @@ fn apply_color(rgb_in: vec3<f32>) -> vec3<f32> {
     return c;
 }
 
+// Échantillonne la source (mire procédurale ou texture vidéo).
+fn sample_source(mode: u32, p: vec2<f32>) -> vec3<f32> {
+    switch mode {
+        case 1u: { return grid_color(p); }
+        case 2u: { return checker_color(p); }
+        case 3u: { return corners_color(p); }
+        default: { return textureSampleLevel(video_tex, video_smp, p, 0.0).rgb; }
+    }
+}
+
+// Miroir kaléidoscope puis pixellisation — MÊMES formules que raster.rs.
+fn apply_uv_effects(t_in: vec2<f32>) -> vec2<f32> {
+    var t = t_in;
+    let mirror = u.fx_b.x;
+    if mirror > 0.0 {
+        let mirrored = abs(t.x * 2.0 - 1.0);
+        t.x = t.x + mirror * (mirrored - t.x);
+    }
+    let pixelate = u.fx_a.x;
+    if pixelate > 0.0 {
+        let blocks = 256.0 - pixelate * 248.0;
+        t = (floor(t * blocks) + vec2<f32>(0.5)) / blocks;
+    }
+    return clamp(t, vec2<f32>(0.0), vec2<f32>(1.0));
+}
+
+// Hachage pseudo-aléatoire stable (même formule que raster.rs).
+fn hash2(x: f32, y: f32) -> f32 {
+    return abs(fract(sin(x * 12.9898 + y * 78.233) * 43758.547));
+}
+
+// Postérisation puis bruit animé, après la correction couleur.
+fn apply_pixel_effects(rgb_in: vec3<f32>, t: vec2<f32>) -> vec3<f32> {
+    var rgb = rgb_in;
+    let posterize = u.fx_a.y;
+    if posterize > 0.0 {
+        let levels = 64.0 - posterize * 61.0;
+        rgb = floor(clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0)) * levels) / levels;
+    }
+    let noise = u.fx_a.z;
+    if noise > 0.0 {
+        let time = u.fx_b.y;
+        let n = hash2(t.x * 311.7 + fract(time) * 17.0, t.y * 173.3 + fract(time) * 29.0);
+        rgb = rgb + vec3<f32>((n - 0.5) * noise * 0.35);
+    }
+    return rgb;
+}
+
 @fragment
 fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     let black = vec4<f32>(0.0, 0.0, 0.0, 1.0);
@@ -148,19 +200,26 @@ fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
         return black;
     }
     // 2. Flip + rotation inverse + recadrage.
-    let t = apply3(u.uv_c0, u.uv_c1, u.uv_c2, q);
-    if t.x < 0.0 || t.x > 1.0 || t.y < 0.0 || t.y > 1.0 {
+    let t_brut = apply3(u.uv_c0, u.uv_c1, u.uv_c2, q);
+    if t_brut.x < 0.0 || t_brut.x > 1.0 || t_brut.y < 0.0 || t_brut.y > 1.0 {
         return black;
     }
-    // 3. Échantillonnage de la source (SampleLevel : licite après un return
-    // conditionnel, contrairement à textureSample).
-    var rgb: vec3<f32>;
-    switch mode {
-        case 1u: { rgb = grid_color(t); }
-        case 2u: { rgb = checker_color(t); }
-        case 3u: { rgb = corners_color(t); }
-        default: { rgb = textureSampleLevel(video_tex, video_smp, t, 0.0).rgb; }
+    // 3. Effets géométriques puis échantillonnage (accentuation : 5
+    //    prélèvements en croix, décalage fixe comme raster.rs).
+    let t = apply_uv_effects(t_brut);
+    var rgb = sample_source(mode, t);
+    let sharpen = u.fx_a.w;
+    if sharpen > 0.0 {
+        let o = 1.0 / 512.0;
+        let voisins = sample_source(mode, clamp(t - vec2<f32>(o, 0.0), vec2<f32>(0.0), vec2<f32>(1.0)))
+            + sample_source(mode, clamp(t + vec2<f32>(o, 0.0), vec2<f32>(0.0), vec2<f32>(1.0)))
+            + sample_source(mode, clamp(t - vec2<f32>(0.0, o), vec2<f32>(0.0), vec2<f32>(1.0)))
+            + sample_source(mode, clamp(t + vec2<f32>(0.0, o), vec2<f32>(0.0), vec2<f32>(1.0)));
+        let k = sharpen * 0.8;
+        rgb = rgb * (1.0 + 4.0 * k) - voisins * k;
     }
-    // 4. Correction couleur.
-    return vec4<f32>(apply_color(rgb), 1.0);
+    // 4. Correction couleur puis effets de teinte.
+    rgb = apply_color(rgb);
+    rgb = apply_pixel_effects(rgb, t);
+    return vec4<f32>(rgb, 1.0);
 }
