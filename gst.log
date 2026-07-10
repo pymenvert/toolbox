@@ -1,0 +1,14 @@
+[1m[92m    Updating[0m crates.io index
+[1m[92m    Checking[0m toolbox-core v1.1.0 (/home/runner/work/toolbox/toolbox/crates/core)
+[1m[92m    Checking[0m toolbox-engine v1.1.0 (/home/runner/work/toolbox/toolbox/crates/engine)
+[1m[92m    Checking[0m toolbox-gst v1.1.0 (/home/runner/work/toolbox/toolbox/crates/gst)
+[1m[91merror[E0599][0m[1m: no associated function or constant named `INSTANT_RATE_CHANGE` found for struct `gstreamer::SeekFlags` in the current scope[0m
+   [1m[94m--> [0mcrates/gst/src/backend.rs:292:37
+    [1m[94m|[0m
+[1m[94m292[0m [1m[94m|[0m                     gst::SeekFlags::INSTANT_RATE_CHANGE,
+    [1m[94m|[0m                                     [1m[91m^^^^^^^^^^^^^^^^^^^[0m [1m[91massociated function or constant not found in `gstreamer::SeekFlags`[0m
+
+[1mFor more information about this error, try `rustc --explain E0599`.[0m
+[1m[91merror[0m: could not compile `toolbox-gst` (lib) due to 1 previous error
+[1m[33mwarning[0m: build failed, waiting for other jobs to finish...
+[1m[91merror[0m: could not compile `toolbox-gst` (lib test) due to 1 previous error
