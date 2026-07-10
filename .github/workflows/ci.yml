@@ -207,9 +207,10 @@ jobs:
         run: |
           set -o pipefail
           # L'emplacement du MSI varie selon les versions : on le cherche.
-          GST=$(ls -d /c/gstreamer/1.0/msvc_x86_64 "/c/Program Files/gstreamer/1.0/msvc_x86_64" 2>/dev/null | head -1)
+          # (`|| true` : sous set -e, une substitution qui echoue tue le step.)
+          GST=$(ls -d /c/gstreamer/1.0/msvc_x86_64 "/c/Program Files/gstreamer/1.0/msvc_x86_64" 2>/dev/null | head -1 || true)
           if [ -z "$GST" ]; then
-            GST=$(find /c -maxdepth 4 -type d -name "msvc_x86_64" -path "*gstreamer*" 2>/dev/null | head -1)
+            GST=$(find /c -maxdepth 4 -type d -name "msvc_x86_64" -path "*gstreamer*" 2>/dev/null | head -1 || true)
           fi
           echo "dossier GStreamer : ${GST:-INTROUVABLE}" | tee -a gstwin.log
           [ -n "$GST" ]
