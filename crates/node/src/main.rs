@@ -220,7 +220,7 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
         ));
     }
 
-    // OSC.
+    // OSC + OSCQuery (auto-découverte des paramètres pour Chataigne).
     if config.modules.osc {
         let osc_config = toolbox_control_osc::OscConfig {
             bind: config.ports.bind.clone(),
@@ -233,6 +233,26 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
             tokio::spawn(async move {
                 if let Err(err) = toolbox_control_osc::serve(osc_config, osc_bus, shutdown).await {
                     error!(%err, "le serveur OSC s'est arrêté en erreur");
+                }
+            }),
+        ));
+
+        let oscquery_state = toolbox_control_http::oscquery::OscQueryState {
+            bus: handle.clone(),
+            node_name: node_name.clone(),
+            osc_port: config.ports.osc,
+        };
+        let bind = config.ports.bind.clone();
+        let port = config.ports.oscquery;
+        let shutdown = shutdown_rx.clone();
+        services.push((
+            "oscquery",
+            tokio::spawn(async move {
+                if let Err(err) =
+                    toolbox_control_http::oscquery::serve(bind, port, oscquery_state, shutdown)
+                        .await
+                {
+                    error!(%err, "le serveur OSCQuery s'est arrêté en erreur");
                 }
             }),
         ));

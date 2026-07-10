@@ -18,6 +18,7 @@
 //! noms/chemins côté core.
 
 pub mod monitor;
+pub mod oscquery;
 
 use std::time::Instant;
 

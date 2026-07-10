@@ -64,6 +64,8 @@ pub struct Ports {
     pub bind: String,
     pub http: u16,
     pub osc: u16,
+    /// OSCQuery : auto-découverte des paramètres OSC (Chataigne…).
+    pub oscquery: u16,
 }
 
 impl Default for Ports {
@@ -72,6 +74,7 @@ impl Default for Ports {
             bind: "0.0.0.0".to_string(),
             http: 8080,
             osc: 9000,
+            oscquery: 8081,
         }
     }
 }
