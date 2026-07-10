@@ -258,6 +258,10 @@ pub fn event_to_osc(event: &toolbox_core::Event) -> Option<OscMessage> {
         Event::DmxSceneDemandee { name } => {
             message("/dmx/scene", vec![OscType::String(name.clone())])
         }
+        Event::LutChanged { name } => message(
+            "/lut",
+            vec![OscType::String(name.clone().unwrap_or_default())],
+        ),
         Event::BlackoutChanged { actif, fondu_ms } => message(
             "/blackout",
             vec![
@@ -343,6 +347,11 @@ pub fn map_message(addr: &str, args: &[OscType]) -> Result<Command, MapError> {
         "/rate" => float_arg(args, 0)
             .map(|rate| Command::SetRate { rate })
             .ok_or_else(|| bad("attendu : vitesse (float 0.25..4)")),
+        // LUT d'étalonnage : /lut nom.cube, ou /lut sans argument = retirer.
+        "/lut" => match string_arg(args, 0) {
+            Some(name) if !name.is_empty() => Ok(Command::LutSet { name: Some(name) }),
+            _ => Ok(Command::LutSet { name: None }),
+        },
         // Boutons de régie : /blackout 1 [fondu_ms], /freeze 1.
         "/blackout" => bool_arg(args, 0)
             .map(|actif| Command::BlackoutSet {

@@ -12,12 +12,14 @@
 //! embarqués dans le binaire via `include_str!` (voir [`shaders`]).
 
 pub mod homography;
+pub mod lut;
 pub mod player;
 pub mod raster;
 pub mod render;
 pub mod video;
 
 pub use homography::{HomographyError, Mat3};
+pub use lut::Lut3d;
 pub use player::{
     BackendEvent, MemoryBackend, PlaybackPosition, Player, PlayerBackend, PlayerError,
 };

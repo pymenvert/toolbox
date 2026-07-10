@@ -19,19 +19,25 @@ struct Uniforms {
     misc: vec4<f32>,
     // pixellisation, postérisation, bruit, accentuation (intensités 0..1)
     fx_a: vec4<f32>,
-    // miroir, temps (secondes, pour le bruit animé)
+    // miroir, temps (secondes), colonnes et lignes du mesh (0 = aucun)
     fx_b: vec4<f32>,
     // fondu de bords : gauche, droite, haut, bas (largeurs 0..0.45)
     blending_a: vec4<f32>,
-    // fondu de bords : gamma, nombre de masques
+    // fondu de bords : gamma, nombre de masques, niveau de blackout,
+    // taille de grille de la LUT (0 = aucune)
     blending_b: vec4<f32>,
     // masques : 8 quadrilatères × 2 vec4 (x0,y0,x1,y1) puis (x2,y2,x3,y3)
     masques: array<vec4<f32>, 16>,
+    // mesh warp : 81 déplacements max (9×9), deux par vec4 (xy puis zw)
+    mesh: array<vec4<f32>, 41>,
 }
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
 @group(0) @binding(1) var video_tex: texture_2d<f32>;
 @group(0) @binding(2) var video_smp: sampler;
+// LUT 3D d'étalonnage : n³ entrées, r variant le plus vite (ordre .cube).
+// Trilinéaire calculé ici — MÊME formule que Lut3d::appliquer (raster CPU).
+@group(0) @binding(3) var<storage, read> lut_data: array<vec4<f32>>;
 
 @vertex
 fn vs_main(@builtin(vertex_index) index: u32) -> @builtin(position) vec4<f32> {
@@ -222,6 +228,57 @@ fn dans_un_masque(p: vec2<f32>) -> bool {
     return false;
 }
 
+// Déplacement du point k de la grille de mesh (deux points par vec4).
+fn point_mesh(k: u32) -> vec2<f32> {
+    let q = u.mesh[k / 2u];
+    if (k % 2u) == 0u {
+        return q.xy;
+    }
+    return q.zw;
+}
+
+// Déplacement du mesh warp au pixel p : interpolation bilinéaire des
+// déplacements — MÊME formule que deplacement_mesh (raster.rs).
+fn deplacement_mesh(p: vec2<f32>) -> vec2<f32> {
+    let c = u32(u.fx_b.z);
+    let l = u32(u.fx_b.w);
+    if c < 2u || l < 2u {
+        return vec2<f32>(0.0);
+    }
+    let x = clamp(p.x, 0.0, 1.0) * f32(c - 1u);
+    let y = clamp(p.y, 0.0, 1.0) * f32(l - 1u);
+    let i = min(u32(floor(x)), c - 2u);
+    let j = min(u32(floor(y)), l - 2u);
+    let f = vec2<f32>(x - f32(i), y - f32(j));
+    let p00 = point_mesh(j * c + i);
+    let p10 = point_mesh(j * c + i + 1u);
+    let p01 = point_mesh((j + 1u) * c + i);
+    let p11 = point_mesh((j + 1u) * c + i + 1u);
+    return mix(mix(p00, p10, f.x), mix(p01, p11, f.x), f.y);
+}
+
+// Une entrée de la grille de LUT à l'indice (r, g, b).
+fn lut_grille(r: u32, g: u32, b: u32, n: u32) -> vec3<f32> {
+    return lut_data[(b * n + g) * n + r].rgb;
+}
+
+// LUT 3D trilinéaire — MÊME formule que Lut3d::appliquer (raster.rs).
+fn appliquer_lut(rgb: vec3<f32>) -> vec3<f32> {
+    let n = u32(u.blending_b.w);
+    if n < 2u {
+        return rgb;
+    }
+    let echelle = f32(n - 1u);
+    let pos = clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0)) * echelle;
+    let idx = min(vec3<u32>(floor(pos)), vec3<u32>(n - 2u));
+    let f = pos - vec3<f32>(idx);
+    let c00 = mix(lut_grille(idx.x, idx.y, idx.z, n), lut_grille(idx.x + 1u, idx.y, idx.z, n), f.x);
+    let c10 = mix(lut_grille(idx.x, idx.y + 1u, idx.z, n), lut_grille(idx.x + 1u, idx.y + 1u, idx.z, n), f.x);
+    let c01 = mix(lut_grille(idx.x, idx.y, idx.z + 1u, n), lut_grille(idx.x + 1u, idx.y, idx.z + 1u, n), f.x);
+    let c11 = mix(lut_grille(idx.x, idx.y + 1u, idx.z + 1u, n), lut_grille(idx.x + 1u, idx.y + 1u, idx.z + 1u, n), f.x);
+    return mix(mix(c00, c10, f.y), mix(c01, c11, f.y), f.z);
+}
+
 // Rampe d'un bord du fondu — MÊME formule que raster.rs (facteur_blending).
 fn rampe_blending(distance: f32, largeur: f32, gamma: f32) -> f32 {
     if largeur <= 0.0 || distance >= largeur {
@@ -252,8 +309,11 @@ fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     if dans_un_masque(p) {
         return black;
     }
+    // 0. Mesh warp : l'échantillonnage est décalé, masques et blending
+    //    restent en espace de sortie physique (p) — comme raster.rs.
+    let pm = p - deplacement_mesh(p);
     // 1. Warp inverse : hors du quad de mapping, rien n'est projeté.
-    let q = apply3(u.warp_inv_c0, u.warp_inv_c1, u.warp_inv_c2, p);
+    let q = apply3(u.warp_inv_c0, u.warp_inv_c1, u.warp_inv_c2, pm);
     if q.x < 0.0 || q.x > 1.0 || q.y < 0.0 || q.y > 1.0 {
         return black;
     }
@@ -276,8 +336,10 @@ fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
         let k = sharpen * 0.8;
         rgb = rgb * (1.0 + 4.0 * k) - voisins * k;
     }
-    // 4. Correction couleur puis effets de teinte.
+    // 4. Correction couleur, LUT d'étalonnage, puis effets de teinte —
+    //    MÊME ordre que raster.rs.
     rgb = apply_color(rgb);
+    rgb = appliquer_lut(rgb);
     rgb = apply_pixel_effects(rgb, t);
     // 5. Fondu de bords : atténuation finale en espace de sortie.
     rgb = rgb * facteur_blending(p);

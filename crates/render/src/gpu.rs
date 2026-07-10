@@ -30,14 +30,17 @@ struct Uniforms {
     misc: [f32; 4],
     /// pixellisation, postérisation, bruit, accentuation
     fx_a: [f32; 4],
-    /// miroir, temps (secondes)
+    /// miroir, temps (secondes), colonnes et lignes du mesh (0 = aucun)
     fx_b: [f32; 4],
     /// fondu de bords : gauche, droite, haut, bas
     blending_a: [f32; 4],
-    /// fondu de bords : gamma, nombre de masques, niveau de blackout
+    /// fondu de bords : gamma, nombre de masques, niveau de blackout,
+    /// taille de grille de la LUT (0 = aucune)
     blending_b: [f32; 4],
     /// masques : 8 quadrilatères × 4 coins = 2 vec4 (x0,y0,x1,y1) chacun
     masques: [[f32; 4]; 16],
+    /// mesh warp : 81 déplacements max (9×9), 2 par vec4 (xy puis zw)
+    mesh: [[f32; 4]; 41],
 }
 
 /// Colonnes vec4 d'une matrice 3x3 exportée colonne-major (`to_gl`).
@@ -68,6 +71,11 @@ pub struct GpuPainter {
     video_texture: wgpu::Texture,
     video_size: (u32, u32),
     bind_group: wgpu::BindGroup,
+    lut_buffer: wgpu::Buffer,
+    /// Nom du fichier de la LUT téléversée (évite un re-téléversement par
+    /// frame) et sa taille de grille (0 = aucune).
+    lut_nom: Option<String>,
+    lut_taille: u32,
 }
 
 impl GpuPainter {
@@ -130,6 +138,20 @@ impl GpuPainter {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                // LUT 3D en buffer storage : trilinéaire calculé dans le
+                // shader avec EXACTEMENT la même formule que Lut3d (CPU) —
+                // pas de texture 3D filtrée, dont la précision dépendrait
+                // du matériel.
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         });
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -180,8 +202,16 @@ impl GpuPainter {
             ..Default::default()
         });
         let video_texture = create_video_texture(&device, 1, 1);
-        let bind_group =
-            create_bind_group(&device, &bind_layout, &uniforms, &video_texture, &sampler);
+        // Buffer LUT factice (une entrée) tant qu'aucune LUT n'est chargée.
+        let lut_buffer = create_lut_buffer(&device, &[0.0, 0.0, 0.0, 1.0]);
+        let bind_group = create_bind_group(
+            &device,
+            &bind_layout,
+            &uniforms,
+            &video_texture,
+            &sampler,
+            &lut_buffer,
+        );
 
         info!(backend = ?adapter.get_info().backend, gpu = %adapter.get_info().name, "rendu GPU actif");
         Ok(Self {
@@ -196,14 +226,19 @@ impl GpuPainter {
             video_texture,
             video_size: (1, 1),
             bind_group,
+            lut_buffer,
+            lut_nom: None,
+            lut_taille: 0,
         })
     }
 
     /// Rend une frame. Retourne `true` si elle a été présentée.
+    #[allow(clippy::too_many_arguments)] // pipeline de rendu : tout est requis
     pub fn render(
         &mut self,
         state: &NodeState,
         video: Option<&VideoFrame>,
+        lut: Option<(&str, &toolbox_engine::Lut3d)>,
         time: f32,
         width: u32,
         height: u32,
@@ -219,6 +254,7 @@ impl GpuPainter {
         if let Some(frame) = video {
             self.upload_video(frame);
         }
+        self.sync_lut(lut);
         let u = self.uniforms_for(state, video.is_some(), time, width, height, blackout);
         self.queue
             .write_buffer(&self.uniforms, 0, bytemuck::bytes_of(&u));
@@ -277,18 +313,48 @@ impl GpuPainter {
         true
     }
 
+    /// Téléverse la LUT quand elle change (nom comparé, pas le contenu).
+    fn sync_lut(&mut self, lut: Option<(&str, &toolbox_engine::Lut3d)>) {
+        match lut {
+            Some((nom, lut)) => {
+                if self.lut_nom.as_deref() != Some(nom) {
+                    self.lut_buffer = create_lut_buffer(&self.device, &lut.texels_rgba_f32());
+                    self.lut_nom = Some(nom.to_string());
+                    #[allow(clippy::cast_possible_truncation)] // ≤ 129
+                    {
+                        self.lut_taille = lut.taille as u32;
+                    }
+                    self.rebuild_bind_group();
+                }
+            }
+            None => {
+                if self.lut_nom.is_some() {
+                    self.lut_buffer = create_lut_buffer(&self.device, &[0.0, 0.0, 0.0, 1.0]);
+                    self.lut_nom = None;
+                    self.lut_taille = 0;
+                    self.rebuild_bind_group();
+                }
+            }
+        }
+    }
+
+    fn rebuild_bind_group(&mut self) {
+        self.bind_group = create_bind_group(
+            &self.device,
+            &self.bind_layout,
+            &self.uniforms,
+            &self.video_texture,
+            &self.sampler,
+            &self.lut_buffer,
+        );
+    }
+
     /// Téléverse la frame vidéo (texture recréée si la taille change).
     fn upload_video(&mut self, frame: &VideoFrame) {
         if self.video_size != (frame.width, frame.height) {
             self.video_texture = create_video_texture(&self.device, frame.width, frame.height);
             self.video_size = (frame.width, frame.height);
-            self.bind_group = create_bind_group(
-                &self.device,
-                &self.bind_layout,
-                &self.uniforms,
-                &self.video_texture,
-                &self.sampler,
-            );
+            self.rebuild_bind_group();
         }
         self.queue.write_texture(
             wgpu::TexelCopyTextureInfo {
@@ -375,23 +441,54 @@ impl GpuPainter {
                 state.effects.noise,
                 state.effects.sharpen,
             ],
-            fx_b: [state.effects.mirror, time, 0.0, 0.0],
+            fx_b: {
+                // Le mesh suit l'interrupteur du mapping, comme raster.rs.
+                let mesh = if state.mapping.enabled {
+                    state.mapping.mesh.as_ref()
+                } else {
+                    None
+                };
+                [
+                    state.effects.mirror,
+                    time,
+                    mesh.map_or(0.0, |m| f32::from(m.colonnes)),
+                    mesh.map_or(0.0, |m| f32::from(m.lignes)),
+                ]
+            },
             blending_a: [
                 state.blending.gauche,
                 state.blending.droite,
                 state.blending.haut,
                 state.blending.bas,
             ],
-            #[allow(clippy::cast_precision_loss)] // ≤ 8
+            #[allow(clippy::cast_precision_loss)] // ≤ 8 et ≤ 129
             blending_b: [
                 state.blending.gamma,
                 state.masques.len().min(8) as f32,
                 blackout.clamp(0.0, 1.0),
-                0.0,
+                self.lut_taille as f32,
             ],
             masques: masques_vec4(&state.masques),
+            mesh: mesh_vec4(if state.mapping.enabled {
+                state.mapping.mesh.as_ref()
+            } else {
+                None
+            }),
         }
     }
+}
+
+/// Emballe les déplacements du mesh (81 max) : deux points par vec4.
+fn mesh_vec4(mesh: Option<&toolbox_core::MeshState>) -> [[f32; 4]; 41] {
+    let mut out = [[0.0f32; 4]; 41];
+    if let Some(mesh) = mesh {
+        for (k, o) in mesh.offsets.iter().take(81).enumerate() {
+            let moitie = (k % 2) * 2;
+            out[k / 2][moitie] = o.x;
+            out[k / 2][moitie + 1] = o.y;
+        }
+    }
+    out
 }
 
 /// Emballe les masques (8 max) en paires de vec4 : (x0,y0,x1,y1), (x2,y2,x3,y3).
@@ -428,6 +525,7 @@ fn create_bind_group(
     uniforms: &wgpu::Buffer,
     texture: &wgpu::Texture,
     sampler: &wgpu::Sampler,
+    lut: &wgpu::Buffer,
 ) -> wgpu::BindGroup {
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
     device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -446,7 +544,21 @@ fn create_bind_group(
                 binding: 2,
                 resource: wgpu::BindingResource::Sampler(sampler),
             },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: lut.as_entire_binding(),
+            },
         ],
+    })
+}
+
+/// Buffer storage des entrées de LUT (vec4 par entrée, alpha ignoré).
+fn create_lut_buffer(device: &wgpu::Device, texels: &[f32]) -> wgpu::Buffer {
+    use wgpu::util::DeviceExt;
+    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("lut"),
+        contents: bytemuck::cast_slice(texels),
+        usage: wgpu::BufferUsages::STORAGE,
     })
 }
 

@@ -33,5 +33,6 @@ pub use output::{MonitorInfo, OutputSettings};
 pub use preset::{MappingStore, PresetStore};
 pub use source::MediaSource;
 pub use state::{
-    BlendingState, Event, LoopMode, MappingState, Masque, NodeState, Rotation, Transport,
+    valider_mesh, valider_nom_lut, BlendingState, Event, LoopMode, MappingState, Masque, MeshState,
+    NodeState, Rotation, Transport,
 };

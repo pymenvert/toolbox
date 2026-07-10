@@ -152,6 +152,12 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
         config.limits.max_upload_mb.saturating_mul(1024 * 1024),
     )?;
 
+    // Dossier des LUT .cube (étalonnage) : créé pour que l'utilisateur
+    // puisse y déposer ses fichiers (ou via PUT /api/luts/<nom>).
+    if let Err(err) = std::fs::create_dir_all("luts") {
+        warn!(%err, "dossier luts/ non créé");
+    }
+
     // Reste d'une mise à jour OTA réussie (ancien binaire, script) : nettoyé.
     toolbox_control_http::ota::nettoyer_apres_demarrage();
 

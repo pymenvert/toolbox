@@ -5,6 +5,18 @@
 
 ## [Non publié]
 
+- **LUT 3D .cube** : étalonnage complet en un fichier (dossier `luts/`,
+  dépôt et sélection depuis l'onglet Couleur — les fichiers invalides sont
+  refusés avec la raison). Interpolation trilinéaire, MÊME formule CPU et
+  GPU (buffer storage, pas de texture filtrée dépendante du matériel),
+  appliquée après la correction couleur. Sauvée dans les presets,
+  OSC `/lut nom.cube`.
+- **Mesh warp** : grille de points de contrôle (2×2 à 9×9) par-dessus le
+  mapping 4 coins pour épouser les surfaces irrégulières — éditeur à la
+  souris dans l'onglet Mapping, déplacements bornés ±0,25, interpolation
+  bilinéaire, parité stricte CPU/GPU. Les vecteurs de référence de
+  l'homographie restent intouchés (le mesh est un décalage APRÈS le
+  mapping). Sauvé dans les presets de mapping.
 - **Boutons de régie** : **BLACKOUT** (voile noir avec rampe animée —
   300 ms par défaut, réglable — l'état complet continue en dessous et
   revient intact) et **FREEZE** (gel de la source vidéo sur la dernière

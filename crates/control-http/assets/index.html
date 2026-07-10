@@ -402,6 +402,25 @@
           relief). Ajuste les coins au clavier dans la liste (x,y normalis&eacute;s 0..1).</div>
         </div>
         <div class="card">
+          <h3>Mesh warp</h3>
+          <div class="presetRow">
+            <select id="meshTaille" style="flex:1;min-width:110px">
+              <option value="">D&eacute;sactiv&eacute;</option>
+              <option value="3x3">Grille 3&times;3</option>
+              <option value="5x3">Grille 5&times;3</option>
+              <option value="5x5">Grille 5&times;5</option>
+              <option value="9x5">Grille 9&times;5</option>
+              <option value="9x9">Grille 9&times;9</option>
+            </select>
+            <button id="meshRaz" class="mini danger">Aplatir</button>
+          </div>
+          <canvas id="meshCanvas" style="width:100%;aspect-ratio:16/9;background:#000;border:1px solid var(--border);border-radius:8px;margin-top:8px;touch-action:none;display:none"></canvas>
+          <div class="hint">Une grille de points par-dessus le mapping 4 coins, pour
+          &eacute;pouser les surfaces irr&eacute;guli&egrave;res : glisse chaque point (d&eacute;placements
+          &plusmn;0,25 max). &laquo; Aplatir &raquo; remet les points en place, changer la
+          taille repart d'une grille plate.</div>
+        </div>
+        <div class="card">
           <h3>Sortie</h3>
           <div class="presetRow">
             <select id="outMonitor" style="flex:1;min-width:120px"></select>
@@ -475,6 +494,18 @@
           <button id="colorReset" class="danger">Tout r&eacute;initialiser</button>
         </div>
         <div class="hint">Double-clic sur un curseur : retour &agrave; la valeur neutre.</div>
+      </div>
+      <div class="card">
+        <h3>LUT d'&eacute;talonnage (.cube)</h3>
+        <div class="presetRow">
+          <select id="lutSel" style="flex:1;min-width:140px"><option value="">Aucune</option></select>
+          <button id="lutUploadBtn" class="mini">+ D&eacute;poser un .cube</button>
+        </div>
+        <input type="file" id="lutFile" accept=".cube" style="display:none">
+        <div class="hint">Une LUT 3D appliqu&eacute;e apr&egrave;s la correction couleur
+        (m&ecirc;me rendu CPU et GPU, interpolation trilin&eacute;aire). Les fichiers
+        vivent dans le dossier <code>luts/</code> &agrave; c&ocirc;t&eacute; du logiciel.
+        Sauv&eacute;e dans les presets. OSC : <code>/lut nom.cube</code>.</div>
       </div>
     </div>
   </section>
@@ -884,7 +915,7 @@ function applyState(s) {
   state = s;
   renderTransport(); renderMediaInfo(); renderVolume(); renderLoop();
   renderPlaylist(); renderMapping(); renderColor();
-  renderBlending(); renderMasques(); renderEffects(); renderRegie();
+  renderBlending(); renderMasques(); renderEffects(); renderRegie(); renderMesh();
 }
 
 function onEvent(m) {
@@ -919,6 +950,11 @@ function onEvent(m) {
       renderMapping(); break;
     case "test_pattern_changed": state.test_pattern = m.pattern; renderMapping(); break;
     case "blending_changed": state.blending = m.blending; renderBlending(); break;
+    case "lut_changed": state.lut = m.name; renderLut(); break;
+    case "mesh_changed":
+      if (state.mapping) state.mapping.mesh = m.mesh;
+      if (meshDrag == null) renderMesh();
+      break;
     case "blackout_changed":
       state.blackout = { actif: m.actif, fondu_ms: m.fondu_ms };
       renderRegie(); break;
@@ -947,7 +983,7 @@ $$("nav a").forEach(a => a.addEventListener("click", () => {
   const p = a.dataset.page;
   $$(".page").forEach(s => s.classList.toggle("visible", s.id === "page-" + p));
   $("#pagetitle").textContent = pageTitles[p];
-  if (p === "mapping") { sizeStage(); renderBlending(); renderMasques(); }
+  if (p === "mapping") { sizeStage(); renderBlending(); renderMasques(); renderMesh(); }
   if (p === "features") loadFeatures();
   if (p === "lights") loadDmx();
   if (p === "cues") { loadCues(); loadMedia(); loadPresets(); }
@@ -1387,6 +1423,91 @@ $("#masqueAjoute").addEventListener("click", () => {
     { x: 0.4, y: 0.4 }, { x: 0.6, y: 0.4 }, { x: 0.6, y: 0.6 }, { x: 0.4, y: 0.6 }] });
 });
 
+/* Mesh warp : grille de points draggables (déplacements ±0.25). */
+const meshCv = $("#meshCanvas");
+let meshDrag = null; // index du point en cours de glissement
+const meshEnvoi = throttler(() => {
+  const m = state && state.mapping && state.mapping.mesh;
+  if (m) sendCmd({ cmd: "mesh_set", colonnes: m.colonnes, lignes: m.lignes, offsets: m.offsets });
+}, 80);
+function meshPoints() {
+  const m = state && state.mapping && state.mapping.mesh;
+  if (!m) return null;
+  const pts = [];
+  for (let j = 0; j < m.lignes; j++) for (let i = 0; i < m.colonnes; i++) {
+    const o = m.offsets[j * m.colonnes + i];
+    pts.push({ x: i / (m.colonnes - 1) + o.x, y: j / (m.lignes - 1) + o.y, i: i, j: j });
+  }
+  return pts;
+}
+function renderMesh() {
+  const m = state && state.mapping && state.mapping.mesh;
+  const sel = $("#meshTaille");
+  if (document.activeElement !== sel) sel.value = m ? (m.colonnes + "x" + m.lignes) : "";
+  meshCv.style.display = m ? "block" : "none";
+  if (!m) return;
+  const r = meshCv.getBoundingClientRect();
+  meshCv.width = Math.max(200, r.width); meshCv.height = Math.max(120, r.height);
+  const ctx = meshCv.getContext("2d");
+  ctx.clearRect(0, 0, meshCv.width, meshCv.height);
+  const X = x => x * meshCv.width, Y = y => y * meshCv.height;
+  const pts = meshPoints();
+  ctx.strokeStyle = "rgba(120,170,255,.55)"; ctx.lineWidth = 1;
+  for (let j = 0; j < m.lignes; j++) {
+    ctx.beginPath();
+    for (let i = 0; i < m.colonnes; i++) { const p = pts[j * m.colonnes + i]; i ? ctx.lineTo(X(p.x), Y(p.y)) : ctx.moveTo(X(p.x), Y(p.y)); }
+    ctx.stroke();
+  }
+  for (let i = 0; i < m.colonnes; i++) {
+    ctx.beginPath();
+    for (let j = 0; j < m.lignes; j++) { const p = pts[j * m.colonnes + i]; j ? ctx.lineTo(X(p.x), Y(p.y)) : ctx.moveTo(X(p.x), Y(p.y)); }
+    ctx.stroke();
+  }
+  pts.forEach((p, k) => {
+    ctx.beginPath();
+    ctx.arc(X(p.x), Y(p.y), meshDrag === k ? 8 : 6, 0, Math.PI * 2);
+    ctx.fillStyle = meshDrag === k ? "#ffd75e" : "#78aaff";
+    ctx.fill();
+  });
+}
+function meshPos(e) {
+  const r = meshCv.getBoundingClientRect();
+  return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height };
+}
+meshCv.addEventListener("pointerdown", e => {
+  const pts = meshPoints(); if (!pts) return;
+  const p = meshPos(e);
+  let best = -1, bd = 1e9;
+  pts.forEach((q, k) => { const d = Math.hypot(q.x - p.x, q.y - p.y); if (d < bd) { bd = d; best = k; } });
+  if (bd < 0.08) { meshDrag = best; meshCv.setPointerCapture(e.pointerId); renderMesh(); }
+});
+meshCv.addEventListener("pointermove", e => {
+  if (meshDrag == null) return;
+  const m = state.mapping.mesh, p = meshPos(e);
+  const pt = meshPoints()[meshDrag];
+  const cible = { x: p.x - pt.i / (m.colonnes - 1), y: p.y - pt.j / (m.lignes - 1) };
+  m.offsets[meshDrag] = {
+    x: Math.max(-0.25, Math.min(0.25, cible.x)),
+    y: Math.max(-0.25, Math.min(0.25, cible.y)),
+  };
+  renderMesh(); meshEnvoi();
+});
+["pointerup", "pointercancel"].forEach(ev => meshCv.addEventListener(ev, () => { meshDrag = null; meshEnvoi.flush(); renderMesh(); }));
+$("#meshTaille").addEventListener("change", () => {
+  const v = $("#meshTaille").value;
+  if (!v) { sendCmd({ cmd: "mesh_reset" }); return; }
+  const c = +v.split("x")[0], l = +v.split("x")[1];
+  const offsets = [];
+  for (let k = 0; k < c * l; k++) offsets.push({ x: 0, y: 0 });
+  sendCmd({ cmd: "mesh_set", colonnes: c, lignes: l, offsets: offsets });
+});
+$("#meshRaz").addEventListener("click", () => {
+  const m = state && state.mapping && state.mapping.mesh;
+  if (!m) return;
+  sendCmd({ cmd: "mesh_set", colonnes: m.colonnes, lignes: m.lignes,
+    offsets: m.offsets.map(() => ({ x: 0, y: 0 })) });
+});
+
 /* Presets de mapping (indépendants des presets d'état complet). */
 async function loadMapPresets() {
   let names = [];
@@ -1504,7 +1625,48 @@ function renderColor() {
     if (v !== undefined) { inp.value = v; sliderOut(inp); }
   });
   renderEffects();
+  renderLut();
 }
+
+/* LUT d'étalonnage (.cube). */
+async function loadLuts() {
+  try {
+    const noms = await api("/api/luts") || [];
+    const sel = $("#lutSel");
+    const courante = sel.value;
+    sel.innerHTML = '<option value="">Aucune</option>';
+    noms.forEach(n => {
+      const o = document.createElement("option");
+      o.value = n; o.textContent = n;
+      sel.appendChild(o);
+    });
+    sel.value = (state && state.lut) || courante || "";
+  } catch (e) { /* hors ligne */ }
+}
+function renderLut() {
+  if (!state) return;
+  const sel = $("#lutSel");
+  if (document.activeElement !== sel) sel.value = state.lut || "";
+}
+$("#lutSel").addEventListener("change", () =>
+  sendCmd({ cmd: "lut_set", name: $("#lutSel").value || null }));
+$("#lutUploadBtn").addEventListener("click", () => $("#lutFile").click());
+$("#lutFile").addEventListener("change", async () => {
+  const f = $("#lutFile").files[0];
+  if (!f) return;
+  try {
+    const r = await fetch("/api/luts/" + encodeURIComponent(f.name), { method: "PUT", body: f });
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({}));
+      toast(e.error || "Fichier .cube refusé", "err");
+    } else {
+      toast("LUT déposée : " + f.name);
+      await loadLuts();
+      sendCmd({ cmd: "lut_set", name: f.name });
+    }
+  } catch (e) { toast("Dépôt impossible", "err"); }
+  $("#lutFile").value = "";
+});
 
 /* Effets (0 = inactif). */
 $$(".fx").forEach(inp => {
@@ -2300,7 +2462,7 @@ $("#chataigneLance").addEventListener("click", async () => {
   try {
     await api("/api/chataigne/lancer", { method: "POST" });
     toast("Chataigne lancé sur la machine du node");
-  } catch (e) { toast("Lancement impossible", true); loadChataigne(); }
+  } catch (e) { toast("Lancement impossible", "err"); loadChataigne(); }
 });
 
 /* Parc de nodes (mDNS). */
@@ -2412,6 +2574,7 @@ function renderSante(sys) {
   loadSystem();
   loadFleet();
   loadChataigne();
+  loadLuts();
   setInterval(loadSystem, 5000);
   setInterval(loadFleet, 7000);
   loadParc();

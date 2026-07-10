@@ -99,6 +99,10 @@ impl OutputControl {
     }
 }
 
+/// Cache de la LUT d'aperçu : (nom du fichier, LUT chargée).
+type CacheLutApercu =
+    std::sync::Arc<tokio::sync::Mutex<Option<(String, std::sync::Arc<toolbox_engine::Lut3d>)>>>;
+
 /// Dépendances partagées par tous les handlers.
 #[derive(Clone)]
 pub struct AppState {
@@ -126,6 +130,9 @@ pub struct AppState {
     /// et les requêtes concurrentes attendent le même rendu au lieu d'en
     /// lancer chacune un (important sur Pi).
     preview: std::sync::Arc<tokio::sync::Mutex<PreviewCache>>,
+    /// LUT chargée pour l'aperçu (le nom vient de `state.lut`, le fichier
+    /// de `luts/`) — même logique de cache que la fenêtre de sortie.
+    lut_apercu: CacheLutApercu,
     /// Interrupteurs de fonctions (onglet « Fonctions ») : lecture pour
     /// l'état effectif, écriture pour les bascules — le contrôleur du node
     /// observe le même canal.
@@ -172,6 +179,7 @@ impl AppState {
             node_name,
             version,
             preview: std::sync::Arc::new(tokio::sync::Mutex::new(PreviewCache::default())),
+            lut_apercu: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
             // Canal autonome par défaut (tests, assemblages partiels) : le
             // binaire branche le vrai canal — partagé avec le contrôleur de
             // services — via `with_features`.
@@ -287,6 +295,8 @@ pub fn router(app: AppState) -> Router {
         .route("/api/system/shutdown", post(system_shutdown))
         .route("/api/chataigne", get(chataigne_get))
         .route("/api/chataigne/lancer", post(chataigne_lancer))
+        .route("/api/luts", get(luts_list))
+        .route("/api/luts/{name}", put(lut_upload).delete(lut_delete))
         .route("/api/preview.png", get(preview_png))
         .route("/api/diagnostic.zip", get(diagnostic_zip))
         .route("/api/features", get(features_get).post(features_set))
@@ -714,10 +724,19 @@ async fn preview_png(
     let frame_key = video.as_ref().map(|f| f.rgba.as_ptr() as usize);
     let time = app.started_at.elapsed().as_secs_f32();
 
+    let lut = lut_pour_apercu(&app, state.lut.as_deref()).await;
     let mut cache = app.preview.lock().await;
     let png = cache.get_or_render(width, &state, frame_key, || {
         let mut pixels = vec![0u32; (width * height) as usize];
-        toolbox_engine::render_frame(&state, video.as_ref(), time, width, height, &mut pixels);
+        toolbox_engine::raster::render_frame_lut(
+            &state,
+            video.as_ref(),
+            lut.as_deref(),
+            time,
+            width,
+            height,
+            &mut pixels,
+        );
         // L'aperçu reflète le blackout de régie (niveau final, sans la
         // rampe animée — elle vit dans la fenêtre de sortie).
         if state.blackout.actif {
@@ -754,6 +773,105 @@ async fn preview_png(
         )
             .into_response(),
         None => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
+}
+
+/// LUT à appliquer à l'aperçu : chargée depuis `luts/` et mémorisée tant
+/// que l'état pointe le même fichier. Illisible = pas de LUT (la fenêtre
+/// de sortie journalise déjà l'erreur).
+async fn lut_pour_apercu(
+    app: &AppState,
+    nom: Option<&str>,
+) -> Option<std::sync::Arc<toolbox_engine::Lut3d>> {
+    let nom = nom?;
+    let mut cache = app.lut_apercu.lock().await;
+    if cache.as_ref().map(|(n, _)| n.as_str()) != Some(nom) {
+        let charge = std::fs::read_to_string(std::path::Path::new("luts").join(nom))
+            .ok()
+            .and_then(|t| toolbox_engine::Lut3d::depuis_texte(&t).ok());
+        *cache = charge.map(|l| (nom.to_string(), std::sync::Arc::new(l)));
+    }
+    cache.as_ref().map(|(_, l)| l.clone())
+}
+
+/// Les fichiers `.cube` disponibles dans `luts/`.
+async fn luts_list() -> Json<Vec<String>> {
+    let mut noms: Vec<String> = std::fs::read_dir("luts")
+        .map(|entries| {
+            entries
+                .filter_map(Result::ok)
+                .filter_map(|e| e.file_name().into_string().ok())
+                .filter(|n| n.to_ascii_lowercase().ends_with(".cube"))
+                .collect()
+        })
+        .unwrap_or_default();
+    noms.sort();
+    Json(noms)
+}
+
+/// Dépose une LUT `.cube` (le contenu est parsé AVANT d'écrire : un
+/// fichier invalide est refusé avec la raison).
+async fn lut_upload(
+    axum::extract::Path(name): axum::extract::Path<String>,
+    body: axum::body::Bytes,
+) -> (StatusCode, Json<serde_json::Value>) {
+    if let Err(err) = toolbox_core::valider_nom_lut(&name) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": err.to_string() })),
+        );
+    }
+    if body.len() > 64 * 1024 * 1024 {
+        return (
+            StatusCode::PAYLOAD_TOO_LARGE,
+            Json(serde_json::json!({ "error": "fichier .cube trop gros (64 Mo max)" })),
+        );
+    }
+    let texte = match std::str::from_utf8(&body) {
+        Ok(t) => t,
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": "fichier .cube non textuel" })),
+            );
+        }
+    };
+    if let Err(err) = toolbox_engine::Lut3d::depuis_texte(texte) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": format!(".cube invalide : {err}") })),
+        );
+    }
+    let chemin = std::path::Path::new("luts").join(&name);
+    let ecrit = std::fs::create_dir_all("luts").and_then(|()| std::fs::write(&chemin, &body));
+    match ecrit {
+        Ok(()) => {
+            info!(name, "LUT déposée");
+            (StatusCode::OK, Json(serde_json::json!({ "ok": true })))
+        }
+        Err(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": err.to_string() })),
+        ),
+    }
+}
+
+/// Supprime une LUT du dossier `luts/`.
+async fn lut_delete(
+    axum::extract::Path(name): axum::extract::Path<String>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    if let Err(err) = toolbox_core::valider_nom_lut(&name) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": err.to_string() })),
+        );
+    }
+    match std::fs::remove_file(std::path::Path::new("luts").join(&name)) {
+        Ok(()) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))),
+        Err(err) => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": err.to_string() })),
+        ),
     }
 }
 

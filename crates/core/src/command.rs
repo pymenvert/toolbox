@@ -165,6 +165,20 @@ pub enum Command {
     MasqueSupprime {
         index: u8,
     },
+    /// LUT 3D d'étalonnage : fichier `.cube` du dossier `luts/` (nom sans
+    /// chemin), `null` = retirer. OSC : `/lut nom` ou `/lut` seul.
+    LutSet {
+        name: Option<String>,
+    },
+    /// Pose (ou remplace) la grille de mesh warp : `colonnes × lignes`
+    /// déplacements (±0,25 max), ligne par ligne.
+    MeshSet {
+        colonnes: u8,
+        lignes: u8,
+        offsets: Vec<crate::state::Corner>,
+    },
+    /// Retire la grille de mesh warp (retour au mapping 4 coins pur).
+    MeshReset,
     /// Blackout de régie : voile noir sur la sortie (l'état continue en
     /// dessous). `fondu_ms` absent = durée mémorisée. OSC : `/blackout`.
     BlackoutSet {
@@ -454,6 +468,35 @@ mod tests {
             (
                 serde_json::to_string(&Command::MasqueSupprime { index: 1 }).expect("ser"),
                 r#"{"cmd":"masque_supprime","index":1}"#,
+            ),
+            (
+                serde_json::to_string(&Command::LutSet {
+                    name: Some("cinema.cube".into()),
+                })
+                .expect("ser"),
+                r#"{"cmd":"lut_set","name":"cinema.cube"}"#,
+            ),
+            (
+                serde_json::to_string(&Command::LutSet { name: None }).expect("ser"),
+                r#"{"cmd":"lut_set","name":null}"#,
+            ),
+            (
+                serde_json::to_string(&Command::MeshSet {
+                    colonnes: 2,
+                    lignes: 2,
+                    offsets: vec![
+                        crate::state::Corner { x: 0.0, y: 0.0 },
+                        crate::state::Corner { x: 0.1, y: 0.0 },
+                        crate::state::Corner { x: 0.0, y: 0.0 },
+                        crate::state::Corner { x: 0.0, y: 0.0 },
+                    ],
+                })
+                .expect("ser"),
+                r#"{"cmd":"mesh_set","colonnes":2,"lignes":2,"offsets":[{"x":0.0,"y":0.0},{"x":0.1,"y":0.0},{"x":0.0,"y":0.0},{"x":0.0,"y":0.0}]}"#,
+            ),
+            (
+                serde_json::to_string(&Command::MeshReset).expect("ser"),
+                r#"{"cmd":"mesh_reset"}"#,
             ),
             (
                 serde_json::to_string(&Command::BlackoutSet {

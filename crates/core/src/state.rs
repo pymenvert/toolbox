@@ -113,6 +113,21 @@ pub struct Masque {
     pub corners: [Corner; 4],
 }
 
+/// Mesh warp (V3) : une grille de points de contrôle par-dessus le mapping
+/// 4 coins, pour épouser les surfaces irrégulières. Chaque point porte un
+/// DÉPLACEMENT (dx, dy) en espace de sortie, interpolé bilinéairement entre
+/// les points — approximation exacte pour des corrections modérées
+/// (déplacements bornés à ±0,25).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MeshState {
+    /// Points par ligne (2..=9).
+    pub colonnes: u8,
+    /// Points par colonne (2..=9).
+    pub lignes: u8,
+    /// `colonnes × lignes` déplacements, ligne par ligne (haut → bas).
+    pub offsets: Vec<Corner>,
+}
+
 /// Mapping 4 coins + orientation + recadrage.
 /// Ordre des coins : 0=HG, 1=HD, 2=BD, 3=BG.
 ///
@@ -134,6 +149,10 @@ pub struct MappingState {
     pub flip_v: bool,
     #[serde(default)]
     pub crop: CropState,
+    /// Grille de mesh warp (`None` = désactivé). Défaut serde : les
+    /// anciens presets restent chargeables.
+    #[serde(default)]
+    pub mesh: Option<MeshState>,
 }
 
 impl Default for MappingState {
@@ -150,6 +169,7 @@ impl Default for MappingState {
             flip_h: false,
             flip_v: false,
             crop: CropState::default(),
+            mesh: None,
         }
     }
 }
@@ -368,6 +388,10 @@ pub struct NodeState {
     /// Masques noirs en espace de sortie (8 max).
     #[serde(default)]
     pub masques: Vec<Masque>,
+    /// LUT 3D d'étalonnage (fichier `.cube` du dossier `luts/`, nom sans
+    /// chemin). `None` = pas de LUT. Sauvée dans les presets.
+    #[serde(default)]
+    pub lut: Option<String>,
     /// Voile noir de régie (bouton panique). Défauts serde : anciens
     /// presets OK.
     #[serde(default)]
@@ -472,6 +496,14 @@ pub enum Event {
     MasqueSupprimeEvt {
         index: u8,
     },
+    /// LUT d'étalonnage changée (`None` = retirée).
+    LutChanged {
+        name: Option<String>,
+    },
+    /// Grille de mesh warp posée, remplacée ou retirée (`None`).
+    MeshChanged {
+        mesh: Option<MeshState>,
+    },
     /// Blackout de régie posé ou levé.
     BlackoutChanged {
         actif: bool,
@@ -530,6 +562,47 @@ pub enum Event {
 /// interfaces.
 pub fn validate_media_path(path: &str) -> Result<(), CoreError> {
     crate::source::MediaSource::parse(path).map(|_| ())
+}
+
+/// Valide une grille de mesh warp : dimensions 2..=9, un déplacement par
+/// point, déplacements bornés à ±0,25 (au-delà, l'approximation par champ
+/// de déplacements n'est plus fidèle).
+pub fn valider_mesh(mesh: &MeshState) -> Result<(), CoreError> {
+    if !(2..=9).contains(&mesh.colonnes) || !(2..=9).contains(&mesh.lignes) {
+        return Err(CoreError::InvalidCommand(format!(
+            "grille de mesh hors bornes : {}×{} (2..9)",
+            mesh.colonnes, mesh.lignes
+        )));
+    }
+    let attendu = usize::from(mesh.colonnes) * usize::from(mesh.lignes);
+    if mesh.offsets.len() != attendu {
+        return Err(CoreError::InvalidCommand(format!(
+            "{} déplacements fournis, {attendu} attendus",
+            mesh.offsets.len()
+        )));
+    }
+    for o in &mesh.offsets {
+        check_range("mesh.dx", o.x, -0.25, 0.25)?;
+        check_range("mesh.dy", o.y, -0.25, 0.25)?;
+    }
+    Ok(())
+}
+
+/// Valide un nom de LUT : simple nom de fichier `.cube` du dossier
+/// `luts/`, sans chemin ni traversée.
+pub fn valider_nom_lut(name: &str) -> Result<(), CoreError> {
+    let ok = !name.is_empty()
+        && name.len() <= 128
+        && !name.contains(['/', '\\'])
+        && !name.contains("..")
+        && name.to_ascii_lowercase().ends_with(".cube");
+    if ok {
+        Ok(())
+    } else {
+        Err(CoreError::InvalidCommand(format!(
+            "nom de LUT invalide : « {name} » (fichier .cube du dossier luts/, sans chemin)"
+        )))
+    }
 }
 
 impl NodeState {
@@ -788,6 +861,31 @@ impl NodeState {
                 self.masques.remove(i);
                 Ok(vec![Event::MasqueSupprimeEvt { index: *index }])
             }
+            Command::MeshSet {
+                colonnes,
+                lignes,
+                offsets,
+            } => {
+                let mesh = MeshState {
+                    colonnes: *colonnes,
+                    lignes: *lignes,
+                    offsets: offsets.clone(),
+                };
+                valider_mesh(&mesh)?;
+                self.mapping.mesh = Some(mesh.clone());
+                Ok(vec![Event::MeshChanged { mesh: Some(mesh) }])
+            }
+            Command::MeshReset => {
+                self.mapping.mesh = None;
+                Ok(vec![Event::MeshChanged { mesh: None }])
+            }
+            Command::LutSet { name } => {
+                if let Some(name) = name {
+                    valider_nom_lut(name)?;
+                }
+                self.lut.clone_from(name);
+                Ok(vec![Event::LutChanged { name: name.clone() }])
+            }
             Command::BlackoutSet { actif, fondu_ms } => {
                 if let Some(ms) = fondu_ms {
                     if *ms > 10_000 {
@@ -925,6 +1023,12 @@ impl NodeState {
                 "blackout.fondu_ms hors bornes : {} (10 000 max)",
                 self.blackout.fondu_ms
             )));
+        }
+        if let Some(lut) = &self.lut {
+            valider_nom_lut(lut)?;
+        }
+        if let Some(mesh) = &self.mapping.mesh {
+            valider_mesh(mesh)?;
         }
         if let Some(media) = &self.player.media {
             validate_media_path(media)?;

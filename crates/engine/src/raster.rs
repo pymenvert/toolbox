@@ -39,6 +39,20 @@ pub fn render_frame(
     height: u32,
     out: &mut [u32],
 ) {
+    render_frame_lut(state, video, None, time, width, height, out);
+}
+
+/// Comme [`render_frame`], avec une LUT 3D d'étalonnage déjà chargée
+/// (l'appelant fait le cache disque : `state.lut` ne porte que le nom).
+pub fn render_frame_lut(
+    state: &NodeState,
+    video: Option<&VideoFrame>,
+    lut: Option<&crate::lut::Lut3d>,
+    time: f32,
+    width: u32,
+    height: u32,
+    out: &mut [u32],
+) {
     let source = match (state.test_pattern, video) {
         (Some(pattern), _) => Source::Pattern(pattern),
         (None, Some(frame)) if state.player.transport != Transport::Stopped => Source::Video(frame),
@@ -68,6 +82,12 @@ pub fn render_frame(
     let effects = state.effects;
     let blending = state.blending;
     let masques = &state.masques;
+    // Mesh warp : suit l'interrupteur du mapping (bypass = image brute).
+    let mesh = if state.mapping.enabled {
+        state.mapping.mesh.as_ref()
+    } else {
+        None
+    };
     // Parallélisé par lignes (rayon) : chaque pixel est indépendant — le
     // repli CPU et l'aperçu web gagnent ~un facteur nb-de-cœurs.
     use rayon::prelude::*;
@@ -83,11 +103,56 @@ pub fn render_frame(
                     *px = 0;
                     continue;
                 }
-                let couleur = shade(&source, &warp_inv, &params, &effects, time, u, v);
+                // Mesh warp : l'échantillonnage est décalé, mais masques et
+                // blending restent en espace de sortie physique.
+                let (mu, mv) = match mesh {
+                    Some(m) => {
+                        let (dx, dy) = deplacement_mesh(m, u, v);
+                        (u - dx, v - dy)
+                    }
+                    None => (u, v),
+                };
+                let couleur = shade(&source, &warp_inv, &params, &effects, lut, time, mu, mv);
                 // Fondu de bords : atténuation finale en espace de sortie.
                 *px = appliquer_blending(&blending, couleur, u, v);
             }
         });
+}
+
+/// Déplacement du mesh warp au pixel (u, v) : interpolation bilinéaire des
+/// déplacements des points de contrôle sur la grille régulière. MÊME
+/// formule que `warp.wgsl` (deplacement_mesh) — toute divergence est un bug.
+pub fn deplacement_mesh(mesh: &toolbox_core::state::MeshState, u: f64, v: f64) -> (f64, f64) {
+    let c = usize::from(mesh.colonnes);
+    let l = usize::from(mesh.lignes);
+    if c < 2 || l < 2 || mesh.offsets.len() != c * l {
+        return (0.0, 0.0);
+    }
+    #[allow(clippy::cast_precision_loss)] // ≤ 9
+    let x = u.clamp(0.0, 1.0) * (c - 1) as f64;
+    #[allow(clippy::cast_precision_loss)]
+    let y = v.clamp(0.0, 1.0) * (l - 1) as f64;
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let i = (x.floor() as usize).min(c - 2);
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let j = (y.floor() as usize).min(l - 2);
+    #[allow(clippy::cast_precision_loss)]
+    let fx = x - i as f64;
+    #[allow(clippy::cast_precision_loss)]
+    let fy = y - j as f64;
+    let point = |i: usize, j: usize| -> (f64, f64) {
+        let o = &mesh.offsets[j * c + i];
+        (f64::from(o.x), f64::from(o.y))
+    };
+    let lerp = |a: f64, b: f64, t: f64| a + (b - a) * t;
+    let (x00, y00) = point(i, j);
+    let (x10, y10) = point(i + 1, j);
+    let (x01, y01) = point(i, j + 1);
+    let (x11, y11) = point(i + 1, j + 1);
+    (
+        lerp(lerp(x00, x10, fx), lerp(x01, x11, fx), fy),
+        lerp(lerp(y00, y10, fx), lerp(y01, y11, fx), fy),
+    )
 }
 
 /// Le pixel (u, v) est-il couvert par un masque ? Test « même côté » sur les
@@ -195,11 +260,13 @@ pub fn appliquer_blackout(out: &mut [u32], niveau: f32) {
 }
 
 /// Couleur d'un pixel de sortie, packée en `0RGB`.
+#[allow(clippy::too_many_arguments)] // pipeline de rendu : tout est requis
 fn shade(
     source: &Source<'_>,
     warp_inv: &Mat3,
     params: &RenderParams,
     effects: &EffectsState,
+    lut: Option<&crate::lut::Lut3d>,
     time: f32,
     u: f64,
     v: f64,
@@ -222,8 +289,17 @@ fn shade(
     } else {
         sample_source(source, tu, tv)
     };
-    // 4. Correction couleur puis effets de teinte (postérisation, bruit).
+    // 4. Correction couleur, LUT d'étalonnage, puis effets de teinte
+    //    (postérisation, bruit). MÊME ordre que warp.wgsl.
     let rgb = apply_color(&params.color, rgb);
+    let rgb = match lut {
+        Some(lut) => lut.appliquer([
+            rgb[0].clamp(0.0, 1.0),
+            rgb[1].clamp(0.0, 1.0),
+            rgb[2].clamp(0.0, 1.0),
+        ]),
+        None => rgb,
+    };
     let rgb = apply_pixel_effects(effects, rgb, tu, tv, time);
     pack(rgb)
 }
@@ -463,6 +539,85 @@ fn pack(rgb: [f32; 3]) -> u32 {
 mod tests {
     use super::*;
     use toolbox_core::{Command, NodeState};
+
+    /// Une LUT négatif inverse chaque canal du rendu (à l'arrondi près).
+    #[test]
+    fn la_lut_est_appliquee_au_rendu() {
+        let texte = "LUT_3D_SIZE 2\n1 1 1\n0 1 1\n1 0 1\n0 0 1\n1 1 0\n0 1 0\n1 0 0\n0 0 0\n";
+        let lut = crate::lut::Lut3d::depuis_texte(texte).expect("lut");
+        let s = NodeState {
+            test_pattern: Some(toolbox_core::TestPattern::Checker),
+            ..NodeState::default()
+        };
+        let (w, h) = (16, 16);
+        let mut sans = vec![0u32; (w * h) as usize];
+        let mut avec = vec![0u32; (w * h) as usize];
+        render_frame(&s, None, 0.0, w, h, &mut sans);
+        render_frame_lut(&s, None, Some(&lut), 0.0, w, h, &mut avec);
+        assert_ne!(sans, avec, "la LUT doit changer l'image");
+        for (a, b) in sans.iter().zip(&avec) {
+            for d in [16u32, 8, 0] {
+                let ca = i64::from((a >> d) & 0xFF);
+                let cb = i64::from((b >> d) & 0xFF);
+                assert!(
+                    (ca + cb - 255).abs() <= 1,
+                    "canal non inversé : {ca} + {cb} != 255"
+                );
+            }
+        }
+    }
+
+    /// Un mesh identité ne change rien ; un décalage uniforme de +0,1 en x
+    /// déplace l'échantillonnage de 2 px sur 20 (translation exacte).
+    #[test]
+    fn le_mesh_decale_l_echantillonnage() {
+        let mut s = NodeState {
+            test_pattern: Some(toolbox_core::TestPattern::Checker),
+            ..NodeState::default()
+        };
+        let (w, h) = (20u32, 20u32);
+        let mut sans = vec![0u32; 400];
+        render_frame(&s, None, 0.0, w, h, &mut sans);
+
+        let zero = toolbox_core::state::Corner { x: 0.0, y: 0.0 };
+        s.mapping.mesh = Some(toolbox_core::state::MeshState {
+            colonnes: 2,
+            lignes: 2,
+            offsets: vec![zero; 4],
+        });
+        let mut identite = vec![0u32; 400];
+        render_frame(&s, None, 0.0, w, h, &mut identite);
+        assert_eq!(sans, identite, "mesh identité = rendu inchangé");
+
+        let dx = toolbox_core::state::Corner { x: 0.1, y: 0.0 };
+        s.mapping.mesh = Some(toolbox_core::state::MeshState {
+            colonnes: 2,
+            lignes: 2,
+            offsets: vec![dx; 4],
+        });
+        let mut decale = vec![0u32; 400];
+        render_frame(&s, None, 0.0, w, h, &mut decale);
+        assert_ne!(sans, decale);
+        // Translation de 2 px attendue. Les pixels dont l'échantillon tombe
+        // PILE sur une frontière de case peuvent basculer d'un côté ou de
+        // l'autre selon l'arrondi f64 (0.225 - 0.1 ≠ 0.125 exactement) :
+        // on tolère cette poignée de pixels-frontière.
+        for y in 0..20usize {
+            for x in 2..20usize {
+                // Échantillon pile sur une frontière de case du damier
+                // (8×8 cases) : le côté choisi dépend de l'arrondi, exclu.
+                let u2 = (x as f64 + 0.5) / 20.0 - 0.1;
+                if (u2 * 8.0 - (u2 * 8.0).round()).abs() < 1e-9 {
+                    continue;
+                }
+                assert_eq!(
+                    decale[y * 20 + x],
+                    sans[y * 20 + x - 2],
+                    "pixel ({x},{y}) : translation de 2 px attendue"
+                );
+            }
+        }
+    }
 
     /// La rampe de blackout progresse linéairement puis sature à la cible.
     #[test]

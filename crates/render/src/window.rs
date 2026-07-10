@@ -25,7 +25,6 @@ use toolbox_core::{MonitorInfo, NodeState, OutputSettings};
 use toolbox_engine::VideoFrame;
 
 use crate::gpu::GpuPainter;
-use toolbox_engine::raster::render_frame;
 
 /// Réglages fixes de la fenêtre (les réglages à chaud passent par
 /// [`OutputChannels::settings`]).
@@ -155,6 +154,7 @@ fn run_event_loop(config: WindowConfig, channels: OutputChannels) {
         blackout_depuis: std::time::Instant::now(),
         blackout_niveau: 0.0,
         frame_gelee: None,
+        lut_cache: None,
     };
     if let Err(err) = event_loop.run_app(&mut app) {
         error!(%err, "event loop de la fenêtre de sortie terminé en erreur");
@@ -251,6 +251,9 @@ struct OutputApp {
     blackout_niveau: f32,
     /// Frame retenue pendant un gel d'image (`state.freeze`).
     frame_gelee: Option<VideoFrame>,
+    /// LUT chargée depuis `luts/<nom>` — `None` dans la paire : fichier
+    /// illisible (mémorisé pour ne pas relire le disque à chaque frame).
+    lut_cache: Option<(String, Option<toolbox_engine::Lut3d>)>,
 }
 
 impl OutputApp {
@@ -369,19 +372,45 @@ impl OutputApp {
         }
     }
 
+    /// Charge (et mémorise) la LUT nommée par l'état. Un fichier illisible
+    /// est journalisé une fois puis ignoré.
+    fn sync_lut_cache(&mut self, nom: Option<&str>) {
+        match nom {
+            Some(nom) => {
+                if self.lut_cache.as_ref().map(|(n, _)| n.as_str()) != Some(nom) {
+                    let chemin = std::path::Path::new("luts").join(nom);
+                    let charge = std::fs::read_to_string(&chemin)
+                        .map_err(|e| e.to_string())
+                        .and_then(|t| toolbox_engine::Lut3d::depuis_texte(&t));
+                    match &charge {
+                        Ok(lut) => info!(nom, taille = lut.taille, "LUT d'étalonnage chargée"),
+                        Err(err) => warn!(nom, %err, "LUT illisible — ignorée"),
+                    }
+                    self.lut_cache = Some((nom.to_string(), charge.ok()));
+                }
+            }
+            None => self.lut_cache = None,
+        }
+    }
+
     fn redraw(&mut self) {
         // Fonction coupée : aucun rendu, quel que soit l'événement.
         if !*self.enabled.borrow() {
             return;
         }
-        let (Some(window), Some(painter)) = (&self.window, &mut self.painter) else {
+        // Les mutations de cache (LUT, gel, rampe) précèdent l'emprunt du
+        // peintre : une méthode `&mut self` ne peut pas cohabiter avec lui.
+        let Some(size) = self.window.as_ref().map(|w| w.inner_size()) else {
             return;
         };
-        let size = window.inner_size();
+        if self.painter.is_none() {
+            return;
+        }
         let (Some(w), Some(h)) = (NonZeroU32::new(size.width), NonZeroU32::new(size.height)) else {
             return; // fenêtre réduite : rien à peindre
         };
         let snapshot = self.state.borrow().clone();
+        self.sync_lut_cache(snapshot.lut.as_deref());
         // Gel d'image : la frame affichée au moment du gel est retenue tant
         // que `freeze` est posé — le transport continue en dessous.
         let video = if snapshot.freeze {
@@ -411,12 +440,25 @@ impl OutputApp {
         );
         self.blackout_niveau = niveau;
         let time = self.started_at.elapsed().as_secs_f32();
+        let lut = self
+            .lut_cache
+            .as_ref()
+            .and_then(|(nom, lut)| lut.as_ref().map(|l| (nom.as_str(), l)));
         // L'emprunt du peintre doit se terminer avant de compter la frame
         // (le compteur emprunte `self` à son tour).
+        let Some(painter) = self.painter.as_mut() else {
+            return;
+        };
         let presented = match painter {
-            Painter::Gpu(gpu) => {
-                gpu.render(&snapshot, video.as_ref(), time, w.get(), h.get(), niveau)
-            }
+            Painter::Gpu(gpu) => gpu.render(
+                &snapshot,
+                video.as_ref(),
+                lut,
+                time,
+                w.get(),
+                h.get(),
+                niveau,
+            ),
             Painter::Cpu(surface) => {
                 if let Err(err) = surface.resize(w, h) {
                     warn!(%err, "surface de sortie non retaillée");
@@ -424,9 +466,10 @@ impl OutputApp {
                 }
                 match surface.buffer_mut() {
                     Ok(mut buffer) => {
-                        render_frame(
+                        toolbox_engine::raster::render_frame_lut(
                             &snapshot,
                             video.as_ref(),
+                            lut.map(|(_, l)| l),
                             time,
                             w.get(),
                             h.get(),
