@@ -5,6 +5,22 @@
 
 ## [Non publié]
 
+- **Installation par profils** : `deploy/installer-windows.ps1` (nouveau)
+  et `deploy/install.sh` (refondu) proposent Complet / Lecteur+Mapping /
+  Synchro / Lumières / Minimal — chaque profil écrit `node.toml` +
+  `fonctions.json`, les fonctions inutiles sont réellement coupées.
+  L'installateur Windows sait télécharger la dernière release tout seul.
+- **Smoke test CI** : les jobs Linux et Windows lancent désormais le VRAI
+  binaire (`deploy/smoke.sh`) et vérifient l'API vivante (health, state,
+  features) avant de publier quoi que ce soit.
+- **Télémétrie opt-in** : chaque panic est consigné dans `logs/crash.txt`
+  (diagnostic local). Si — et seulement si — `[telemetrie] url` est
+  configurée, le rapport est envoyé au démarrage suivant puis supprimé.
+- **Lanceur Chataigne** : carte Système → Chataigne (détection, lancement,
+  lien de téléchargement officiel) + API `/api/chataigne`.
+- **Manuel** : sections Tailscale (contrôle à distance), profils
+  d'installation, télémétrie ; table node.toml complétée
+  (`[sync]`, `[security]`, `[telemetrie]`).
 - **Slots intelligents** : les cues gagnent les **jours de la semaine**
   (« ven sam à 20:00 »), les actions **lumières** (rappel de scène DMX,
   chaser start/stop) et le déclenchement **OSC** (`/cue/go nom`) et

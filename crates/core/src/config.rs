@@ -243,6 +243,18 @@ impl Default for SyncSettings {
     }
 }
 
+/// Télémétrie d'incidents — STRICTEMENT opt-in. Sans URL configurée, rien
+/// ne sort jamais de la machine. Avec une URL : au démarrage suivant un
+/// crash, le rapport (`crash.txt` du dossier de logs) est envoyé en POST
+/// puis supprimé. Aucune donnée personnelle : panic, version, nom du node.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Telemetrie {
+    /// Destination des rapports de crash (`"https://exemple.fr/rapports"`).
+    /// Absente (défaut) : télémétrie totalement désactivée.
+    pub url: Option<String>,
+}
+
 /// Sécurité de l'interface web (P4.4). Sans mot de passe : réseau local de
 /// confiance, comportement historique.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -310,6 +322,7 @@ pub struct NodeConfig {
     pub sync: SyncSettings,
     pub limits: Limits,
     pub midi: MidiSettings,
+    pub telemetrie: Telemetrie,
 }
 
 impl NodeConfig {
@@ -409,6 +422,21 @@ mod tests {
         assert_eq!(cfg.midi.bindings[1].cc, Some(7));
         assert_eq!(cfg.midi.bindings[1].scale, Some(ScaleTarget::Volume));
         assert_eq!(cfg.midi.bindings[2].channel, Some(10));
+    }
+
+    #[test]
+    fn telemetrie_absente_par_defaut() {
+        // Opt-in strict : sans section [telemetrie], aucune URL — et donc
+        // aucun envoi possible.
+        let cfg: NodeConfig = toml::from_str("").expect("parse");
+        assert_eq!(cfg.telemetrie.url, None);
+
+        let cfg: NodeConfig =
+            toml::from_str("[telemetrie]\nurl = \"https://exemple.fr/rapports\"").expect("parse");
+        assert_eq!(
+            cfg.telemetrie.url.as_deref(),
+            Some("https://exemple.fr/rapports")
+        );
     }
 
     #[test]

@@ -35,6 +35,11 @@ jobs:
         run: |
           set -o pipefail
           cargo test --workspace 2>&1 | tee tests.log
+      - name: Smoke test (binaire réel, API vivante)
+        run: |
+          set -o pipefail
+          cargo build -p toolbox-node 2>&1 | tail -1
+          bash deploy/smoke.sh target/debug/toolbox-node 2>&1 | tee smoke.log
       - name: Publier les logs en cas d'échec
         if: failure()
         run: |
@@ -42,7 +47,7 @@ jobs:
           git checkout -q --orphan ci-logs-check
           git rm -rfq --cached .
           echo "run $GITHUB_RUN_ID commit $GITHUB_SHA" > run.txt
-          for f in run.txt fmt.log clippy.log tests.log; do if [ -f "$f" ]; then git add -f "$f"; fi; done
+          for f in run.txt fmt.log clippy.log tests.log smoke.log; do if [ -f "$f" ]; then git add -f "$f"; fi; done
           git commit -qm "logs check $GITHUB_RUN_ID"
           git push -f origin ci-logs-check
 
@@ -58,6 +63,12 @@ jobs:
         run: |
           set -o pipefail
           cargo test --workspace 2>&1 | tee windows.log
+      - name: Smoke test (binaire réel, API vivante)
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo build -p toolbox-node 2>&1 | tail -1
+          bash deploy/smoke.sh target/debug/toolbox-node.exe 2>&1 | tee smoke.log
       - name: Publier les logs en cas d'échec
         if: failure()
         shell: bash
@@ -66,7 +77,7 @@ jobs:
           git checkout -q --orphan ci-logs-windows
           git rm -rfq --cached .
           echo "run $GITHUB_RUN_ID commit $GITHUB_SHA" > run.txt
-          for f in run.txt windows.log; do if [ -f "$f" ]; then git add -f "$f"; fi; done
+          for f in run.txt windows.log smoke.log; do if [ -f "$f" ]; then git add -f "$f"; fi; done
           git commit -qm "logs windows $GITHUB_RUN_ID"
           git push -f origin ci-logs-windows
 

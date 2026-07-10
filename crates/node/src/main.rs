@@ -24,6 +24,7 @@ mod fleet;
 mod journal;
 mod supervision;
 mod sync;
+mod telemetrie;
 
 use supervision::spawn_service;
 
@@ -38,11 +39,20 @@ fn main() -> ExitCode {
         }
     };
 
-    // Tout panic est journalisé (donc visible dans la page de logs) avant
-    // que le process ne tombe — un crash muet est interdit.
-    std::panic::set_hook(Box::new(|info| {
+    // Tout panic est journalisé (donc visible dans la page de logs) ET
+    // consigné dans crash.txt avant que le process ne tombe — un crash muet
+    // est interdit. Le fichier sert au diagnostic local ; il n'est envoyé à
+    // la télémétrie (au prochain démarrage) que si `[telemetrie] url` est
+    // configurée.
+    let chemin_crash = telemetrie::chemin_crash(&config.paths.logs);
+    let nom_crash = config.name.clone().unwrap_or_else(|| "node".to_string());
+    std::panic::set_hook(Box::new(move |info| {
         error!("PANIC : {info}");
         eprintln!("PANIC : {info}");
+        telemetrie::ecrire_rapport(
+            &chemin_crash,
+            &telemetrie::rapport(env!("CARGO_PKG_VERSION"), &nom_crash, &info.to_string()),
+        );
     }));
 
     info!(
@@ -144,6 +154,16 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
 
     // Reste d'une mise à jour OTA réussie (ancien binaire, script) : nettoyé.
     toolbox_control_http::ota::nettoyer_apres_demarrage();
+
+    // Rapport de crash en attente d'un précédent démarrage : envoyé en tâche
+    // de fond, uniquement si la télémétrie est configurée (opt-in strict).
+    {
+        let url = config.telemetrie.url.clone();
+        let chemin = telemetrie::chemin_crash(&config.paths.logs);
+        tokio::spawn(async move {
+            telemetrie::envoyer_rapport_en_attente(url.as_deref(), &chemin).await;
+        });
+    }
 
     // Le bus, cœur du node.
     let bus = Bus::new(256, 1024)

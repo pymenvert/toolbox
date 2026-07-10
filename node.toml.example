@@ -90,6 +90,14 @@ log_buffer = 1000      # entrées gardées par la page de logs
 # OSC à cette adresse — les curseurs de Chataigne suivent le node.
 #feedback = "10.0.0.5:9001"
 
+[telemetrie]
+# Envoi des rapports de crash — STRICTEMENT opt-in : sans URL (défaut), rien
+# ne sort jamais de la machine. Avec une URL : au démarrage qui suit un
+# crash, le rapport (logs/crash.txt — panic, version, nom du node, aucune
+# donnée personnelle) est envoyé en POST puis supprimé. crash.txt est écrit
+# dans tous les cas : il sert d'abord au diagnostic local.
+#url = "https://exemple.fr/rapports-toolbox"
+
 [midi]
 # Sous-chaîne du nom du port MIDI à ouvrir (absent = premier port trouvé).
 #port = "APC"

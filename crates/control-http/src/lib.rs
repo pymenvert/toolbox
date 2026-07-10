@@ -17,6 +17,7 @@
 //! ajoutera mot de passe + token). Tout ce qui touche au disque revalide les
 //! noms/chemins côté core.
 
+pub mod chataigne;
 pub mod monitor;
 pub mod oscquery;
 pub mod ota;
@@ -284,6 +285,8 @@ pub fn router(app: AppState) -> Router {
         .route("/api/identify", post(identify))
         .route("/api/system/reboot", post(system_reboot))
         .route("/api/system/shutdown", post(system_shutdown))
+        .route("/api/chataigne", get(chataigne_get))
+        .route("/api/chataigne/lancer", post(chataigne_lancer))
         .route("/api/preview.png", get(preview_png))
         .route("/api/diagnostic.zip", get(diagnostic_zip))
         .route("/api/features", get(features_get).post(features_set))
@@ -585,6 +588,31 @@ async fn system_reboot() -> StatusCode {
 async fn system_shutdown() -> StatusCode {
     warn!("extinction machine demandée via l'API");
     machine_power(false)
+}
+
+/// Chataigne installé ou non sur cette machine (+ lien de téléchargement).
+async fn chataigne_get() -> Json<serde_json::Value> {
+    Json(serde_json::to_value(chataigne::etat()).unwrap_or_default())
+}
+
+/// Lance Chataigne en processus détaché — il survit à l'arrêt du node.
+async fn chataigne_lancer() -> (StatusCode, Json<serde_json::Value>) {
+    match chataigne::lancer() {
+        Ok(chemin) => {
+            info!(chemin = %chemin.display(), "Chataigne lancé");
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({ "ok": true, "chemin": chemin.display().to_string() })),
+            )
+        }
+        Err(erreur) => {
+            warn!(erreur, "lancement de Chataigne impossible");
+            (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({ "ok": false, "erreur": erreur })),
+            )
+        }
+    }
 }
 
 fn machine_power(reboot: bool) -> StatusCode {

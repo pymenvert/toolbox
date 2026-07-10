@@ -255,6 +255,25 @@ footer { margin-top: 60px; padding-top: 24px; border-top: 1px solid var(--lisere
       (démarrage au boot, relance en cas de crash).</p>
     </div>
   </div>
+
+  <h3>Installation par profils</h3>
+  <p>Les installeurs du dossier <code>deploy/</code> proposent des
+  <b>profils</b> : chacun écrit <code>node.toml</code> et
+  <code>fonctions.json</code> pour que seules les fonctions utiles tournent
+  (les autres sont réellement coupées — zéro ressource). Tout reste
+  modifiable ensuite dans l'onglet Fonctions.</p>
+  <ul>
+    <li><b>Complet</b> — tout : lecteur, mapping, OSC, MIDI, parc, lumières.</li>
+    <li><b>Lecteur + Mapping</b> — projection seule, pas de réseau ni lumières.</li>
+    <li><b>Synchro</b> — lecteur + mapping + parc réseau + synchro multi-machines.</li>
+    <li><b>Lumières</b> — console Art-Net + OSC/MIDI, sans vidéo.</li>
+    <li><b>Minimal</b> — lecteur seul, le plus léger.</li>
+  </ul>
+  <p>Windows : <code>deploy/installer-windows.ps1</code> (clic droit →
+  Exécuter avec PowerShell — il peut télécharger la dernière release tout
+  seul, et proposer le lancement à l'ouverture de session). Linux / Pi :
+  <code>deploy/install.sh</code> (<code>--profil complet</code>… pour du
+  non-interactif).</p>
 </section>
 
 <section id="interface">
@@ -445,6 +464,32 @@ footer { margin-top: 60px; padding-top: 24px; border-top: 1px solid var(--lisere
   <code>GET /api/diagnostic.zip</code>) : une archive avec l'état complet, le
   journal, les infos système, les écrans, les médias et les presets — tout ce
   qu'il faut pour comprendre un node à distance, sans aucun secret dedans.</p>
+  <p>Après un crash, le node écrit aussi <code>logs/crash.txt</code>
+  (panic, version, nom du node). En option — et seulement si
+  <code>[telemetrie] url</code> est configurée dans <code>node.toml</code> —
+  ce rapport est envoyé automatiquement au démarrage suivant, puis supprimé.
+  Sans URL (le défaut), rien ne sort jamais de la machine.</p>
+  <h3>Contrôle à distance : Tailscale</h3>
+  <p>Pour piloter ou dépanner un node hors du réseau local (une install chez
+  un client, un Pi dans un théâtre), le plus simple et le plus sûr est
+  <a href="https://tailscale.com">Tailscale</a> (VPN maillé, gratuit jusqu'à
+  100 machines) :</p>
+  <ul>
+    <li>installer Tailscale sur la machine du node et sur la vôtre, connectées
+    au même compte (<code>tailscale up</code> sur le Pi) ;</li>
+    <li>la web UI devient accessible depuis n'importe où via l'IP Tailscale
+    du node : <code>http://100.x.y.z:8080/</code> — la carte Système →
+    Tailscale du node affiche cette IP ;</li>
+    <li>tout le reste suit : export diagnostic, mise à jour OTA, reboot à
+    distance, fichiers du parc… comme en local ;</li>
+    <li>recommandé dès que le node sort du réseau de confiance :
+    <code>[security] password</code> dans <code>node.toml</code>.</li>
+  </ul>
+  <h3>Chataigne sur la même machine</h3>
+  <p>La carte Système → Chataigne détecte le logiciel s'il est installé, le
+  lance d'un clic (il survit à l'arrêt du node) et pointe vers son
+  téléchargement officiel sinon. Combiné à l'auto-découverte OSCQuery
+  ci-dessus, c'est le duo idéal pour les shows scénarisés complexes.</p>
   <h3>Plusieurs projecteurs ensemble</h3>
   <p>Chaque node s'annonce sur le réseau (page Système → Réseau : liste du
   parc, lien « Ouvrir », bouton « Identifier » qui flashe la mire coins sur la
@@ -507,6 +552,9 @@ command = { cmd = "preset_load", name = "scene_01" }</code></pre>
       <tr><td><code>[paths]</code></td><td>Dossiers média, presets, logs</td><td>relatifs au binaire</td></tr>
       <tr><td><code>[limits]</code></td><td>Taille max d'upload, taille du journal</td><td>2048 Mo · 1000 lignes</td></tr>
       <tr><td><code>[osc]</code></td><td>Retour d'état vers <code>feedback = "hôte:port"</code></td><td>désactivé</td></tr>
+      <tr><td><code>[sync]</code></td><td>Rôle maître/suiveur, verrouillage à la frame</td><td>désactivé</td></tr>
+      <tr><td><code>[security]</code></td><td>Mot de passe de l'UI et de l'API</td><td>aucun</td></tr>
+      <tr><td><code>[telemetrie]</code></td><td>Envoi des rapports de crash vers <code>url</code></td><td>désactivé (opt-in)</td></tr>
       <tr><td><code>[midi]</code></td><td>Port et bindings</td><td>—</td></tr>
     </tbody>
   </table></div>

@@ -724,6 +724,18 @@
       quelle &eacute;tape, l'installation actuelle reste intacte.</div>
     </div>
     <div class="card" style="margin-top:14px;max-width:720px">
+      <h3>Chataigne</h3>
+      <div class="rowbtns">
+        <button id="chataigneLance" style="display:none">Lancer Chataigne</button>
+        <a id="chataigneDl" class="btnlink" target="_blank" rel="noopener" style="display:none">T&eacute;l&eacute;charger Chataigne</a>
+        <span id="chataigneEtat" class="muted" style="font-size:13px">V&eacute;rification&hellip;</span>
+      </div>
+      <div class="hint">Chataigne (logiciel s&eacute;par&eacute;, gratuit) pilote le node en OSC :
+      gr&acirc;ce &agrave; OSCQuery (port 8081), il d&eacute;couvre tout seul lecture, volume,
+      mapping, effets, cues et lumi&egrave;res. Le node le d&eacute;tecte s'il est install&eacute;
+      sur cette machine et peut le lancer d'ici.</div>
+    </div>
+    <div class="card" style="margin-top:14px;max-width:720px">
       <h3>Alimentation de la machine</h3>
       <div class="rowbtns">
         <button id="sysReboot" class="danger">Red&eacute;marrer la machine</button>
@@ -2243,6 +2255,29 @@ $("#majApplique").addEventListener("click", async () => {
   } catch (e) { $("#majEtat").textContent = "Bascule impossible : rien n'a changé."; }
 });
 
+/* Chataigne : détection à l'ouverture, lancement à la demande. */
+async function loadChataigne() {
+  try {
+    const c = await api("/api/chataigne");
+    if (c.installe) {
+      $("#chataigneEtat").textContent = "Détecté : " + c.chemin;
+      $("#chataigneLance").style.display = "inline-block";
+      $("#chataigneDl").style.display = "none";
+    } else {
+      $("#chataigneEtat").textContent = "Non installé sur cette machine.";
+      $("#chataigneLance").style.display = "none";
+      $("#chataigneDl").href = c.telechargement;
+      $("#chataigneDl").style.display = "inline-block";
+    }
+  } catch (e) { $("#chataigneEtat").textContent = ""; }
+}
+$("#chataigneLance").addEventListener("click", async () => {
+  try {
+    await api("/api/chataigne/lancer", { method: "POST" });
+    toast("Chataigne lancé sur la machine du node");
+  } catch (e) { toast("Lancement impossible", true); loadChataigne(); }
+});
+
 /* Parc de nodes (mDNS). */
 async function loadFleet() {
   let fleet = [];
@@ -2351,6 +2386,7 @@ function renderSante(sys) {
   loadOutputs();
   loadSystem();
   loadFleet();
+  loadChataigne();
   setInterval(loadSystem, 5000);
   setInterval(loadFleet, 7000);
   loadParc();
