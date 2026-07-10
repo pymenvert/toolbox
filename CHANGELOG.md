@@ -3,7 +3,11 @@
 Évolutions notables du node Toolbox. Format inspiré de
 [Keep a Changelog](https://keepachangelog.com/fr/), versionnage SemVer.
 
-## [Non publié] — journée du 2026-07-10
+## [1.0.0] — 2026-07-10
+
+Première version complète : lecture vidéo réelle, mapping GPU, calibrage
+projecteur de bout en bout, packs autonomes sur la page Releases,
+manuel utilisateur (`docs/manuel.html`).
 
 ### Ajouté
 - **Fenêtre de sortie** (`crates/render`) : fenêtre native qui affiche les

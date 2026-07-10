@@ -1,0 +1,131 @@
+# Release : un tag `v*` publie les binaires sur la page Releases (publique,
+# sans compte GitHub — contrairement aux artefacts de l'onglet Actions).
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  # Crée la release (brouillon de notes) avant que les jobs n'y attachent
+  # leurs binaires — évite une course à la création.
+  creer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: Toolbox ${{ github.ref_name }}
+          body: |
+            Node multimédia : lecture vidéo (GStreamer), projection mapping
+            4 coins rendu par le GPU, contrôle web / OSC / MIDI.
+
+            **Quel fichier télécharger ?**
+            - Windows : `toolbox-node-windows-x64-gstreamer.zip` — pack
+              complet avec la vidéo, dézipper et lancer, rien à installer.
+            - Windows sans vidéo (léger) : `toolbox-node-windows-x64.zip`.
+            - Ubuntu/Debian : `toolbox-node-linux-x64.tar.gz`
+              (+ paquets gstreamer1.0-*, voir le manuel).
+            - Raspberry Pi 4/5 : `toolbox-node-raspberrypi-arm64.tar.gz`.
+
+            Manuel : `docs/manuel.html` du dépôt. Journal des changements :
+            `CHANGELOG.md`.
+
+  linux:
+    needs: [creer]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Dépendances système (ALSA)
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - name: Build + archive
+        run: |
+          cargo build --release -p toolbox-node
+          mkdir -p staging
+          cp target/release/toolbox-node staging/
+          cp deploy/run-portable.sh node.toml.example staging/
+          tar czf toolbox-node-linux-x64.tar.gz -C staging .
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: toolbox-node-linux-x64.tar.gz
+
+  windows:
+    needs: [creer]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build + archive
+        shell: pwsh
+        run: |
+          cargo build --release -p toolbox-node
+          New-Item -ItemType Directory staging | Out-Null
+          Copy-Item target/release/toolbox-node.exe, deploy/run-portable.bat, deploy/install-autostart-windows.bat, node.toml.example staging/
+          Compress-Archive -Path staging/* -DestinationPath toolbox-node-windows-x64.zip
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: toolbox-node-windows-x64.zip
+
+  windows-gstreamer:
+    needs: [creer]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: GStreamer MSVC (dev + runtime) + pkg-config
+        shell: bash
+        run: choco install -y gstreamer gstreamer-devel pkgconfiglite --no-progress 2>&1 | tail -3
+      - name: Build + pack autonome
+        shell: bash
+        run: |
+          set -o pipefail
+          GST=$(ls -d /c/gstreamer/1.0/msvc_x86_64 "/c/Program Files/gstreamer/1.0/msvc_x86_64" 2>/dev/null | head -1 || true)
+          if [ -z "$GST" ]; then
+            GST=$(find /c -maxdepth 4 -type d -name "msvc_x86_64" -path "*gstreamer*" 2>/dev/null | head -1 || true)
+          fi
+          [ -n "$GST" ]
+          export PATH="$GST/bin:$PATH"
+          export PKG_CONFIG_PATH="$GST/lib/pkgconfig"
+          cargo build --release -p toolbox-node --features gstreamer
+          mkdir -p dist/lib
+          cp target/release/toolbox-node.exe dist/
+          cp deploy/run-portable.bat deploy/install-autostart-windows.bat node.toml.example dist/
+          cp "$GST"/bin/*.dll dist/
+          cp -r "$GST"/lib/gstreamer-1.0 dist/lib/
+          rm -f dist/lib/gstreamer-1.0/*.pdb dist/lib/gstreamer-1.0/gstpython.dll 2>/dev/null || true
+      - name: Archive
+        shell: pwsh
+        run: Compress-Archive -Path dist/* -DestinationPath toolbox-node-windows-x64-gstreamer.zip
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: toolbox-node-windows-x64-gstreamer.zip
+
+  raspberrypi:
+    needs: [creer]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-gnu
+      - uses: Swatinem/rust-cache@v2
+      - name: Linker croisé ARM64
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+      - name: Build + archive (sans MIDI/fenêtre — voir install.sh pour le Pi)
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+        run: |
+          cargo build --release -p toolbox-node --no-default-features --target aarch64-unknown-linux-gnu
+          mkdir -p staging
+          cp target/aarch64-unknown-linux-gnu/release/toolbox-node staging/
+          cp deploy/run-portable.sh deploy/install.sh node.toml.example staging/
+          tar czf toolbox-node-raspberrypi-arm64.tar.gz -C staging .
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: toolbox-node-raspberrypi-arm64.tar.gz

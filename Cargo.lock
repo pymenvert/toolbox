@@ -2803,7 +2803,7 @@ checksum = "756daf9b1013ebe47a8776667b466417e2d4c5679d441c26230efd9ef78692db"
 
 [[package]]
 name = "toolbox-control-http"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "axum",
  "futures-util",
@@ -2822,7 +2822,7 @@ dependencies = [
 
 [[package]]
 name = "toolbox-control-midi"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "midir",
  "thiserror 2.0.18",
@@ -2832,7 +2832,7 @@ dependencies = [
 
 [[package]]
 name = "toolbox-control-osc"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "rosc",
  "thiserror 2.0.18",
@@ -2843,7 +2843,7 @@ dependencies = [
 
 [[package]]
 name = "toolbox-core"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2857,7 +2857,7 @@ dependencies = [
 
 [[package]]
 name = "toolbox-engine"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "serde",
  "thiserror 2.0.18",
@@ -2868,7 +2868,7 @@ dependencies = [
 
 [[package]]
 name = "toolbox-gst"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "gstreamer",
  "gstreamer-app",
@@ -2880,7 +2880,7 @@ dependencies = [
 
 [[package]]
 name = "toolbox-node"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "tokio",
  "toolbox-control-http",
@@ -2896,7 +2896,7 @@ dependencies = [
 
 [[package]]
 name = "toolbox-render"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "bytemuck",
  "naga",
