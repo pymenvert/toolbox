@@ -19,6 +19,8 @@ use toolbox_core::{
 };
 use toolbox_engine::{MemoryBackend, PlaybackPosition, Player, PlayerBackend};
 
+mod fleet;
+
 fn main() -> ExitCode {
     let (config, config_path, logs) = match bootstrap() {
         Ok(parts) => parts,
@@ -144,6 +146,16 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
     let (monitors_tx, monitors_rx) = watch::channel(Vec::new());
     let (fps_tx, fps_rx) = watch::channel(0.0f32);
 
+    // Découverte réseau du parc (mDNS) : annonce + écoute, liste publiée
+    // pour /api/fleet. Sans réseau multicast, le node fonctionne sans.
+    let (fleet_tx, fleet_rx) = watch::channel(serde_json::Value::Array(Vec::new()));
+    fleet::spawn(
+        node_name.clone(),
+        config.ports.http,
+        env!("CARGO_PKG_VERSION").to_string(),
+        fleet_tx,
+    );
+
     // Player. Backend GStreamer si compilé et disponible (vidéo réelle dans
     // la fenêtre de sortie), sinon backend mémoire : position, durée
     // (simulée à 10 s), fin de média, boucles et playlist fonctionnent
@@ -200,6 +212,7 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
                 settings: output_settings_tx.clone(),
                 fps: fps_rx.clone(),
             },
+            fleet_rx.clone(),
             node_name.clone(),
             env!("CARGO_PKG_VERSION").to_string(),
         );

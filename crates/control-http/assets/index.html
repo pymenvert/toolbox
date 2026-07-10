@@ -484,6 +484,13 @@
   <!-- ================= SYSTEME ================= -->
   <section class="page" id="page-system">
     <div class="grid tiles" id="sysGrid"></div>
+    <div class="card" style="margin-top:14px;max-width:720px">
+      <h3>R&eacute;seau &mdash; nodes Toolbox d&eacute;couverts</h3>
+      <ul class="plist" id="fleetList"><li class="empty" style="border:none">Recherche en cours&hellip;</li></ul>
+      <div class="hint">Chaque node du r&eacute;seau s'annonce automatiquement (mDNS).
+      &laquo; Identifier &raquo; affiche la mire coins 4 secondes sur SA sortie &mdash;
+      pour savoir quel projecteur appartient &agrave; quel node.</div>
+    </div>
   </section>
 </main>
 
@@ -1394,6 +1401,39 @@ function tile(k, v, unit, sub, warn) {
     esc(v) + (unit ? '<small>' + esc(unit) + '</small>' : "") + '</div>' +
     (sub ? '<div class="sub" style="font-size:11px;color:var(--muted);margin-top:4px">' + esc(sub) + '</div>' : "") + '</div>';
 }
+/* Parc de nodes (mDNS). */
+async function loadFleet() {
+  let fleet = [];
+  try { fleet = await api("/api/fleet") || []; } catch (e) { return; }
+  const ul = $("#fleetList");
+  ul.innerHTML = "";
+  if (!fleet.length) {
+    ul.innerHTML = '<li class="empty" style="border:none">Aucun node découvert (réseau sans multicast ?). Ce node reste pilotable directement.</li>';
+    return;
+  }
+  fleet.forEach(n => {
+    const li = document.createElement("li");
+    const nm = document.createElement("span"); nm.className = "nm";
+    nm.textContent = n.name + (n.soi_meme ? " (ce node)" : "") + " · v" + n.version;
+    li.appendChild(nm);
+    if (!n.soi_meme) {
+      const open = document.createElement("a");
+      open.href = n.url; open.target = "_blank"; open.textContent = "Ouvrir";
+      open.style.marginRight = "8px";
+      li.appendChild(open);
+    }
+    const ident = document.createElement("button"); ident.className = "mini"; ident.textContent = "Identifier";
+    ident.addEventListener("click", () => {
+      // no-cors : requête envoyée au node cible sans lire la réponse
+      // (suffisant pour un déclencheur, et licite entre origines).
+      fetch(n.url + "api/identify", { method: "POST", mode: "no-cors" }).catch(() => {});
+      toast("Mire coins envoyée à " + n.name);
+    });
+    li.appendChild(ident);
+    ul.appendChild(li);
+  });
+}
+
 async function loadSystem() {
   let sys = null;
   try {
@@ -1440,7 +1480,9 @@ async function loadSystem() {
   loadMapPresets();
   loadOutputs();
   loadSystem();
+  loadFleet();
   setInterval(loadSystem, 5000);
+  setInterval(loadFleet, 7000);
   sizeStage();
   paintSeek();
 })();

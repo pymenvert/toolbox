@@ -31,6 +31,10 @@ toolbox-gst = { path = "../gst", optional = true }
 toolbox-control-http = { path = "../control-http" }
 toolbox-control-osc = { path = "../control-osc" }
 toolbox-control-midi = { path = "../control-midi", optional = true }
+# Découverte réseau des autres nodes (page fleet) : mDNS pur Rust.
+mdns-sd = "0.13"
+serde = { workspace = true }
+serde_json = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

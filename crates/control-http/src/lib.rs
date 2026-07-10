@@ -105,6 +105,9 @@ pub struct AppState {
     /// graceful shutdown d'axum attendrait indéfiniment une UI affichée.
     shutdown: watch::Receiver<bool>,
     output: OutputControl,
+    /// Parc de nodes découverts en mDNS (JSON prêt à servir ; vide sans
+    /// découverte). Publié par le module fleet du binaire.
+    fleet: watch::Receiver<serde_json::Value>,
     started_at: Instant,
     node_name: String,
     version: String,
@@ -121,6 +124,7 @@ impl AppState {
         position: watch::Receiver<PlaybackPosition>,
         shutdown: watch::Receiver<bool>,
         output: OutputControl,
+        fleet: watch::Receiver<serde_json::Value>,
         node_name: String,
         version: String,
     ) -> Self {
@@ -133,10 +137,16 @@ impl AppState {
             position,
             shutdown,
             output,
+            fleet,
             started_at: Instant::now(),
             node_name,
             version,
         }
+    }
+
+    /// Canal fleet inerte (tests, découverte désactivée).
+    pub fn no_fleet() -> watch::Receiver<serde_json::Value> {
+        watch::channel(serde_json::Value::Array(Vec::new())).1
     }
 }
 
@@ -191,6 +201,8 @@ pub fn router(app: AppState) -> Router {
         .route("/api/system", get(system_stats))
         .route("/api/outputs", get(outputs_get))
         .route("/api/output", post(output_set))
+        .route("/api/fleet", get(fleet_get))
+        .route("/api/identify", post(identify))
         .route("/ws", get(ws_events_upgrade))
         .route("/ws/logs", get(ws_logs_upgrade))
         .with_state(app)
@@ -396,6 +408,37 @@ async fn logs_snapshot(State(app): State<AppState>) -> Json<Vec<toolbox_core::Lo
 
 async fn system_stats(State(app): State<AppState>) -> Json<monitor::SystemStats> {
     Json(monitor::collect(app.started_at))
+}
+
+/// Parc de nodes découverts en mDNS (ce node inclus).
+async fn fleet_get(State(app): State<AppState>) -> Json<serde_json::Value> {
+    Json(app.fleet.borrow().clone())
+}
+
+/// « Identifie » ce node : la mire « coins » s'affiche 4 secondes sur sa
+/// sortie (et son nom est dedans via le titre de la fenêtre) — pratique pour
+/// savoir quel projecteur appartient à quel node. La mire précédente est
+/// restaurée ensuite.
+async fn identify(State(app): State<AppState>) -> StatusCode {
+    let before = app.bus.snapshot().test_pattern;
+    let _ = app
+        .bus
+        .send(
+            Source::Http,
+            Command::SetTestPattern {
+                pattern: Some(toolbox_core::TestPattern::Corners),
+            },
+        )
+        .await;
+    let bus = app.bus.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(4)).await;
+        let _ = bus
+            .send(Source::Http, Command::SetTestPattern { pattern: before })
+            .await;
+    });
+    info!("identification demandée : mire coins pendant 4 s");
+    StatusCode::NO_CONTENT
 }
 
 /// Écrans détectés + réglages courants de la fenêtre de sortie.
@@ -646,6 +689,7 @@ mod tests {
             position_rx,
             shutdown_rx,
             OutputControl::disconnected(),
+            AppState::no_fleet(),
             "test-node".into(),
             "0.0.0-test".into(),
         );
@@ -824,6 +868,7 @@ mod tests {
             prx,
             srx,
             OutputControl::disconnected(),
+            AppState::no_fleet(),
             "t".into(),
             "0".into(),
         );
@@ -1027,6 +1072,7 @@ mod tests {
             prx,
             srx,
             output,
+            AppState::no_fleet(),
             "t".into(),
             "0".into(),
         );
@@ -1106,6 +1152,7 @@ mod tests {
             prx,
             shutdown_rx.clone(),
             OutputControl::disconnected(),
+            AppState::no_fleet(),
             "t".into(),
             "0".into(),
         );
