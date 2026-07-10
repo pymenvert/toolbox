@@ -1,14 +1,19 @@
-# Toolbox
+# Lanterne (projet Toolbox)
 
-Node multimédia open source (MIT) : player vidéo, projection mapping 4 coins,
-correction couleur, playlists, presets, mires de test, contrôle **web UI /
-OSC / MIDI / REST / WebSocket**, page de logs et monitoring intégrés.
+Node multimédia open source (MIT) : player vidéo, projection mapping
+4 coins + mesh warp, étalonnage (LUT .cube), lumières Art-Net, séquenceur,
+playlists, presets, mires de test, contrôle **web UI / OSC / MIDI / REST /
+WebSocket**, page de logs et monitoring intégrés.
 Cibles : Raspberry Pi 4/5, Linux, Windows.
+
+L'application s'appelle **Lanterne** ; les binaires et crates gardent le
+préfixe historique `toolbox-` (aucun chemin ni contrat ne change).
 
 > Cadrage complet (décisions, plan, architecture, recherches) : dossier
 > `Toolbox/docs/` du projet — ce repo ne contient que le code.
+> Liste complète des fonctions : en tête de `docs/manuel.html`.
 
-## État — v2.0.0
+## État — v3.0.0
 
 La chaîne complète est fonctionnelle et testée (160+ tests, CI Linux +
 Windows + check ARM64) : **lecture vidéo réelle** (GStreamer, boucle sans
@@ -31,7 +36,16 @@ chasers), **séquenceur** (cues, enchaînements, programmation quotidienne),
 **fichiers du parc** (voir/pousser les médias de toutes les machines,
 1 → N), **interrupteurs de fonctions** (chaque service réellement arrêté
 à chaud, zéro ressource), **edge blending + masques**, page **santé**,
-mise à jour **OTA** expérimentale.
+mise à jour **OTA** expérimentale, **passthrough** (carte d'acquisition
+rebranchée = image revenue) et **état de démarrage**.
+
+La V3 ajoute : **LUT 3D .cube** (trilinéaire, parité CPU/GPU stricte),
+**mesh warp** (grille jusqu'à 9×9, éditeur à la souris), boutons de régie
+**BLACKOUT/FREEZE**, **slots intelligents** (cues par jour de semaine,
+actions lumières, OSC/MIDI), **installation par profils**
+(`deploy/installer-windows.ps1`, `deploy/install.sh`), **smoke tests CI**,
+**télémétrie opt-in** (rien ne sort sans URL configurée), lanceur
+**Chataigne**, et l'identité **Lanterne**.
 
 📖 **[Manuel utilisateur](docs/manuel.html)** — démarrage rapide,
 calibrage pas à pas, référence OSC/MIDI/config, dépannage.

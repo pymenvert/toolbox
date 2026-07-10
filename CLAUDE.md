@@ -1,8 +1,9 @@
-# Toolbox — contexte pour Claude
+# Toolbox / « Lanterne » — contexte pour Claude
 
 Node multimédia en Rust : player vidéo + projection mapping + contrôle
 web/OSC/MIDI. Cibles : Raspberry Pi 4/5 (Linux ARM64), Linux x64, Windows x64.
-Propriétaire : Pym.
+Propriétaire : Pym. Nom d'application affiché : **Lanterne** (UI, manuel,
+README) — binaires, crates et artefacts gardent le préfixe `toolbox-`.
 
 ## Règles du projet (à respecter absolument)
 
@@ -136,6 +137,17 @@ Sous Windows, aucune dépendance système (midir utilise WinMM).
   2.1 : LUT .cube, mesh warp (tâche #48), sorties NDI/RTSP.
 - La chaîne vidéo Pi (DRM/KMS) et le bench GStreamer sur matériel réel
   attendent le retour de Pym.
+- v3.0.0 (2026-07-11, nuit) : LUT .cube (engine/lut.rs, parité CPU/GPU par
+  buffer storage + trilinéaire WGSL, dossier `luts/`, API /api/luts, OSC
+  /lut), mesh warp (MappingState.mesh, champ de déplacements ±0,25, grille
+  ≤ 9×9, éditeur canvas), régie BLACKOUT (rampe animée dans la fenêtre) /
+  FREEZE (gel de la source), slots (cues jours de semaine + actions
+  lumières + /cue/go), installateurs à profils (installer-windows.ps1 —
+  fichiers écrits SANS BOM, install.sh), smoke test CI (deploy/smoke.sh,
+  jobs check et check-windows), télémétrie opt-in (crash.txt toujours,
+  envoi curl uniquement si [telemetrie] url), lanceur Chataigne
+  (/api/chataigne), identité Lanterne (logo SVG nav + favicon). Chaque
+  fonction vérifiée en réel sur node local (pixels d'aperçu, OSC, API).
 
 ## Prochaines étapes
 

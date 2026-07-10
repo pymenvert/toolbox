@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Toolbox — Manuel</title>
+<title>Lanterne — Manuel</title>
 <style>
 /* =========================================================================
    Charte : dérivée de l'interface du node (fond bleu-nuit, accent bleu).
@@ -154,14 +154,16 @@ footer { margin-top: 60px; padding-top: 24px; border-top: 1px solid var(--lisere
 
 <nav class="sommaire" aria-label="Sommaire">
   <div class="marque">
-    <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
-      <rect x="1" y="1" width="32" height="32" rx="7" fill="none" stroke="var(--lisere)"/>
-      <path d="M7 9 L27 6 L24 26 L9 23 Z" fill="var(--accent-doux)" stroke="var(--accent)" stroke-width="1.6" stroke-linejoin="round"/>
-      <circle cx="7" cy="9" r="2.4" fill="var(--accent)"/><circle cx="27" cy="6" r="2.4" fill="var(--accent)"/>
-      <circle cx="24" cy="26" r="2.4" fill="var(--accent)"/><circle cx="9" cy="23" r="2.4" fill="var(--accent)"/>
+    <svg width="34" height="34" viewBox="0 0 32 32" aria-hidden="true">
+      <path d="M13 12 L31 5 L31 27 L13 20 Z" fill="#ffd75e" opacity=".5"/>
+      <rect x="3" y="9" width="11" height="14" rx="2.5" fill="none" stroke="var(--accent)" stroke-width="1.8"/>
+      <circle cx="8.5" cy="16" r="3.1" fill="#ffd75e"/>
+      <path d="M6 9 Q8.5 4.5 11 9" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round"/>
     </svg>
-    <div><b>Toolbox</b><small>Manuel · v1.0</small></div>
+    <div><b>Lanterne</b><small>Manuel · v3.0 · projet Toolbox</small></div>
   </div>
+  <div class="lot">Vue d'ensemble</div>
+  <a href="#fonctions">Toutes les fonctions</a>
   <div class="lot">Prise en main</div>
   <a href="#demarrage">Démarrage rapide</a>
   <a href="#installation">Installation</a>
@@ -179,12 +181,13 @@ footer { margin-top: 60px; padding-top: 24px; border-top: 1px solid var(--lisere
 
 <main>
 <header class="heros">
-  <span class="versionne">Version 1.0</span>
+  <span class="versionne">Lanterne · version 3.0</span>
   <h1>Projeter une vidéo, exactement là où il faut.</h1>
-  <p class="chapo">Toolbox transforme un ordinateur — ou un Raspberry Pi — en node de
-  projection : lecture vidéo, mapping 4 coins, correction couleur, le tout piloté
-  depuis n'importe quel navigateur, en OSC ou en MIDI. Il redémarre seul, en plein
-  show, après une coupure de courant.</p>
+  <p class="chapo"><b>Lanterne</b> (projet Toolbox) transforme un ordinateur — ou un
+  Raspberry Pi — en node de projection : lecture vidéo, mapping 4 coins et mesh warp,
+  étalonnage, lumières Art-Net, séquenceur, le tout piloté depuis n'importe quel
+  navigateur, en OSC ou en MIDI. Il redémarre seul, en plein show, après une coupure
+  de courant.</p>
   <svg class="scene" width="100%" height="150" viewBox="0 0 720 150" aria-label="Un cadre vidéo déformé sur ses quatre coins" role="img">
     <rect x="0" y="0" width="720" height="150" rx="12" fill="var(--surface)"/>
     <g stroke="var(--lisere)" stroke-width="1">
@@ -202,6 +205,54 @@ footer { margin-top: 60px; padding-top: 24px; border-top: 1px solid var(--lisere
     </g>
   </svg>
 </header>
+
+<section id="fonctions">
+  <div class="sur-titre">Vue d'ensemble</div>
+  <h2>Toutes les fonctions</h2>
+  <p><b>Lecture</b></p>
+  <ul>
+    <li><b>Lecteur vidéo</b> — GStreamer (pack Windows autonome), boucle sans coupure, playlists, vitesse 0,25×–4×.</li>
+    <li><b>Sources externes</b> — carte d'acquisition (<code>capture://0</code>), flux RTSP/SRT/HTTP, NDI, images fixes.</li>
+    <li><b>Passthrough</b> — l'entrée branchée est projetée mappée ; débranchée puis rebranchée, elle revient toute seule.</li>
+    <li><b>État de démarrage</b> — un bouton fige l'état complet, retrouvé à CHAQUE lancement.</li>
+  </ul>
+  <p><b>Image</b></p>
+  <ul>
+    <li><b>Mapping 4 coins</b> — homographie GPU (repli CPU auto), rotation, miroirs, recadrage, presets de mapping avec fondus.</li>
+    <li><b>Mesh warp</b> — grille de points (jusqu'à 9×9) pour les surfaces irrégulières, éditeur à la souris.</li>
+    <li><b>Edge blending + masques</b> — fondu de bords multi-projecteurs (gamma réglable), 8 masques noirs.</li>
+    <li><b>Correction couleur + LUT .cube</b> — luminosité/contraste/gamma/saturation/teinte/gains RVB, LUT 3D trilinéaire.</li>
+    <li><b>Effets</b> — pixellisation, postérisation, bruit, netteté, miroir kaléidoscope.</li>
+    <li><b>Régie</b> — BLACKOUT (voile noir à rampe, l'état continue dessous) et FREEZE (gel de la source).</li>
+  </ul>
+  <p><b>Contrôle</b></p>
+  <ul>
+    <li><b>Web UI</b> — un seul fichier embarqué, téléphone/tablette/PC, plusieurs clients en même temps, mot de passe optionnel.</li>
+    <li><b>OSC + OSCQuery</b> — toute la grammaire en UDP, auto-découverte par Chataigne (lanceur intégré page Système).</li>
+    <li><b>MIDI</b> — notes → commandes, CC → paramètres continus (bindings dans node.toml).</li>
+    <li><b>Séquenceur (slots)</b> — cues d'actions déclenchées à la main, à heure fixe par jour de semaine, en chaîne, en OSC/MIDI.</li>
+  </ul>
+  <p><b>Lumières</b></p>
+  <ul>
+    <li><b>Console Art-Net</b> — faders DMX, scènes, chasers (30 trames/s), master, pilotable en OSC/MIDI et par les cues.</li>
+  </ul>
+  <p><b>Multi-machines</b></p>
+  <ul>
+    <li><b>Parc mDNS</b> — chaque node se découvre ; identifier un projecteur d'un clic.</li>
+    <li><b>Fichiers du parc</b> — voir les médias de chaque machine, envoyer un fichier à une ou à toutes.</li>
+    <li><b>Synchro à la frame</b> — maître/suiveurs, dérive mesurée &lt; 2 ms, resync dur au-delà du seuil.</li>
+  </ul>
+  <p><b>Exploitation</b></p>
+  <ul>
+    <li><b>Fonctions activables</b> — chaque service coupé est réellement arrêté : zéro ressource.</li>
+    <li><b>Santé + diagnostic</b> — CPU/RAM/disque, erreurs récentes, dérive de synchro, export ZIP.</li>
+    <li><b>OTA</b> — mise à jour en 3 temps prudents depuis l'UI, retour arrière gardé.</li>
+    <li><b>Kiosque</b> — autostart Windows / systemd, reprise du show après coupure ; reboot/extinction à distance.</li>
+    <li><b>Installation par profils</b> — Complet, Lecteur+Mapping, Synchro, Lumières, Minimal.</li>
+    <li><b>Télémétrie opt-in</b> — crash.txt local toujours ; envoi automatique SEULEMENT si une URL est configurée.</li>
+    <li><b>Tailscale</b> — pilotage et dépannage à distance, OTA et diagnostic compris.</li>
+  </ul>
+</section>
 
 <section id="demarrage">
   <div class="sur-titre">Prise en main</div>
@@ -595,7 +646,7 @@ command = { cmd = "preset_load", name = "scene_01" }</code></pre>
 </section>
 
 <footer>
-  Toolbox v1.0 · manuel généré le 10 juillet 2026 ·
+  Lanterne v3.0 (projet Toolbox) · manuel mis à jour le 11 juillet 2026 ·
   <a href="https://github.com/pymenvert/toolbox">github.com/pymenvert/toolbox</a>
 </footer>
 </main>

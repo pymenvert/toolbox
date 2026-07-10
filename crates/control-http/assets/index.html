@@ -67,8 +67,31 @@
     font: inherit; color: var(--ink); background: var(--surface-2);
     border: 1px solid var(--border); border-radius: 8px; padding: 7px 14px; cursor: pointer;
     min-height: 34px;
+    transition: border-color .15s, background .15s, transform .06s;
   }
   button:hover { border-color: var(--accent); }
+  button:active { transform: translateY(1px); }
+  /* Focus clavier visible partout, sans polluer le clic souris. */
+  button:focus-visible, a:focus-visible, select:focus-visible,
+  input:focus-visible, canvas:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px;
+  }
+  nav a { transition: background .15s, color .15s; }
+  select, input[type=text], input[type=number], input[type=time] {
+    transition: border-color .15s;
+  }
+  /* Barres de défilement discrètes, assorties au thème. */
+  * { scrollbar-width: thin; scrollbar-color: var(--hairline) transparent; }
+  *::-webkit-scrollbar { width: 9px; height: 9px; }
+  *::-webkit-scrollbar-thumb { background: var(--hairline); border-radius: 8px; }
+  *::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+  /* Arrivée douce des pages (respect de prefers-reduced-motion). */
+  @media (prefers-reduced-motion: no-preference) {
+    section.page.visible { animation: pagein .18s ease-out; }
+    @keyframes pagein { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+    .toast { animation: toastin .2s ease-out; }
+    @keyframes toastin { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  }
   button.primary { background: var(--accent); border-color: var(--accent); font-weight: 600; }
   button.danger { color: #ffb0b0; }
   button.danger:hover { border-color: var(--critical); }

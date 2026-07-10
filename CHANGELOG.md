@@ -3,7 +3,11 @@
 Évolutions notables du node Toolbox. Format inspiré de
 [Keep a Changelog](https://keepachangelog.com/fr/), versionnage SemVer.
 
-## [Non publié]
+## [3.0.0] — 2026-07-11
+
+L'application prend son nom : **Lanterne** (les binaires restent
+`toolbox-node`). Image avancée (LUT, mesh warp), boutons de régie, slots
+intelligents, installation par profils, télémétrie opt-in.
 
 - **LUT 3D .cube** : étalonnage complet en un fichier (dossier `luts/`,
   dépôt et sélection depuis l'onglet Couleur — les fichiers invalides sont
@@ -45,6 +49,12 @@
   **MIDI** (binding `{cmd = "cue_go", name = "…"}`). Les scènes et
   chasers lumières sont aussi pilotables directement en OSC/MIDI
   (`/dmx/scene`, `/dmx/chaser`) — tout le vocabulaire passe par le bus.
+## [2.0.0] — 2026-07-11
+
+La V2 : synchronisation à la frame, console lumières Art-Net, séquenceur,
+fichiers du parc, interrupteurs de fonctions, edge blending et masques,
+santé système, OTA. (LUT .cube et mesh warp sont arrivés en 3.0.0.)
+
 - **Passthrough + état de démarrage** : bouton « Faire de l'état actuel
   l'état de démarrage » (onglet Presets) — mapping, couleur, effets,
   source et lecture retrouvés à CHAQUE lancement (`demarrage.json`, prime
@@ -55,12 +65,6 @@
 - **Rendu CPU ×8** : parallélisation par lignes — 1080p chargé passe de
   215 à 25 ms/frame ; l'aperçu web et le repli sans GPU en profitent
   (banc de mesure reproductible `bench_raster`).
-
-## [2.0.0] — 2026-07-11
-
-La V2 : synchronisation à la frame, console lumières Art-Net, séquenceur,
-fichiers du parc, interrupteurs de fonctions, edge blending et masques,
-santé système, OTA. (LUT .cube et mesh warp suivront en 2.1.0.)
 
 - **Edge blending + masques** (onglet Mapping) : bandes de fondu vers le
   noir sur chaque bord de la sortie (largeur par bord + gamma projecteur,
