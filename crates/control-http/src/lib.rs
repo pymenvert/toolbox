@@ -119,6 +119,11 @@ pub struct AppState {
     started_at: Instant,
     node_name: String,
     version: String,
+    /// Cache du dernier aperçu PNG (voir [`preview_png`]) : plusieurs
+    /// dashboards ouverts ne coûtent qu'un rendu CPU par fenêtre de 250 ms,
+    /// et les requêtes concurrentes attendent le même rendu au lieu d'en
+    /// lancer chacune un (important sur Pi).
+    preview: std::sync::Arc<tokio::sync::Mutex<PreviewCache>>,
 }
 
 impl AppState {
@@ -150,6 +155,7 @@ impl AppState {
             started_at: Instant::now(),
             node_name,
             version,
+            preview: std::sync::Arc::new(tokio::sync::Mutex::new(PreviewCache::default())),
         }
     }
 
@@ -509,9 +515,63 @@ fn machine_power(reboot: bool) -> StatusCode {
     }
 }
 
+/// Fenêtre de validité du cache d'aperçu : en dessous, les requêtes
+/// partagent le même rendu. Les clients tirent toutes les 1,5 s : chacun
+/// garde donc une image fraîche, même avec les effets animés.
+const PREVIEW_TTL: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// Cache du dernier aperçu rendu (une seule entrée : tous les clients
+/// demandent la même taille, et le snapshot plein format reste rare).
+#[derive(Default)]
+struct PreviewCache {
+    entry: Option<PreviewEntry>,
+}
+
+struct PreviewEntry {
+    width: u32,
+    state: toolbox_core::NodeState,
+    /// Identité de la frame vidéo affichée (pointeur des pixels).
+    frame: Option<usize>,
+    rendered_at: Instant,
+    png: std::sync::Arc<Vec<u8>>,
+}
+
+impl PreviewCache {
+    /// Ressert le rendu précédent si rien n'a changé (taille, état, frame)
+    /// depuis moins de [`PREVIEW_TTL`] ; sinon appelle `render`.
+    fn get_or_render(
+        &mut self,
+        width: u32,
+        state: &toolbox_core::NodeState,
+        frame: Option<usize>,
+        render: impl FnOnce() -> Option<Vec<u8>>,
+    ) -> Option<std::sync::Arc<Vec<u8>>> {
+        if let Some(entry) = &self.entry {
+            if entry.width == width
+                && entry.frame == frame
+                && entry.rendered_at.elapsed() < PREVIEW_TTL
+                && entry.state == *state
+            {
+                return Some(entry.png.clone());
+            }
+        }
+        let png = std::sync::Arc::new(render()?);
+        self.entry = Some(PreviewEntry {
+            width,
+            state: state.clone(),
+            frame,
+            rendered_at: Instant::now(),
+            png: png.clone(),
+        });
+        Some(png)
+    }
+}
+
 /// Aperçu de la sortie en PNG basse résolution : ce que projette le node,
 /// vu depuis n'importe quel navigateur (`?w=480` optionnel, 64..960).
 /// Rendu par la référence CPU — identique au shader GPU de la fenêtre.
+/// Les requêtes concurrentes partagent un seul rendu (cache 250 ms sous
+/// mutex) : plusieurs dashboards ouverts ne surchargent pas un Pi.
 async fn preview_png(
     State(app): State<AppState>,
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
@@ -525,35 +585,44 @@ async fn preview_png(
     let height = width * 9 / 16;
     let state = app.bus.snapshot();
     let video = app.output.video.borrow().clone();
+    let frame_key = video.as_ref().map(|f| f.rgba.as_ptr() as usize);
     let time = app.started_at.elapsed().as_secs_f32();
 
-    let mut pixels = vec![0u32; (width * height) as usize];
-    toolbox_engine::render_frame(&state, video.as_ref(), time, width, height, &mut pixels);
-    let mut rgb = Vec::with_capacity(pixels.len() * 3);
-    for px in &pixels {
-        rgb.extend_from_slice(&[(px >> 16) as u8, (px >> 8) as u8, *px as u8]);
-    }
+    let mut cache = app.preview.lock().await;
+    let png = cache.get_or_render(width, &state, frame_key, || {
+        let mut pixels = vec![0u32; (width * height) as usize];
+        toolbox_engine::render_frame(&state, video.as_ref(), time, width, height, &mut pixels);
+        let mut rgb = Vec::with_capacity(pixels.len() * 3);
+        for px in &pixels {
+            rgb.extend_from_slice(&[(px >> 16) as u8, (px >> 8) as u8, *px as u8]);
+        }
+        let mut out = Vec::new();
+        let mut encoder = png::Encoder::new(&mut out, width, height);
+        encoder.set_color(png::ColorType::Rgb);
+        encoder.set_depth(png::BitDepth::Eight);
+        let encoded = encoder
+            .write_header()
+            .and_then(|mut writer| writer.write_image_data(&rgb));
+        match encoded {
+            Ok(()) => Some(out),
+            Err(err) => {
+                warn!(%err, "aperçu PNG non encodé");
+                None
+            }
+        }
+    });
+    drop(cache);
 
-    let mut out = Vec::new();
-    let mut encoder = png::Encoder::new(&mut out, width, height);
-    encoder.set_color(png::ColorType::Rgb);
-    encoder.set_depth(png::BitDepth::Eight);
-    let encoded = encoder
-        .write_header()
-        .and_then(|mut writer| writer.write_image_data(&rgb));
-    match encoded {
-        Ok(()) => (
+    match png {
+        Some(png) => (
             [
                 (axum::http::header::CONTENT_TYPE, "image/png"),
                 (axum::http::header::CACHE_CONTROL, "no-store"),
             ],
-            out,
+            (*png).clone(),
         )
             .into_response(),
-        Err(err) => {
-            warn!(%err, "aperçu PNG non encodé");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
-        }
+        None => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 }
 
@@ -588,7 +657,6 @@ async fn identify(State(app): State<AppState>) -> StatusCode {
     StatusCode::NO_CONTENT
 }
 
-/// Écrans détectés + réglages courants de la fenêtre de sortie.
 /// Export diagnostic (brief 7.2) : une archive ZIP avec tout ce qu'il faut
 /// pour comprendre un node à distance — état, journal, système, écrans,
 /// médias, presets. Aucun secret dedans (ni node.toml, ni mot de passe).
@@ -651,6 +719,7 @@ async fn diagnostic_zip(State(app): State<AppState>) -> Result<Response, ApiErro
         .into_response())
 }
 
+/// Écrans détectés + réglages courants de la fenêtre de sortie.
 async fn outputs_get(State(app): State<AppState>) -> Json<serde_json::Value> {
     Json(serde_json::json!({
         "monitors": *app.output.monitors.borrow(),
@@ -1348,6 +1417,59 @@ mod tests {
             .await
             .expect("resp");
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    /// Le cache d'aperçu partage les rendus dans la fenêtre de 250 ms et
+    /// re-rend dès que la taille ou l'état change.
+    #[test]
+    fn preview_cache_shares_renders_within_the_window() {
+        let mut cache = PreviewCache::default();
+        let state = toolbox_core::NodeState::default();
+        let mut renders = 0;
+
+        let a = cache
+            .get_or_render(480, &state, None, || {
+                renders += 1;
+                Some(vec![1])
+            })
+            .expect("a");
+        let b = cache
+            .get_or_render(480, &state, None, || {
+                renders += 1;
+                Some(vec![2])
+            })
+            .expect("b");
+        assert_eq!(renders, 1, "le deuxième appel ressert le cache");
+        assert_eq!(*a, *b);
+
+        // Autre taille → nouveau rendu.
+        cache
+            .get_or_render(960, &state, None, || {
+                renders += 1;
+                Some(vec![3])
+            })
+            .expect("c");
+        assert_eq!(renders, 2);
+
+        // État changé → nouveau rendu, même taille.
+        let mut autre = toolbox_core::NodeState::default();
+        autre.player.volume = 0.5;
+        cache
+            .get_or_render(960, &autre, None, || {
+                renders += 1;
+                Some(vec![4])
+            })
+            .expect("d");
+        assert_eq!(renders, 3);
+
+        // Nouvelle frame vidéo → nouveau rendu.
+        cache
+            .get_or_render(960, &autre, Some(42), || {
+                renders += 1;
+                Some(vec![5])
+            })
+            .expect("e");
+        assert_eq!(renders, 4);
     }
 
     /// L'aperçu de la sortie est un vrai PNG aux dimensions demandées.

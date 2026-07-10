@@ -3,6 +3,13 @@
 Évolutions notables du node Toolbox. Format inspiré de
 [Keep a Changelog](https://keepachangelog.com/fr/), versionnage SemVer.
 
+## [Non publié]
+
+- **Aperçu partagé** : les requêtes `/api/preview.png` concurrentes
+  partagent un seul rendu CPU (cache 250 ms) — plusieurs dashboards
+  ouverts ne surchargent plus un Pi (mesuré : 724 ms à froid → 2 ms en
+  cache sur un rendu 1920).
+
 ## [1.1.0] — 2026-07-10
 
 Améliorations continues de l'après-midi/soirée : scènes en fondu,
