@@ -2955,6 +2955,7 @@ name = "toolbox-control-osc"
 version = "1.0.0"
 dependencies = [
  "rosc",
+ "serde_json",
  "thiserror 2.0.18",
  "tokio",
  "toolbox-core",

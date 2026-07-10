@@ -5,6 +5,11 @@
 
 ## [Non publié]
 
+- **Retour d'état OSC** (`[osc] feedback = "hôte:port"`) : chaque changement
+  du node (transport, volume, coins, couleur, effets, presets…) est renvoyé
+  en OSC à l'adresse configurée, avec la même grammaire que les commandes
+  (`/volume`, `/corner/2`, `/pattern`…). Les curseurs de Chataigne suivent
+  le node quelle que soit l'interface qui a fait le changement.
 - **Mot de passe optionnel de l'UI/API** (`[security] password`) : HTTP
   Basic, tout identifiant + ce mot de passe ; absent = ouvert comme avant.
   L'OSC (UDP) reste ouvert — réseau local ou Tailscale conseillés.

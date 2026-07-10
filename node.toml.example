@@ -64,6 +64,11 @@ gpu = true         # rendu par la carte graphique (repli CPU automatique en cas 
 max_upload_mb = 2048   # taille max d'un média déposé via la web UI
 log_buffer = 1000      # entrées gardées par la page de logs
 
+[osc]
+# Retour d'état : chaque changement (volume, coins, couleur…) est renvoyé en
+# OSC à cette adresse — les curseurs de Chataigne suivent le node.
+#feedback = "10.0.0.5:9001"
+
 [midi]
 # Sous-chaîne du nom du port MIDI à ouvrir (absent = premier port trouvé).
 #port = "APC"

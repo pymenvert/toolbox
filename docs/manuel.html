@@ -407,6 +407,13 @@ footer { margin-top: 60px; padding-top: 24px; border-top: 1px solid var(--lisere
   <p>Dans Chataigne, ajoute un module <strong>OSCQuery</strong> avec l'IP du
   node et le port <code>8081</code> : tous les paramètres apparaissent avec
   leurs curseurs bornés et leurs valeurs courantes — aucune adresse à taper.</p>
+  <h3>Retour d'état (feedback)</h3>
+  <p>Avec <code>[osc] feedback = "10.0.0.5:9001"</code> dans
+  <code>node.toml</code>, le node renvoie chaque changement en OSC à cette
+  adresse, avec les mêmes adresses que les commandes (<code>/volume</code>,
+  <code>/corner/2</code>, <code>/pattern</code>…). Les curseurs de Chataigne
+  suivent donc le node, même quand le changement vient de la web UI ou du
+  MIDI.</p>
   <h3>Plusieurs projecteurs ensemble</h3>
   <p>Chaque node s'annonce sur le réseau (page Système → Réseau : liste du
   parc, lien « Ouvrir », bouton « Identifier » qui flashe la mire coins sur la
@@ -460,6 +467,7 @@ command = { cmd = "preset_load", name = "scene_01" }</code></pre>
       <tr><td><code>[startup]</code></td><td>Mode kiosque : preset + autoplay</td><td>désactivé</td></tr>
       <tr><td><code>[paths]</code></td><td>Dossiers média, presets, logs</td><td>relatifs au binaire</td></tr>
       <tr><td><code>[limits]</code></td><td>Taille max d'upload, taille du journal</td><td>2048 Mo · 1000 lignes</td></tr>
+      <tr><td><code>[osc]</code></td><td>Retour d'état vers <code>feedback = "hôte:port"</code></td><td>désactivé</td></tr>
       <tr><td><code>[midi]</code></td><td>Port et bindings</td><td>—</td></tr>
     </tbody>
   </table></div>

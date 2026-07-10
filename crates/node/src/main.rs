@@ -255,6 +255,22 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
             }),
         ));
 
+        // Retour d'état vers Chataigne (les curseurs suivent le node).
+        if let Some(target) = config.osc.feedback.clone() {
+            let feedback_bus = handle.clone();
+            let shutdown = shutdown_rx.clone();
+            services.push((
+                "osc-feedback",
+                tokio::spawn(async move {
+                    if let Err(err) =
+                        toolbox_control_osc::feedback(target, feedback_bus, shutdown).await
+                    {
+                        error!(%err, "le retour d'état OSC s'est arrêté en erreur");
+                    }
+                }),
+            ));
+        }
+
         let oscquery_state = toolbox_control_http::oscquery::OscQueryState {
             bus: handle.clone(),
             node_name: node_name.clone(),

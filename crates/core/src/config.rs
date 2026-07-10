@@ -172,6 +172,16 @@ impl Default for Output {
     }
 }
 
+/// Réglages OSC au-delà du port d'écoute.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct OscSettings {
+    /// Destination du retour d'état (`"10.0.0.5:9001"`) : chaque changement
+    /// (volume, coins, couleur…) est renvoyé en OSC à cette adresse — les
+    /// curseurs de Chataigne suivent le node. Absent = pas de feedback.
+    pub feedback: Option<String>,
+}
+
 /// Sécurité de l'interface web (P4.4). Sans mot de passe : réseau local de
 /// confiance, comportement historique.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -235,6 +245,7 @@ pub struct NodeConfig {
     pub startup: Startup,
     pub output: Output,
     pub security: Security,
+    pub osc: OscSettings,
     pub limits: Limits,
     pub midi: MidiSettings,
 }

@@ -8,6 +8,8 @@ license.workspace = true
 [dependencies]
 toolbox-core = { path = "../core" }
 rosc = "0.10"
+# Noms canoniques des paramètres (couleur/effets) pour le retour d'état.
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

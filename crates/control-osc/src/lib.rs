@@ -94,6 +94,165 @@ pub async fn serve(
     Ok(())
 }
 
+/// Retour d'état OSC : renvoie chaque changement du node (volume, coins,
+/// couleur…) vers un hôte configuré — les curseurs de Chataigne suivent le
+/// node, quelle que soit l'interface qui a fait le changement.
+pub async fn feedback(
+    target: String,
+    bus: BusHandle,
+    mut shutdown: watch::Receiver<bool>,
+) -> Result<(), OscError> {
+    let socket = tokio::net::UdpSocket::bind("0.0.0.0:0")
+        .await
+        .map_err(|source| OscError::Bind {
+            addr: "0.0.0.0:0".into(),
+            source,
+        })?;
+    info!(%target, "retour d'état OSC actif");
+    let mut events = bus.subscribe();
+    loop {
+        tokio::select! {
+            _ = shutdown.changed() => break,
+            received = events.recv() => match received {
+                Ok(event) => {
+                    let Some(message) = event_to_osc(&event) else { continue };
+                    match rosc::encoder::encode(&OscPacket::Message(message)) {
+                        Ok(bytes) => {
+                            if let Err(err) = socket.send_to(&bytes, &target).await {
+                                // Hôte éteint : on continue, il reviendra.
+                                debug!(%err, "feedback OSC non délivré");
+                            }
+                        }
+                        Err(err) => warn!(?err, "feedback OSC non encodé"),
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(missed)) => {
+                    warn!(missed, "feedback OSC en retard : événements sautés");
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            },
+        }
+    }
+    info!("retour d'état OSC arrêté");
+    Ok(())
+}
+
+/// Traduit un événement du bus en message OSC — miroir de la grammaire des
+/// commandes (une adresse d'entrée = la même adresse en retour).
+pub fn event_to_osc(event: &toolbox_core::Event) -> Option<OscMessage> {
+    use toolbox_core::state::Transport;
+    use toolbox_core::Event;
+    let message = |addr: &str, args: Vec<OscType>| {
+        Some(OscMessage {
+            addr: addr.to_string(),
+            args,
+        })
+    };
+    match event {
+        Event::TransportChanged { transport } => message(
+            "/transport",
+            vec![OscType::String(
+                match transport {
+                    Transport::Stopped => "stopped",
+                    Transport::Playing => "playing",
+                    Transport::Paused => "paused",
+                }
+                .into(),
+            )],
+        ),
+        Event::MediaLoaded { path } => message("/media", vec![OscType::String(path.clone())]),
+        Event::VolumeChanged { volume } => message("/volume", vec![OscType::Float(*volume)]),
+        Event::LoopChanged { mode } => message(
+            "/loop",
+            vec![OscType::String(
+                match mode {
+                    toolbox_core::LoopMode::Off => "off",
+                    toolbox_core::LoopMode::One => "one",
+                    toolbox_core::LoopMode::All => "all",
+                }
+                .into(),
+            )],
+        ),
+        Event::PlaylistPositionChanged { index, path } => message(
+            "/playlist/position",
+            vec![
+                OscType::Int(i32::try_from(*index).unwrap_or(i32::MAX)),
+                OscType::String(path.clone()),
+            ],
+        ),
+        Event::CornerMoved { index, x, y } => message(
+            &format!("/corner/{index}"),
+            vec![OscType::Float(*x), OscType::Float(*y)],
+        ),
+        Event::RotationChanged { degrees } => {
+            message("/rotation", vec![OscType::Int(i32::from(*degrees))])
+        }
+        Event::FlipChanged {
+            horizontal,
+            vertical,
+        } => message(
+            "/flip",
+            vec![
+                OscType::Int(i32::from(*horizontal)),
+                OscType::Int(i32::from(*vertical)),
+            ],
+        ),
+        Event::CropChanged {
+            left,
+            top,
+            right,
+            bottom,
+        } => message(
+            "/crop",
+            vec![
+                OscType::Float(*left),
+                OscType::Float(*top),
+                OscType::Float(*right),
+                OscType::Float(*bottom),
+            ],
+        ),
+        Event::ColorChanged { param, value } => {
+            let name = serde_json::to_value(param).ok()?;
+            message(
+                &format!("/color/{}", name.as_str()?),
+                vec![OscType::Float(*value)],
+            )
+        }
+        Event::EffectChanged { param, value } => {
+            let name = serde_json::to_value(param).ok()?;
+            message(
+                &format!("/effect/{}", name.as_str()?),
+                vec![OscType::Float(*value)],
+            )
+        }
+        Event::MappingEnabledChanged { enabled } => {
+            message("/mapping/enabled", vec![OscType::Int(i32::from(*enabled))])
+        }
+        Event::TestPatternChanged { pattern } => message(
+            "/pattern",
+            vec![OscType::String(
+                match pattern {
+                    Some(toolbox_core::TestPattern::Grid) => "grid",
+                    Some(toolbox_core::TestPattern::Checker) => "checker",
+                    Some(toolbox_core::TestPattern::Corners) => "corners",
+                    None => "off",
+                }
+                .into(),
+            )],
+        ),
+        Event::PresetLoaded { name } => {
+            message("/preset/loaded", vec![OscType::String(name.clone())])
+        }
+        Event::MappingLoaded { name, .. } => {
+            message("/mapping/loaded", vec![OscType::String(name.clone())])
+        }
+        Event::SyncScheduled { at } => message("/sync/scheduled", vec![OscType::Double(*at)]),
+        // Le reste (état complet remplacé, sauvegardes…) n'a pas de retour
+        // OSC utile — Chataigne relira les valeurs via OSCQuery.
+        _ => None,
+    }
+}
+
 /// Aplati les bundles (récursifs) en liste de messages.
 fn flatten(packet: OscPacket, out: &mut Vec<OscMessage>) {
     match packet {
@@ -564,6 +723,86 @@ mod tests {
             map_message("/mapping/save", &[]),
             Err(MapError::BadArguments { .. })
         ));
+    }
+
+    #[test]
+    fn feedback_mirrors_the_command_grammar() {
+        use toolbox_core::state::Transport;
+        use toolbox_core::Event;
+        let m = event_to_osc(&Event::VolumeChanged { volume: 0.4 }).expect("volume");
+        assert_eq!(m.addr, "/volume");
+        assert_eq!(m.args, vec![OscType::Float(0.4)]);
+
+        let m = event_to_osc(&Event::CornerMoved {
+            index: 2,
+            x: 0.8,
+            y: 0.9,
+        })
+        .expect("coin");
+        assert_eq!(m.addr, "/corner/2");
+
+        let m = event_to_osc(&Event::ColorChanged {
+            param: ColorParam::GainR,
+            value: 1.5,
+        })
+        .expect("couleur");
+        assert_eq!(m.addr, "/color/gain_r");
+
+        let m = event_to_osc(&Event::EffectChanged {
+            param: toolbox_core::state::EffectParam::Pixelate,
+            value: 0.5,
+        })
+        .expect("effet");
+        assert_eq!(m.addr, "/effect/pixelate");
+
+        let m = event_to_osc(&Event::TransportChanged {
+            transport: Transport::Playing,
+        })
+        .expect("transport");
+        assert_eq!(m.args, vec![OscType::String("playing".into())]);
+
+        // Pas de retour pour l'état complet remplacé.
+        assert!(event_to_osc(&Event::StateReplaced {
+            state: Box::default()
+        })
+        .is_none());
+    }
+
+    /// Bout en bout : un événement du bus arrive en datagramme OSC.
+    #[tokio::test]
+    async fn feedback_delivers_datagrams() {
+        let receiver = tokio::net::UdpSocket::bind("127.0.0.1:0")
+            .await
+            .expect("bind récepteur");
+        let target = receiver.local_addr().expect("addr").to_string();
+
+        let bus = toolbox_core::Bus::new(16, 16);
+        let handle = bus.handle();
+        let (_stx, srx) = tokio::sync::watch::channel(false);
+        tokio::spawn(feedback(target, handle.clone(), srx));
+        tokio::spawn(bus.run());
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        assert!(
+            handle
+                .send(
+                    toolbox_core::Source::Http,
+                    Command::SetVolume { volume: 0.25 }
+                )
+                .await
+        );
+
+        let mut buf = [0u8; 1024];
+        let len = tokio::time::timeout(std::time::Duration::from_secs(2), receiver.recv(&mut buf))
+            .await
+            .expect("datagramme attendu")
+            .expect("réception");
+        let (_, packet) = rosc::decoder::decode_udp(&buf[..len]).expect("décodage");
+        let OscPacket::Message(message) = packet else {
+            panic!("message attendu");
+        };
+        assert_eq!(message.addr, "/volume");
+        assert_eq!(message.args, vec![OscType::Float(0.25)]);
     }
 
     #[test]
