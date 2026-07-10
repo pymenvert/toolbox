@@ -138,6 +138,32 @@ pub struct MidiSettings {
     pub bindings: Vec<MidiBinding>,
 }
 
+/// Fenêtre de sortie (rendu). Tant que le backend vidéo n'est pas branché,
+/// elle affiche les mires de test warpées : le calibrage projecteur est déjà
+/// possible. La vidéo remplacera la mire dans la même fenêtre.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Output {
+    /// Ouvre la fenêtre de sortie au démarrage du node.
+    pub enabled: bool,
+    /// Écran cible, par index (0 = premier). La liste des écrans détectés est
+    /// tracée au démarrage (visible dans la page Logs).
+    pub monitor: usize,
+    /// Plein écran sans bordure sur l'écran cible. F11 bascule à chaud,
+    /// Échap quitte le plein écran.
+    pub fullscreen: bool,
+}
+
+impl Default for Output {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            monitor: 0,
+            fullscreen: false,
+        }
+    }
+}
+
 /// Bornes de ressources — un node de spectacle ne doit jamais saturer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -188,6 +214,7 @@ pub struct NodeConfig {
     pub ports: Ports,
     pub paths: Paths,
     pub startup: Startup,
+    pub output: Output,
     pub limits: Limits,
     pub midi: MidiSettings,
 }
@@ -289,6 +316,21 @@ mod tests {
         assert_eq!(cfg.midi.bindings[1].cc, Some(7));
         assert_eq!(cfg.midi.bindings[1].scale, Some(ScaleTarget::Volume));
         assert_eq!(cfg.midi.bindings[2].channel, Some(10));
+    }
+
+    #[test]
+    fn output_parses_with_defaults() {
+        // Absent : fenêtre activée, premier écran, fenêtré.
+        let cfg: NodeConfig = toml::from_str("").expect("parse");
+        assert!(cfg.output.enabled);
+        assert_eq!(cfg.output.monitor, 0);
+        assert!(!cfg.output.fullscreen);
+
+        let cfg: NodeConfig =
+            toml::from_str("[output]\nmonitor = 1\nfullscreen = true").expect("parse");
+        assert!(cfg.output.enabled);
+        assert_eq!(cfg.output.monitor, 1);
+        assert!(cfg.output.fullscreen);
     }
 
     #[test]

@@ -15,6 +15,7 @@ pub mod homography;
 pub mod player;
 pub mod render;
 
+pub use homography::{HomographyError, Mat3};
 pub use player::{
     BackendEvent, MemoryBackend, PlaybackPosition, Player, PlayerBackend, PlayerError,
 };
