@@ -1,0 +1,22 @@
+[package]
+name = "toolbox-gst"
+description = "Backend vidéo GStreamer du player (derrière la feature `gstreamer`)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+# Sans cette feature, la crate est vide : le workspace compile partout sans
+# les bibliothèques système GStreamer (même modèle que le MIDI/ALSA).
+gstreamer = ["dep:gstreamer", "dep:gstreamer-app", "dep:gstreamer-video"]
+
+[dependencies]
+toolbox-engine = { path = "../engine" }
+tokio = { workspace = true }
+tracing = { workspace = true }
+gstreamer = { version = "0.24", optional = true }
+gstreamer-app = { version = "0.24", optional = true }
+gstreamer-video = { version = "0.24", optional = true }
+
+[lints]
+workspace = true

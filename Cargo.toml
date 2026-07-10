@@ -4,6 +4,7 @@ members = [
     "crates/core",
     "crates/engine",
     "crates/render",
+    "crates/gst",
     "crates/control-http",
     "crates/control-osc",
     "crates/control-midi",

@@ -14,9 +14,10 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
 use toolbox_core::{
-    Bus, Command, LogBuffer, MappingStore, MediaLibrary, NodeConfig, PresetStore, Source,
+    Bus, BusHandle, Command, LogBuffer, MappingStore, MediaLibrary, NodeConfig, OutputSettings,
+    PresetStore, Source,
 };
-use toolbox_engine::{MemoryBackend, PlaybackPosition, Player};
+use toolbox_engine::{MemoryBackend, PlaybackPosition, Player, PlayerBackend};
 
 fn main() -> ExitCode {
     let (config, config_path, logs) = match bootstrap() {
@@ -114,26 +115,55 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let mut services: Vec<(&'static str, tokio::task::JoinHandle<()>)> = Vec::new();
 
-    // Player. Backend mémoire tant que GStreamer n'est pas branché : position,
-    // durée (simulée à 10 s), fin de média, boucles et playlist fonctionnent
+    // Canaux de la sortie vidéo : frames décodées (backend → fenêtre),
+    // réglages à chaud (API web → fenêtre, initialisés depuis [output]) et
+    // écrans détectés (fenêtre → API web).
+    let (video_tx, video_rx) = watch::channel(None);
+    let (output_settings_tx, output_settings_rx) = watch::channel(OutputSettings {
+        monitor: config.output.monitor,
+        fullscreen: config.output.fullscreen,
+    });
+    let output_settings_tx = std::sync::Arc::new(output_settings_tx);
+    let (monitors_tx, monitors_rx) = watch::channel(Vec::new());
+
+    // Player. Backend GStreamer si compilé et disponible (vidéo réelle dans
+    // la fenêtre de sortie), sinon backend mémoire : position, durée
+    // (simulée à 10 s), fin de média, boucles et playlist fonctionnent
     // réellement — seule l'image manque.
     let position_rx = if config.modules.player {
-        let backend = MemoryBackend::new(10.0, true);
-        let player = Player::new(backend, handle.clone(), &config.paths.media);
-        let rx = player.position_watch();
-        let mut shutdown = shutdown_rx.clone();
-        services.push((
-            "player",
-            tokio::spawn(async move {
-                tokio::select! {
-                    () = player.run() => {},
-                    _ = shutdown.changed() => {},
+        #[cfg(feature = "gstreamer")]
+        {
+            match toolbox_gst::GstBackend::new(video_tx) {
+                Ok(backend) => {
+                    info!("module player actif (backend GStreamer)");
+                    spawn_player(backend, &handle, &config, &shutdown_rx, &mut services)
                 }
-            }),
-        ));
-        info!("module player actif (backend simulé — GStreamer en phase suivante)");
-        rx
+                Err(err) => {
+                    error!(%err, "GStreamer indisponible — repli sur le backend simulé");
+                    spawn_player(
+                        MemoryBackend::new(10.0, true),
+                        &handle,
+                        &config,
+                        &shutdown_rx,
+                        &mut services,
+                    )
+                }
+            }
+        }
+        #[cfg(not(feature = "gstreamer"))]
+        {
+            drop(video_tx); // pas de producteur de frames dans ce binaire
+            info!("module player actif (backend simulé — compiler avec `gstreamer` pour la vidéo)");
+            spawn_player(
+                MemoryBackend::new(10.0, true),
+                &handle,
+                &config,
+                &shutdown_rx,
+                &mut services,
+            )
+        }
     } else {
+        drop(video_tx);
         watch::channel(PlaybackPosition::default()).1
     };
 
@@ -147,6 +177,10 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
             logs.clone(),
             position_rx.clone(),
             shutdown_rx.clone(),
+            toolbox_control_http::OutputControl {
+                monitors: monitors_rx.clone(),
+                settings: output_settings_tx.clone(),
+            },
             node_name.clone(),
             env!("CARGO_PKG_VERSION").to_string(),
         );
@@ -185,18 +219,21 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
         ));
     }
 
-    // Fenêtre de sortie : mires warpées en direct (calibrage projecteur).
+    // Fenêtre de sortie : mires et vidéo warpées en direct.
     // Thread dédié ; si l'environnement graphique manque, le node continue.
     #[cfg(feature = "render")]
     let render_thread = if config.output.enabled {
         Some(toolbox_render::spawn(
             toolbox_render::WindowConfig {
-                monitor: config.output.monitor,
-                fullscreen: config.output.fullscreen,
                 title: format!("Toolbox — sortie ({node_name})"),
             },
-            handle.state_watch(),
-            shutdown_rx.clone(),
+            toolbox_render::OutputChannels {
+                state: handle.state_watch(),
+                video: video_rx,
+                settings: output_settings_rx,
+                monitors: monitors_tx,
+                shutdown: shutdown_rx.clone(),
+            },
         ))
     } else {
         info!("fenêtre de sortie désactivée par la config ([output] enabled = false)");
@@ -289,4 +326,28 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
     }
     info!("arrêt complet");
     Ok(())
+}
+
+/// Monte un player (backend quelconque) sur le bus dans une tâche dédiée et
+/// retourne le canal de position de lecture.
+fn spawn_player<B: PlayerBackend + 'static>(
+    backend: B,
+    handle: &BusHandle,
+    config: &NodeConfig,
+    shutdown_rx: &watch::Receiver<bool>,
+    services: &mut Vec<(&'static str, tokio::task::JoinHandle<()>)>,
+) -> watch::Receiver<PlaybackPosition> {
+    let player = Player::new(backend, handle.clone(), &config.paths.media);
+    let rx = player.position_watch();
+    let mut shutdown = shutdown_rx.clone();
+    services.push((
+        "player",
+        tokio::spawn(async move {
+            tokio::select! {
+                () = player.run() => {},
+                _ = shutdown.changed() => {},
+            }
+        }),
+    ));
+    rx
 }

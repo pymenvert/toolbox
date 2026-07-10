@@ -17,11 +17,17 @@ midi = ["dep:toolbox-control-midi"]
 # Fenêtre de sortie (mires warpées). Désactivée en cross ARM64 : le Pi aura
 # sa propre chaîne vidéo (GStreamer/DRM) après le bench matériel.
 render = ["dep:toolbox-render"]
+# Backend vidéo GStreamer (décodage réel). Hors defaut : exige les
+# bibliothèques système GStreamer à la compilation ET le runtime sur la
+# machine cible (voir deploy/README.md). Compiler avec :
+# cargo build --release -p toolbox-node --features gstreamer
+gstreamer = ["dep:toolbox-gst", "toolbox-gst/gstreamer"]
 
 [dependencies]
 toolbox-core = { path = "../core" }
 toolbox-engine = { path = "../engine" }
 toolbox-render = { path = "../render", optional = true }
+toolbox-gst = { path = "../gst", optional = true }
 toolbox-control-http = { path = "../control-http" }
 toolbox-control-osc = { path = "../control-osc" }
 toolbox-control-midi = { path = "../control-midi", optional = true }
