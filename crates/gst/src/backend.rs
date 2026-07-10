@@ -117,9 +117,7 @@ impl GstBackend {
             if !gapless_signal.load(Ordering::Relaxed) {
                 return None;
             }
-            let Some(playbin) = values.first().and_then(|v| v.get::<gst::Element>().ok()) else {
-                return None;
-            };
+            let playbin = values.first().and_then(|v| v.get::<gst::Element>().ok())?;
             if let Some(uri) = playbin.property::<Option<String>>("current-uri") {
                 playbin.set_property("uri", uri);
             }
