@@ -455,11 +455,12 @@ async fn preview_png(
     State(app): State<AppState>,
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> Response {
+    // 1920 max : le clic sur l'aperçu sert de snapshot pleine résolution.
     let width: u32 = params
         .get("w")
         .and_then(|w| w.parse().ok())
         .unwrap_or(480)
-        .clamp(64, 960);
+        .clamp(64, 1920);
     let height = width * 9 / 16;
     let state = app.bus.snapshot();
     let video = app.output.video.borrow().clone();
