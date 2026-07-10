@@ -267,6 +267,8 @@
           <div class="mediaTitle" id="curMedia">Aucun m&eacute;dia charg&eacute;</div>
           <div class="mediaSub" id="curMediaSub">&nbsp;</div>
         </div>
+        <img id="apercu" alt="Aper&ccedil;u de la sortie" title="Ce que projette le node (rafra&icirc;chi toutes les 1,5 s)"
+          style="width:100%;aspect-ratio:16/9;background:#000;border-radius:10px;border:1px solid var(--border);margin-bottom:14px;object-fit:contain;display:block">
         <div class="transport">
           <button id="btnStop" title="Stop">&#9632;</button>
           <button id="btnPlay" class="play" title="Lecture / Pause">&#9654;</button>
@@ -1410,6 +1412,13 @@ function tile(k, v, unit, sub, warn) {
     esc(v) + (unit ? '<small>' + esc(unit) + '</small>' : "") + '</div>' +
     (sub ? '<div class="sub" style="font-size:11px;color:var(--muted);margin-top:4px">' + esc(sub) + '</div>' : "") + '</div>';
 }
+/* Aperçu de la sortie : rafraîchi seulement quand le Dashboard est visible. */
+setInterval(() => {
+  const img = $("#apercu");
+  if (!img || !$("#page-dashboard").classList.contains("visible")) return;
+  img.src = "/api/preview.png?w=480&t=" + Date.now();
+}, 1500);
+
 /* Alimentation machine : double confirmation native. */
 function powerAction(url, label) {
   if (!confirm(label + " — la machine, pas seulement le logiciel. Continuer ?")) return;

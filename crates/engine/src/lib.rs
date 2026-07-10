@@ -13,6 +13,7 @@
 
 pub mod homography;
 pub mod player;
+pub mod raster;
 pub mod render;
 pub mod video;
 
@@ -20,6 +21,7 @@ pub use homography::{HomographyError, Mat3};
 pub use player::{
     BackendEvent, MemoryBackend, PlaybackPosition, Player, PlayerBackend, PlayerError,
 };
+pub use raster::render_frame;
 pub use render::{ColorUniforms, RenderParams};
 pub use video::VideoFrame;
 

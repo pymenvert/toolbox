@@ -75,6 +75,8 @@ pub struct OutputControl {
     pub settings: std::sync::Arc<watch::Sender<OutputSettings>>,
     /// Frames par seconde réellement présentées par la fenêtre de sortie.
     pub fps: watch::Receiver<f32>,
+    /// Dernière frame vidéo décodée — pour l'aperçu web de la sortie.
+    pub video: watch::Receiver<Option<toolbox_engine::VideoFrame>>,
 }
 
 impl OutputControl {
@@ -84,10 +86,12 @@ impl OutputControl {
         let (_, monitors) = watch::channel(Vec::new());
         let (settings, _) = watch::channel(OutputSettings::default());
         let (_, fps) = watch::channel(0.0);
+        let (_, video) = watch::channel(None);
         Self {
             monitors,
             settings: std::sync::Arc::new(settings),
             fps,
+            video,
         }
     }
 }
@@ -205,6 +209,7 @@ pub fn router(app: AppState) -> Router {
         .route("/api/identify", post(identify))
         .route("/api/system/reboot", post(system_reboot))
         .route("/api/system/shutdown", post(system_shutdown))
+        .route("/api/preview.png", get(preview_png))
         .route("/ws", get(ws_events_upgrade))
         .route("/ws/logs", get(ws_logs_upgrade))
         .with_state(app)
@@ -439,6 +444,53 @@ fn machine_power(reboot: bool) -> StatusCode {
         Err(err) => {
             warn!(%err, "commande d'alimentation impossible");
             StatusCode::INTERNAL_SERVER_ERROR
+        }
+    }
+}
+
+/// Aperçu de la sortie en PNG basse résolution : ce que projette le node,
+/// vu depuis n'importe quel navigateur (`?w=480` optionnel, 64..960).
+/// Rendu par la référence CPU — identique au shader GPU de la fenêtre.
+async fn preview_png(
+    State(app): State<AppState>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    let width: u32 = params
+        .get("w")
+        .and_then(|w| w.parse().ok())
+        .unwrap_or(480)
+        .clamp(64, 960);
+    let height = width * 9 / 16;
+    let state = app.bus.snapshot();
+    let video = app.output.video.borrow().clone();
+    let time = app.started_at.elapsed().as_secs_f32();
+
+    let mut pixels = vec![0u32; (width * height) as usize];
+    toolbox_engine::render_frame(&state, video.as_ref(), time, width, height, &mut pixels);
+    let mut rgb = Vec::with_capacity(pixels.len() * 3);
+    for px in &pixels {
+        rgb.extend_from_slice(&[(px >> 16) as u8, (px >> 8) as u8, *px as u8]);
+    }
+
+    let mut out = Vec::new();
+    let mut encoder = png::Encoder::new(&mut out, width, height);
+    encoder.set_color(png::ColorType::Rgb);
+    encoder.set_depth(png::BitDepth::Eight);
+    let encoded = encoder
+        .write_header()
+        .and_then(|mut writer| writer.write_image_data(&rgb));
+    match encoded {
+        Ok(()) => (
+            [
+                (axum::http::header::CONTENT_TYPE, "image/png"),
+                (axum::http::header::CACHE_CONTROL, "no-store"),
+            ],
+            out,
+        )
+            .into_response(),
+        Err(err) => {
+            warn!(%err, "aperçu PNG non encodé");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
 }
@@ -1059,6 +1111,39 @@ mod tests {
         assert!(json["os"].is_string());
     }
 
+    /// L'aperçu de la sortie est un vrai PNG aux dimensions demandées.
+    #[tokio::test]
+    async fn preview_png_renders() {
+        let bed = testbed();
+        let response = bed
+            .router
+            .oneshot(
+                HttpRequest::get("/api/preview.png?w=128")
+                    .body(Body::empty())
+                    .expect("req"),
+            )
+            .await
+            .expect("resp");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get(axum::http::header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok()),
+            Some("image/png")
+        );
+        let bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("corps")
+            .to_bytes();
+        assert_eq!(&bytes[..8], b"\x89PNG\r\n\x1a\n", "signature PNG");
+        // 128×72 attendu (16:9) — vérifié dans l'en-tête IHDR.
+        assert_eq!(&bytes[16..20], &128u32.to_be_bytes());
+        assert_eq!(&bytes[20..24], &72u32.to_be_bytes());
+    }
+
     /// L'API de sortie liste les écrans publiés par la fenêtre et applique
     /// les réglages via le canal watch (index validé contre la liste).
     #[tokio::test]
@@ -1091,10 +1176,12 @@ mod tests {
         ]);
         let (settings_tx, mut settings_rx) = watch::channel(OutputSettings::default());
         let (_fps_tx, fps_rx) = watch::channel(30.0);
+        let (_video_tx, video_rx) = watch::channel(None);
         let output = OutputControl {
             monitors: monitors_rx,
             settings: std::sync::Arc::new(settings_tx),
             fps: fps_rx,
+            video: video_rx,
         };
         let app = AppState::new(
             handle,

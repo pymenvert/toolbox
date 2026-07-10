@@ -13,8 +13,9 @@
 //! rien par défaut) : choisir une mire dans l'onglet Mapping de l'UI web.
 
 pub mod gpu;
-pub mod raster;
 pub mod window;
 
-pub use raster::render_frame;
+// La référence CPU vit dans l'engine (implémentation pure, testée là-bas) ;
+// ré-exportée ici pour les anciens usages.
+pub use toolbox_engine::raster::{self, render_frame};
 pub use window::{spawn, OutputChannels, WindowConfig};

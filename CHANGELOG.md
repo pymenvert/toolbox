@@ -3,6 +3,14 @@
 Évolutions notables du node Toolbox. Format inspiré de
 [Keep a Changelog](https://keepachangelog.com/fr/), versionnage SemVer.
 
+## [Non publié]
+
+- **Aperçu de la sortie dans le Dashboard** : ce que projette le node
+  (warp, mires, vidéo, effets), en PNG basse résolution rafraîchi toutes
+  les 1,5 s — contrôlable depuis un téléphone sans voir le projecteur
+  (`GET /api/preview.png?w=480`). La référence CPU du rendu vit désormais
+  dans l'engine (`toolbox_engine::raster`).
+
 ## [1.0.0] — 2026-07-10
 
 Première version complète du brief : lecture vidéo réelle, mapping GPU,

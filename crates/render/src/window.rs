@@ -25,7 +25,7 @@ use toolbox_core::{MonitorInfo, NodeState, OutputSettings};
 use toolbox_engine::VideoFrame;
 
 use crate::gpu::GpuPainter;
-use crate::raster::render_frame;
+use toolbox_engine::raster::render_frame;
 
 /// Réglages fixes de la fenêtre (les réglages à chaud passent par
 /// [`OutputChannels::settings`]).

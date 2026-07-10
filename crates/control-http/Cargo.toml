@@ -10,6 +10,8 @@ toolbox-core = { path = "../core" }
 toolbox-engine = { path = "../engine" }
 axum = { version = "0.8", features = ["ws"] }
 futures-util = { version = "0.3", default-features = false }
+# Aperçu de la sortie : encodage PNG pur Rust.
+png = "0.18"
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

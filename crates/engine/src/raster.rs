@@ -15,9 +15,9 @@
 //!    transport n'est pas à l'arrêt ;
 //! 3. sinon noir — un vidéoprojecteur de spectacle n'affiche rien par défaut.
 
+use crate::{Mat3, RenderParams, VideoFrame};
 use toolbox_core::command::TestPattern;
 use toolbox_core::state::{EffectsState, NodeState, Transport};
-use toolbox_engine::{Mat3, RenderParams, VideoFrame};
 use tracing::warn;
 
 /// Ce que le pixel échantillonne : mire procédurale ou frame vidéo.
@@ -290,7 +290,7 @@ fn corners_color(u: f64, v: f64) -> [f32; 3] {
 
 /// Correction couleur — implémentation de référence de la future passe GLSL.
 /// Ordre : gains RVB → luminosité → contraste → gamma → saturation → teinte.
-fn apply_color(c: &toolbox_engine::ColorUniforms, rgb: [f32; 3]) -> [f32; 3] {
+fn apply_color(c: &crate::ColorUniforms, rgb: [f32; 3]) -> [f32; 3] {
     let mut out = [
         rgb[0] * c.gain[0] * c.brightness,
         rgb[1] * c.gain[1] * c.brightness,

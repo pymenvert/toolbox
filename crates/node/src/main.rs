@@ -211,6 +211,7 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
                 monitors: monitors_rx.clone(),
                 settings: output_settings_tx.clone(),
                 fps: fps_rx.clone(),
+                video: video_rx.clone(),
             },
             fleet_rx.clone(),
             node_name.clone(),
