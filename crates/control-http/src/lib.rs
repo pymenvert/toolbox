@@ -19,6 +19,7 @@
 
 pub mod monitor;
 pub mod oscquery;
+mod zipper;
 
 use std::time::Instant;
 
@@ -221,6 +222,7 @@ pub fn router(app: AppState) -> Router {
         .route("/api/system/reboot", post(system_reboot))
         .route("/api/system/shutdown", post(system_shutdown))
         .route("/api/preview.png", get(preview_png))
+        .route("/api/diagnostic.zip", get(diagnostic_zip))
         .route("/ws", get(ws_events_upgrade))
         .route("/ws/logs", get(ws_logs_upgrade))
         .layer(axum::middleware::from_fn_with_state(
@@ -587,6 +589,68 @@ async fn identify(State(app): State<AppState>) -> StatusCode {
 }
 
 /// Écrans détectés + réglages courants de la fenêtre de sortie.
+/// Export diagnostic (brief 7.2) : une archive ZIP avec tout ce qu'il faut
+/// pour comprendre un node à distance — état, journal, système, écrans,
+/// médias, presets. Aucun secret dedans (ni node.toml, ni mot de passe).
+async fn diagnostic_zip(State(app): State<AppState>) -> Result<Response, ApiError> {
+    fn json<T: serde::Serialize>(value: &T) -> Result<Vec<u8>, ApiError> {
+        serde_json::to_vec_pretty(value).map_err(|e| ApiError::from(CoreError::from(e)))
+    }
+
+    let stats = monitor::collect(app.started_at);
+    let rapport = format!(
+        "Diagnostic du node Toolbox\n\
+         ==========================\n\
+         node      : {}\n\
+         version   : {}\n\
+         plateforme: {} ({})\n\
+         genere    : {} s depuis l'epoque Unix\n\n\
+         Contenu : etat.json (etat complet), journal.json (dernieres lignes\n\
+         de log), systeme.json (CPU, memoire, disque, Tailscale),\n\
+         sortie.json (ecran/plein ecran), ecrans.json, medias.json,\n\
+         presets.json, fleet.json (nodes decouverts en mDNS).\n",
+        app.node_name,
+        app.version,
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0),
+    );
+
+    let mut zip = zipper::ZipWriter::new();
+    zip.add("rapport.txt", rapport.as_bytes());
+    zip.add("etat.json", &json(&app.bus.snapshot())?);
+    zip.add("journal.json", &json(&app.logs.snapshot())?);
+    zip.add("systeme.json", &json(&stats)?);
+    zip.add("sortie.json", &json(&*app.output.settings.borrow())?);
+    zip.add("ecrans.json", &json(&*app.output.monitors.borrow())?);
+    zip.add("medias.json", &json(&app.media.list()?)?);
+    zip.add(
+        "presets.json",
+        &json(&serde_json::json!({
+            "complets": app.presets.list()?,
+            "mapping": app.mapping_presets.list()?,
+        }))?,
+    );
+    zip.add("fleet.json", &json(&*app.fleet.borrow())?);
+
+    let filename = format!("diagnostic-{}.zip", app.node_name);
+    Ok((
+        StatusCode::OK,
+        [
+            ("content-type", "application/zip".to_string()),
+            (
+                "content-disposition",
+                format!("attachment; filename=\"{filename}\""),
+            ),
+        ],
+        zip.finish(),
+    )
+        .into_response())
+}
+
 async fn outputs_get(State(app): State<AppState>) -> Json<serde_json::Value> {
     Json(serde_json::json!({
         "monitors": *app.output.monitors.borrow(),
@@ -1169,6 +1233,43 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let json = body_json(response).await;
         assert!(json["os"].is_string());
+    }
+
+    /// L'export diagnostic est une archive ZIP valide qui embarque l'état.
+    #[tokio::test]
+    async fn diagnostic_zip_responds_with_a_zip() {
+        let bed = testbed();
+        let response = bed
+            .router
+            .oneshot(
+                HttpRequest::get("/api/diagnostic.zip")
+                    .body(Body::empty())
+                    .expect("req"),
+            )
+            .await
+            .expect("resp");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers()["content-type"],
+            "application/zip",
+            "content-type"
+        );
+        let bytes = axum::body::to_bytes(response.into_body(), 10 * 1024 * 1024)
+            .await
+            .expect("body");
+        // Signature d'en-tête local ZIP + fin d'archive présente.
+        assert_eq!(&bytes[0..4], b"PK\x03\x04");
+        assert_eq!(&bytes[bytes.len() - 22..bytes.len() - 18], b"PK\x05\x06");
+        let haystack = String::from_utf8_lossy(&bytes);
+        for name in [
+            "rapport.txt",
+            "etat.json",
+            "journal.json",
+            "systeme.json",
+            "presets.json",
+        ] {
+            assert!(haystack.contains(name), "entrée manquante : {name}");
+        }
     }
 
     /// Le mot de passe optionnel protège tout : 401 sans identifiants,

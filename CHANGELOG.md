@@ -5,6 +5,11 @@
 
 ## [Non publié]
 
+- **Export diagnostic ZIP** (brief 7.2) : bouton « Exporter le diagnostic »
+  (Système) et `GET /api/diagnostic.zip` — état complet, journal, infos
+  système, écrans, médias, presets, parc mDNS dans une archive à joindre
+  quand on demande de l'aide. Aucun secret dedans (ni node.toml, ni mot de
+  passe). Écrivain ZIP maison sans dépendance (entrées « stored », testé).
 - **Fondu entre presets** (brief 7.4) : bouton « Fondu » sur chaque preset
   (durée réglable), commande `preset_fade`, OSC `/preset/fade nom secondes`.
   Coins, recadrage, couleur, effets et volume glissent en douceur (~30 pas/s,
