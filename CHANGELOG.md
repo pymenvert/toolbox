@@ -5,6 +5,12 @@
 
 ## [Non publié]
 
+- **Fichiers du parc** : depuis l'onglet Médias, voir les médias de chaque
+  node du réseau, envoyer un fichier à un node précis ou **à tout le parc
+  d'un coup** — l'envoi passe de node à node en flux direct (jamais le
+  fichier entier en RAM), avec rapport par machine. Le node ne relaie que
+  vers des machines découvertes en mDNS (pas de proxy ouvert) et transmet
+  le mot de passe du parc s'il y en a un.
 - **Synchronisation multi-node niveau 2 — verrouillage à la frame** :
   `[sync] role = "maitre"|"suiveur"` dans node.toml. Les suiveurs
   s'annoncent d'eux-mêmes au maître (rien à configurer côté maître), qui

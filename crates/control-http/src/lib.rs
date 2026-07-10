@@ -254,6 +254,8 @@ pub fn router(app: AppState) -> Router {
         .route("/api/preview.png", get(preview_png))
         .route("/api/diagnostic.zip", get(diagnostic_zip))
         .route("/api/features", get(features_get).post(features_set))
+        .route("/api/fleet/media", get(fleet_media))
+        .route("/api/fleet/push", post(fleet_push))
         .route("/ws", get(ws_events_upgrade))
         .route("/ws/logs", get(ws_logs_upgrade))
         .layer(axum::middleware::from_fn_with_state(
@@ -664,6 +666,169 @@ async fn fleet_get(State(app): State<AppState>) -> Json<serde_json::Value> {
     Json(app.fleet.borrow().clone())
 }
 
+/// Les URL du parc connues (garde-fou anti-proxy-ouvert : le node ne relaie
+/// QUE vers des nodes découverts en mDNS).
+fn urls_du_parc(app: &AppState) -> Vec<String> {
+    app.fleet
+        .borrow()
+        .as_array()
+        .map(|nodes| {
+            nodes
+                .iter()
+                .filter_map(|n| n.get("url").and_then(|u| u.as_str()).map(String::from))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Fichiers du parc : liste les médias d'un AUTRE node (proxy côté serveur —
+/// le navigateur n'a pas à contourner CORS ni à joindre chaque machine).
+async fn fleet_media(
+    State(app): State<AppState>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+    headers: axum::http::HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let url = params
+        .get("url")
+        .ok_or_else(|| CoreError::InvalidCommand("paramètre url manquant".into()))?;
+    if !urls_du_parc(&app).iter().any(|u| u == url) {
+        return Err(CoreError::InvalidCommand(format!("node inconnu du parc : {url}")).into());
+    }
+    let mut requete = client_http()?.get(format!("{url}api/media"));
+    // Le mot de passe du parc (supposé commun) suit la requête d'origine.
+    if let Some(auth) = headers.get(axum::http::header::AUTHORIZATION) {
+        requete = requete.header(axum::http::header::AUTHORIZATION, auth.clone());
+    }
+    let reponse = requete
+        .send()
+        .await
+        .map_err(|e| CoreError::InvalidCommand(format!("node injoignable : {e}")))?;
+    let json: serde_json::Value = reponse
+        .json()
+        .await
+        .map_err(|e| CoreError::InvalidCommand(format!("réponse illisible : {e}")))?;
+    Ok(Json(json))
+}
+
+#[derive(Deserialize)]
+struct PushRequest {
+    /// Média LOCAL à envoyer (nom plat, déjà dans `media/`).
+    name: String,
+    /// URL des nodes cibles ; vide = tout le parc sauf ce node.
+    #[serde(default)]
+    targets: Vec<String>,
+}
+
+/// Résultat de l'envoi vers un node.
+#[derive(serde::Serialize)]
+struct PushResult {
+    url: String,
+    ok: bool,
+    detail: String,
+}
+
+/// Fichiers du parc : pousse un média local vers un ou plusieurs nodes
+/// (`PUT /api/media/{name}` chez chacun, corps en flux — jamais le fichier
+/// entier en RAM). Cibles vides = tout le parc découvert, sauf ce node.
+async fn fleet_push(
+    State(app): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Json(demande): Json<PushRequest>,
+) -> Result<Json<Vec<PushResult>>, ApiError> {
+    validate_upload_name(&demande.name)?;
+    let chemin = app.media.root().join(&demande.name);
+    if !chemin.is_file() {
+        return Err(CoreError::InvalidCommand(format!(
+            "média local introuvable : {}",
+            demande.name
+        ))
+        .into());
+    }
+
+    let parc = app.fleet.borrow().clone();
+    let connues = urls_du_parc(&app);
+    let cibles: Vec<String> = if demande.targets.is_empty() {
+        parc.as_array()
+            .map(|nodes| {
+                nodes
+                    .iter()
+                    .filter(|n| {
+                        n.get("soi_meme").and_then(serde_json::Value::as_bool) != Some(true)
+                    })
+                    .filter_map(|n| n.get("url").and_then(|u| u.as_str()).map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default()
+    } else {
+        for cible in &demande.targets {
+            if !connues.iter().any(|u| u == cible) {
+                return Err(
+                    CoreError::InvalidCommand(format!("node inconnu du parc : {cible}")).into(),
+                );
+            }
+        }
+        demande.targets.clone()
+    };
+    if cibles.is_empty() {
+        return Err(
+            CoreError::InvalidCommand("aucun autre node découvert sur le réseau".into()).into(),
+        );
+    }
+
+    let client = client_http()?;
+    let mut resultats = Vec::new();
+    for url in cibles {
+        let resultat = envoyer_media(&client, &url, &demande.name, &chemin, &headers).await;
+        let (ok, detail) = match resultat {
+            Ok(()) => (true, "envoyé".to_string()),
+            Err(err) => (false, err),
+        };
+        info!(cible = %url, media = %demande.name, ok, %detail, "envoi vers le parc");
+        resultats.push(PushResult { url, ok, detail });
+    }
+    Ok(Json(resultats))
+}
+
+/// Client HTTP du parc : LAN, pas de TLS, délais courts à la connexion mais
+/// pas de limite d'envoi (les médias peuvent être gros).
+fn client_http() -> Result<reqwest::Client, ApiError> {
+    reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(5))
+        .build()
+        .map_err(|e| ApiError::from(CoreError::InvalidCommand(format!("client HTTP : {e}"))))
+}
+
+async fn envoyer_media(
+    client: &reqwest::Client,
+    url: &str,
+    name: &str,
+    chemin: &std::path::Path,
+    headers: &axum::http::HeaderMap,
+) -> Result<(), String> {
+    let fichier = tokio::fs::File::open(chemin)
+        .await
+        .map_err(|e| format!("lecture locale : {e}"))?;
+    let taille = fichier
+        .metadata()
+        .await
+        .map_err(|e| format!("métadonnées : {e}"))?
+        .len();
+    let flux = tokio_util::io::ReaderStream::new(fichier);
+    let mut requete = client
+        .put(format!("{url}api/media/{name}"))
+        .header(axum::http::header::CONTENT_LENGTH, taille)
+        .body(reqwest::Body::wrap_stream(flux));
+    if let Some(auth) = headers.get(axum::http::header::AUTHORIZATION) {
+        requete = requete.header(axum::http::header::AUTHORIZATION, auth.clone());
+    }
+    let reponse = requete.send().await.map_err(|e| format!("envoi : {e}"))?;
+    if reponse.status().is_success() {
+        Ok(())
+    } else {
+        Err(format!("refusé par le node : HTTP {}", reponse.status()))
+    }
+}
+
 /// « Identifie » ce node : la mire « coins » s'affiche 4 secondes sur sa
 /// sortie (et son nom est dedans via le titre de la fenêtre) — pratique pour
 /// savoir quel projecteur appartient à quel node. La mire précédente est
@@ -977,12 +1142,23 @@ mod tests {
 
     struct TestBed {
         router: Router,
+        app: AppState,
         _dir: tempfile::TempDir,
+    }
+
+    impl TestBed {
+        fn media_dir(&self) -> std::path::PathBuf {
+            self._dir.path().join("media")
+        }
     }
 
     /// Monte un node complet en mémoire : bus qui tourne, presets et
     /// médiathèque sur un dossier temporaire.
     fn testbed() -> TestBed {
+        testbed_avec_fleet(AppState::no_fleet())
+    }
+
+    fn testbed_avec_fleet(fleet: watch::Receiver<serde_json::Value>) -> TestBed {
         let dir = tempfile::tempdir().expect("tempdir");
         let presets = PresetStore::open(dir.path().join("presets")).expect("presets");
         let mapping_presets =
@@ -1015,12 +1191,13 @@ mod tests {
             position_rx,
             shutdown_rx,
             OutputControl::disconnected(),
-            AppState::no_fleet(),
+            fleet,
             "test-node".into(),
             "0.0.0-test".into(),
         );
         TestBed {
-            router: router(app),
+            router: router(app.clone()),
+            app,
             _dir: dir,
         }
     }
@@ -1350,6 +1527,89 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let json = body_json(response).await;
         assert!(json["os"].is_string());
+    }
+
+    /// Fichiers du parc : la poussée copie RÉELLEMENT le média chez un autre
+    /// node (serveur HTTP réel sur un port libre), le proxy liste ses médias,
+    /// et les URL hors parc sont refusées (pas de proxy ouvert).
+    #[tokio::test]
+    async fn fleet_push_copies_media_to_another_node() {
+        // Node B : un vrai serveur sur un port libre.
+        let bed_b = testbed();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let url_b = format!("http://{}/", listener.local_addr().expect("addr"));
+        let (_stop_tx, stop_rx) = watch::channel(false);
+        let app_b = bed_b.app.clone();
+        tokio::spawn(async move {
+            let _ = serve_on(listener, app_b, stop_rx).await;
+        });
+
+        // Node A : connaît B via son parc mDNS (simulé).
+        let (_fleet_tx, fleet_rx) = watch::channel(serde_json::json!([
+            { "name": "b", "url": url_b, "version": "t", "soi_meme": false }
+        ]));
+        let bed_a = testbed_avec_fleet(fleet_rx);
+        let contenu = vec![42u8; 64 * 1024];
+        std::fs::write(bed_a.media_dir().join("pousse.mp4"), &contenu).expect("média local");
+        tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+
+        // Poussée vers tout le parc (= B).
+        let response = bed_a
+            .router
+            .clone()
+            .oneshot(
+                HttpRequest::post("/api/fleet/push")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"name":"pousse.mp4"}"#))
+                    .expect("req"),
+            )
+            .await
+            .expect("resp");
+        assert_eq!(response.status(), StatusCode::OK);
+        let resultats = body_json(response).await;
+        assert_eq!(resultats[0]["ok"], true, "détail : {resultats}");
+
+        // Le fichier est bien arrivé chez B, intact.
+        let recu = std::fs::read(bed_b.media_dir().join("pousse.mp4")).expect("fichier reçu");
+        assert_eq!(recu, contenu);
+
+        // Le proxy liste les médias de B…
+        let response = bed_a
+            .router
+            .clone()
+            .oneshot(
+                HttpRequest::get(format!(
+                    "/api/fleet/media?url={}",
+                    urlencoding_simple(&url_b)
+                ))
+                .body(Body::empty())
+                .expect("req"),
+            )
+            .await
+            .expect("resp");
+        assert_eq!(response.status(), StatusCode::OK);
+        let liste = body_json(response).await;
+        assert!(liste.to_string().contains("pousse.mp4"));
+
+        // … et refuse une URL inconnue du parc.
+        let response = bed_a
+            .router
+            .clone()
+            .oneshot(
+                HttpRequest::get("/api/fleet/media?url=http%3A%2F%2F10.9.9.9%3A8080%2F")
+                    .body(Body::empty())
+                    .expect("req"),
+            )
+            .await
+            .expect("resp");
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    /// Encodage minimal d'une URL en paramètre de query (tests).
+    fn urlencoding_simple(url: &str) -> String {
+        url.replace(':', "%3A").replace('/', "%2F")
     }
 
     /// L'export diagnostic est une archive ZIP valide qui embarque l'état.

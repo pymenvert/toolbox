@@ -14,6 +14,10 @@ futures-util = { version = "0.3", default-features = false }
 png = "0.18"
 # Décodage des identifiants HTTP Basic (mot de passe optionnel de l'UI).
 base64 = "0.22"
+# Fichiers du parc : le node relaie ses médias vers les autres nodes en HTTP
+# pur (pas de TLS sur un LAN de régie) — client léger, corps en flux.
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream"] }
+tokio-util = { version = "0.7", features = ["io"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

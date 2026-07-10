@@ -455,6 +455,17 @@
       </table>
     </div>
     <div class="card" style="margin-top:14px">
+      <h3>Fichiers du parc</h3>
+      <div class="presetRow">
+        <select id="parcMedia" style="flex:1;min-width:140px"></select>
+        <button id="parcPushAll" class="primary">Envoyer &agrave; tout le parc</button>
+      </div>
+      <ul class="plist" id="parcNodes"><li class="empty" style="border:none">Recherche des autres nodes&hellip;</li></ul>
+      <div class="hint">Chaque node du r&eacute;seau appara&icirc;t ici : voir ses m&eacute;dias,
+      lui envoyer le fichier s&eacute;lectionn&eacute;, ou l'envoyer &agrave; toutes les machines
+      d'un coup. L'envoi passe de node &agrave; node en direct (flux, jamais en RAM).</div>
+    </div>
+    <div class="card" style="margin-top:14px">
       <h3>Source externe</h3>
       <div class="presetRow">
         <input type="text" id="srcExterne" placeholder="rtsp://…  ·  srt://…  ·  capture://0  ·  ndi://Nom">
@@ -1213,8 +1224,75 @@ let mediaList = [];
 let pendingDeleteMedia = null;
 async function loadMedia() {
   try { mediaList = await api("/api/media") || []; } catch (e) { return; }
-  renderMediaTable(); renderPlAdd();
+  renderMediaTable(); renderPlAdd(); renderParcMedia();
 }
+
+/* ===================== Fichiers du parc ===================== */
+let parcNodes = [];
+async function loadParc() {
+  try { parcNodes = (await api("/api/fleet") || []).filter(n => !n.soi_meme); } catch (e) { return; }
+  renderParcNodes();
+}
+function renderParcMedia() {
+  const sel = $("#parcMedia");
+  if (!sel) return;
+  const old = sel.value;
+  sel.innerHTML = "";
+  if (!mediaList.length) {
+    const o = document.createElement("option");
+    o.value = ""; o.textContent = "— médiathèque vide —";
+    sel.appendChild(o);
+    return;
+  }
+  mediaList.forEach(m => {
+    const o = document.createElement("option");
+    o.value = o.textContent = m.name;
+    sel.appendChild(o);
+  });
+  if ([...sel.options].some(o => o.value === old)) sel.value = old;
+}
+function renderParcNodes() {
+  const ul = $("#parcNodes");
+  ul.innerHTML = "";
+  if (!parcNodes.length) {
+    ul.innerHTML = '<li class="empty" style="border:none">Aucun autre node découvert sur le réseau.</li>';
+    return;
+  }
+  parcNodes.forEach(n => {
+    const li = document.createElement("li");
+    li.style.flexWrap = "wrap";
+    const nm = document.createElement("span"); nm.className = "nm"; nm.textContent = n.name;
+    const voir = document.createElement("button"); voir.className = "mini"; voir.textContent = "Médias";
+    const envoyer = document.createElement("button"); envoyer.className = "mini"; envoyer.textContent = "Envoyer ici";
+    const detail = document.createElement("div");
+    detail.style.cssText = "flex-basis:100%;display:none;font-size:12px;color:var(--muted);padding:6px 0 2px;line-height:1.7";
+    voir.addEventListener("click", async () => {
+      if (detail.style.display === "block") { detail.style.display = "none"; return; }
+      detail.textContent = "Chargement…"; detail.style.display = "block";
+      try {
+        const liste = await api("/api/fleet/media?url=" + encodeURIComponent(n.url)) || [];
+        detail.textContent = liste.length
+          ? liste.map(m => m.name).join("  ·  ")
+          : "(médiathèque vide)";
+      } catch (e) { detail.textContent = "Node injoignable."; }
+    });
+    envoyer.addEventListener("click", () => parcPush([n.url], n.name));
+    li.appendChild(nm); li.appendChild(voir); li.appendChild(envoyer); li.appendChild(detail);
+    ul.appendChild(li);
+  });
+}
+async function parcPush(targets, label) {
+  const name = $("#parcMedia").value;
+  if (!name) { toast("Choisis d'abord un média à envoyer", "err"); return; }
+  toast("Envoi de « " + name + " » vers " + label + "…");
+  try {
+    const res = await api("/api/fleet/push", { method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: name, targets: targets }) }) || [];
+    res.forEach(r => toast((r.ok ? "✓ " : "✗ ") + r.url + " — " + r.detail, r.ok ? undefined : "err"));
+  } catch (e) { toast("Envoi impossible : " + e, "err"); }
+}
+$("#parcPushAll").addEventListener("click", () => parcPush([], "tout le parc"));
 function renderPlAdd() {
   const sel = $("#plAdd");
   const old = sel.value;
@@ -1619,8 +1697,9 @@ async function loadSystem() {
   loadFleet();
   setInterval(loadSystem, 5000);
   setInterval(loadFleet, 7000);
+  loadParc();
   // Un fichier copié directement dans media/ apparaît sans recharger la page.
-  setInterval(() => { if ($("#page-media").classList.contains("visible")) loadMedia(); }, 5000);
+  setInterval(() => { if ($("#page-media").classList.contains("visible")) { loadMedia(); loadParc(); } }, 5000);
   sizeStage();
   paintSeek();
 })();
