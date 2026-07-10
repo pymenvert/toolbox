@@ -93,13 +93,18 @@ Sous Windows, aucune dépendance système (midir utilise WinMM).
   `mapping_save`/`mapping_load`, API `/api/mapping-presets`, OSC `/mapping/*`,
   UI dans l'onglet Mapping — charger n'interrompt pas la lecture),
   `deploy/install-autostart-windows.bat` (lancement à l'ouverture de session).
-- Fenêtre de sortie livrée (crates/render) : mires ET vidéo warpées en
-  direct, sélection d'écran/plein écran depuis l'UI web. Backend GStreamer
-  livré (crates/gst) mais PAS testé sur du vrai matériel : Pym n'a pas de Pi
-  sous la main (décision du 2026-07-10 : on continue comme si le bench était
-  fait, test matériel plus tard). Le rendu vidéo est CPU (softbuffer) — la
-  passe GPU (GLES, shaders de `engine/shaders/`) reste à faire si le CPU du
-  Pi ne suit pas.
+- v1.0.0 complète du brief (2026-07-10) : sources externes
+  (`core/source.rs` — capture://, rtsp/srt/http, ndi://, images fixes),
+  effets (EffectsState, `/effect/*`), synchro niveau 1 (`sync_arm`/
+  `sync_start_at`, départ sur timer dans Player::run), OSCQuery
+  (`control-http/oscquery.rs`, port 8081), fleet mDNS (`node/fleet.rs`,
+  `/api/fleet` + `/api/identify`), exploitation (disque, Tailscale,
+  reboot/shutdown machine), réglages de sortie persistés (sortie.json),
+  page Releases (workflow release.yml, tag v*). PAS testé sur du vrai
+  matériel Pi (décision Pym 2026-07-10 : bench matériel plus tard) ni en
+  vrai multi-machine. Reste V2 : mesh warp/edge blending, LUT, RTSP out,
+  NDI out, upload multi-nodes, OTA, mot de passe UI, QR code, watch
+  folder shaders.
 - Backend vidéo réel (GStreamer) pas encore commencé — attend le bench sur Pi.
 
 ## Prochaines étapes

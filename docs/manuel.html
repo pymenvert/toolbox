@@ -323,6 +323,25 @@ footer { margin-top: 60px; padding-top: 24px; border-top: 1px solid var(--lisere
     <li><strong>Playlist</strong> : construite dans le Dashboard ; suivant/précédent
     au clic, en OSC ou en MIDI.</li>
   </ul>
+  <h3>Sources externes</h3>
+  <p>Le node ne lit pas que des fichiers — champ « Source externe » de
+  l'onglet Médias (ou <code>/load</code> en OSC) :</p>
+  <ul>
+    <li><code>capture://0</code> — première webcam ou carte d'acquisition
+    HDMI/USB (le boîtier déformeur entre une source et le projecteur) ;</li>
+    <li><code>rtsp://…</code>, <code>srt://…</code>, <code>http(s)://…</code> —
+    flux réseau ;</li>
+    <li><code>ndi://Nom de la source</code> — flux NDI (plugin GStreamer +
+    runtime NDI requis, message clair sinon) ;</li>
+    <li>une image fixe (PNG, JPEG…) s'affiche en continu.</li>
+  </ul>
+  <p class="note">Les sources live n'ont ni durée, ni barre de progression,
+  ni seek.</p>
+  <h3>Effets</h3>
+  <p>Onglet Couleur, carte « Effets » : pixellisation, postérisation, bruit
+  animé, netteté, miroir kaléidoscope. Une intensité 0..1 par effet
+  (0 = inactif) — un fader MIDI ou OSC (<code>/effect/pixelate</code>…)
+  suffit à l'activer et le doser. Calculés par le GPU comme le reste.</p>
   <h3>Gros fichiers</h3>
   <p class="note">Le dépôt via le navigateur est plafonné (2 Go par défaut,
   réglable par <code>[limits] max_upload_mb</code>). Au-delà, copie simplement le
@@ -373,13 +392,27 @@ footer { margin-top: 60px; padding-top: 24px; border-top: 1px solid var(--lisere
       <tr><td><code>/flip</code></td><td>h v (0|1)</td><td>Miroirs</td></tr>
       <tr><td><code>/crop</code></td><td>g h d b</td><td>Recadrage par bord (0..0,45)</td></tr>
       <tr><td><code>/color/brightness</code> etc.</td><td>valeur</td><td><code>contrast gamma saturation hue gain_r gain_g gain_b</code></td></tr>
+      <tr><td><code>/effect/pixelate</code> etc.</td><td>0..1</td><td><code>posterize noise sharpen mirror</code> (0 = inactif)</td></tr>
       <tr><td><code>/mapping/reset</code></td><td>—</td><td>Mapping aux valeurs neutres</td></tr>
       <tr><td><code>/mapping/enabled</code></td><td>0|1</td><td>Bypass du mapping</td></tr>
       <tr><td><code>/mapping/save</code> · <code>/mapping/load</code></td><td>nom</td><td>Mappings enregistrés</td></tr>
       <tr><td><code>/pattern</code></td><td><code>grid|checker|corners|off</code></td><td>Mire de test</td></tr>
       <tr><td><code>/preset/save</code> · <code>/preset/load</code></td><td>nom</td><td>Presets d'état complet</td></tr>
+      <tr><td><code>/sync/arm</code></td><td>—</td><td>Arme : média prêt, pause à 0 (à envoyer à tous les nodes)</td></tr>
+      <tr><td><code>/sync/startAt</code></td><td>heure Unix (double)</td><td>Départ commun au timestamp — horloges NTP partagées</td></tr>
     </tbody>
   </table></div>
+  <h3>Auto-découverte OSCQuery (Chataigne)</h3>
+  <p>Dans Chataigne, ajoute un module <strong>OSCQuery</strong> avec l'IP du
+  node et le port <code>8081</code> : tous les paramètres apparaissent avec
+  leurs curseurs bornés et leurs valeurs courantes — aucune adresse à taper.</p>
+  <h3>Plusieurs projecteurs ensemble</h3>
+  <p>Chaque node s'annonce sur le réseau (page Système → Réseau : liste du
+  parc, lien « Ouvrir », bouton « Identifier » qui flashe la mire coins sur la
+  sortie du node visé). Pour un départ synchronisé : charge un média sur
+  chaque node, envoie <code>/sync/arm</code> à tous, puis
+  <code>/sync/startAt</code> avec la même heure — chaque node part
+  précisément à l'échéance sur son horloge (NTP conseillé).</p>
   <p class="note">La même grammaire existe en JSON sur <code>POST /api/command</code>
   et sur le WebSocket <code>/ws</code> — voir la table dans
   <code>crates/core/src/command.rs</code>.</p>
@@ -421,7 +454,7 @@ command = { cmd = "preset_load", name = "scene_01" }</code></pre>
     <tbody>
       <tr><td><code>name</code></td><td>Nom du node sur le réseau</td><td>nom de la machine</td></tr>
       <tr><td><code>[modules]</code></td><td>Activer player, http, osc, midi</td><td>player, http, osc</td></tr>
-      <tr><td><code>[ports]</code></td><td>Adresse d'écoute et ports</td><td>http 8080 · osc 9000</td></tr>
+      <tr><td><code>[ports]</code></td><td>Adresse d'écoute et ports</td><td>http 8080 · osc 9000 · oscquery 8081</td></tr>
       <tr><td><code>[output]</code></td><td>Fenêtre de sortie : écran, plein écran, GPU</td><td>activée · écran 0 · gpu</td></tr>
       <tr><td><code>[startup]</code></td><td>Mode kiosque : preset + autoplay</td><td>désactivé</td></tr>
       <tr><td><code>[paths]</code></td><td>Dossiers média, presets, logs</td><td>relatifs au binaire</td></tr>

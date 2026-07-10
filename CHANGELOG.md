@@ -5,9 +5,26 @@
 
 ## [1.0.0] — 2026-07-10
 
-Première version complète : lecture vidéo réelle, mapping GPU, calibrage
-projecteur de bout en bout, packs autonomes sur la page Releases,
+Première version complète du brief : lecture vidéo réelle, mapping GPU,
+calibrage projecteur de bout en bout, packs autonomes sur la page Releases,
 manuel utilisateur (`docs/manuel.html`).
+
+### Fonctions v1 du brief (après-midi)
+- **Sources externes** : capture HDMI/USB (`capture://N`), flux réseau
+  (`rtsp/srt/http/udp`), image fixe, NDI optionnel (`ndi://Nom`) — champ
+  « Source externe » de l'onglet Médias.
+- **Effets** : pixellisation, postérisation, bruit animé, netteté, miroir —
+  intensités 0..1, OSC `/effect/*`, carte Effets (onglet Couleur), mêmes
+  formules CPU (référence testée) et GPU (validé naga).
+- **Synchro multi-node niveau 1** : `/sync/arm` + `/sync/startAt`
+  (timestamp Unix double, départ à l'échéance sur timer, annulé par stop).
+- **OSCQuery** (port 8081) : auto-découverte de tous les paramètres dans
+  Chataigne, bornes et valeurs live.
+- **Fleet** : annonce/découverte mDNS `_toolbox._tcp`, page Réseau
+  (Système), bouton « Identifier » (mire coins 4 s sur le node visé).
+- **Exploitation** : espace disque, statut Tailscale, boutons
+  redémarrer/éteindre la machine ; réglages de sortie persistés
+  (`sortie.json`) ; page Releases publique (workflow de release).
 
 ### Ajouté
 - **Fenêtre de sortie** (`crates/render`) : fenêtre native qui affiche les
