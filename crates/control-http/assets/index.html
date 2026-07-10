@@ -135,6 +135,14 @@
   }
   .corner:active { cursor: grabbing; }
   .corner.sel { background: var(--accent-2); outline: 2px solid var(--accent-2); outline-offset: 2px; }
+  /* Mapping désactivé (bypass) : la scène reste éditable mais signale l'état. */
+  #mapstage.off { opacity: .45; }
+  #mapstage.off::after {
+    content: "MAPPING D\00c9SACTIV\00c9"; position: absolute; inset: 0;
+    display: grid; place-items: center; color: var(--ink); font-weight: 700;
+    letter-spacing: 2px; font-size: 13px; pointer-events: none; z-index: 3;
+    text-shadow: 0 1px 6px rgba(0,0,0,.9);
+  }
   .mapside .row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--hairline); font-size: 13px; color: var(--ink-2); }
   .mapside .row:last-child { border: none; }
   .mapside .row b { color: var(--ink); font-variant-numeric: tabular-nums; font-weight: 500; }
@@ -318,9 +326,24 @@
           <div class="row"><span>1 &middot; haut droit</span><b id="c1">&ndash;</b></div>
           <div class="row"><span>2 &middot; bas droit</span><b id="c2">&ndash;</b></div>
           <div class="row"><span>3 &middot; bas gauche</span><b id="c3">&ndash;</b></div>
+          <label class="chk" style="margin-top:8px"><input type="checkbox" id="mapEnabled" checked> Mapping actif</label>
+          <div class="hint">D&eacute;coch&eacute; : image brute plein cadre, les r&eacute;glages sont conserv&eacute;s.</div>
           <div class="rowbtns" style="margin-top:12px">
             <button id="mapReset" class="danger">R&eacute;initialiser le mapping</button>
           </div>
+        </div>
+        <div class="card">
+          <h3>Mappings enregistr&eacute;s</h3>
+          <div class="presetRow">
+            <input type="text" id="mapPresetName" placeholder="Nom du mapping" maxlength="64">
+            <button id="mapPresetSave" class="primary">Enregistrer</button>
+          </div>
+          <div class="presetRow" style="margin-top:8px">
+            <select id="mapPresetSelect" style="flex:1;min-width:120px"></select>
+            <button id="mapPresetLoad">Charger</button>
+            <button id="mapPresetDelete" class="danger mini" title="Supprimer">&#10005;</button>
+          </div>
+          <div class="hint">Enregistre uniquement le mapping (coins, orientation, recadrage) &mdash; pas le m&eacute;dia ni la couleur. Charger n&rsquo;interrompt pas la lecture.</div>
         </div>
         <div class="card">
           <h3>Orientation</h3>
@@ -569,8 +592,11 @@ function onEvent(m) {
     case "flip_changed": state.mapping.flip_h = m.horizontal; state.mapping.flip_v = m.vertical; renderMapping(); break;
     case "crop_changed": state.mapping.crop = { left: m.left, top: m.top, right: m.right, bottom: m.bottom }; renderMapping(); break;
     case "color_changed": state.color[m.param] = m.value; renderColor(); break;
+    case "mapping_enabled_changed": state.mapping.enabled = m.enabled; renderMapping(); break;
+    case "mapping_saved": toast("Mapping « " + m.name + " » enregistré"); loadMapPresets(); break;
+    case "mapping_loaded": state.mapping = m.mapping; renderMapping(); toast("Mapping « " + m.name + " » chargé"); break;
     case "mapping_reset":
-      state.mapping = { corners: [{x:0,y:0},{x:1,y:0},{x:1,y:1},{x:0,y:1}], rotation: "r0",
+      state.mapping = { enabled: true, corners: [{x:0,y:0},{x:1,y:0},{x:1,y:1},{x:0,y:1}], rotation: "r0",
         flip_h: false, flip_v: false, crop: { left:0, top:0, right:0, bottom:0 } };
       renderMapping(); break;
     case "test_pattern_changed": state.test_pattern = m.pattern; renderMapping(); break;
@@ -927,10 +953,49 @@ $$(".mirebtn").forEach(b => b.addEventListener("click", () => {
   sendCmd({ cmd: "set_test_pattern", pattern: b.dataset.pat === "off" ? null : b.dataset.pat });
 }));
 $("#mapReset").addEventListener("click", () => sendCmd({ cmd: "mapping_reset" }));
+$("#mapEnabled").addEventListener("change", e => {
+  sendCmd({ cmd: "set_mapping_enabled", enabled: e.target.checked });
+});
+
+/* Presets de mapping (indépendants des presets d'état complet). */
+async function loadMapPresets() {
+  let names = [];
+  try { names = await api("/api/mapping-presets") || []; } catch (e) { return; }
+  const sel = $("#mapPresetSelect"), prev = sel.value;
+  sel.innerHTML = names.length ? "" : '<option value="">(aucun mapping)</option>';
+  names.forEach(n => {
+    const o = document.createElement("option");
+    o.value = o.textContent = n; sel.appendChild(o);
+  });
+  if (names.includes(prev)) sel.value = prev;
+}
+$("#mapPresetSave").addEventListener("click", () => {
+  const name = $("#mapPresetName").value.trim();
+  if (!name) { toast("Donne un nom au mapping", "err"); return; }
+  sendCmd({ cmd: "mapping_save", name: name });
+  $("#mapPresetName").value = "";
+});
+$("#mapPresetName").addEventListener("keydown", e => { if (e.key === "Enter") $("#mapPresetSave").click(); });
+$("#mapPresetLoad").addEventListener("click", () => {
+  const name = $("#mapPresetSelect").value;
+  if (!name) { toast("Aucun mapping enregistré", "err"); return; }
+  sendCmd({ cmd: "mapping_load", name: name });
+});
+$("#mapPresetDelete").addEventListener("click", async () => {
+  const name = $("#mapPresetSelect").value;
+  if (!name) return;
+  try {
+    await api("/api/mapping-presets/" + encodeURIComponent(name), { method: "DELETE" });
+    toast("Mapping « " + name + " » supprimé");
+  } catch (e) {}
+  loadMapPresets();
+});
 
 function renderMapping() {
   if (!state) return;
   const mp = state.mapping;
+  $("#mapEnabled").checked = mp.enabled !== false;
+  stage.classList.toggle("off", mp.enabled === false);
   for (let i = 0; i < 4; i++) {
     if (dragCorner === i) continue;               // on peint localement pendant le drag
     corners[i] = [mp.corners[i].x, mp.corners[i].y];
@@ -1265,6 +1330,7 @@ async function loadSystem() {
   connectLogWS();
   loadMedia();
   loadPresets();
+  loadMapPresets();
   loadSystem();
   setInterval(loadSystem, 5000);
   sizeStage();
