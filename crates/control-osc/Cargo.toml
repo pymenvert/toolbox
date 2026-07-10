@@ -1,13 +1,13 @@
 [package]
-name = "toolbox-engine"
-description = "Moteur de rendu et de lecture : mapping (homographie), paramètres shader, player. La partie GStreamer arrive avec le matériel."
+name = "toolbox-control-osc"
+description = "Contrôle OSC du node (UDP) : mapping adresses → commandes du bus. Pensé pour Chataigne."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
 toolbox-core = { path = "../core" }
-serde = { workspace = true }
+rosc = "0.10"
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

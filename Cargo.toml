@@ -1,19 +1,35 @@
 [workspace]
 resolver = "2"
-members = ["crates/core", "crates/engine", "crates/node"]
+members = [
+    "crates/core",
+    "crates/engine",
+    "crates/control-http",
+    "crates/control-osc",
+    "crates/control-midi",
+    "crates/node",
+]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-repository = "https://github.com/CHANGEME/toolbox"
+repository = "https://github.com/pymenvert/toolbox"
 rust-version = "1.80"
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
-tokio = { version = "1", features = ["sync", "rt-multi-thread", "macros", "signal", "time"] }
+tokio = { version = "1", features = [
+    "sync",
+    "rt-multi-thread",
+    "macros",
+    "signal",
+    "time",
+    "net",
+    "fs",
+    "io-util",
+] }
 toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -27,3 +43,5 @@ panic = "warn"
 [profile.release]
 lto = "thin"
 codegen-units = 1
+# Binaire plus léger (Pi) ; les noms de symboles restent pour les backtraces.
+strip = "debuginfo"

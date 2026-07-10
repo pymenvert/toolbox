@@ -1,0 +1,26 @@
+# Service systemd du node Toolbox — installé par deploy/install.sh
+# (@PREFIX@ et @USER@ sont remplacés à l'installation).
+#
+# Mode kiosque : le node redémarre tout seul en cas de crash ou au boot ;
+# combiné à [startup] preset/autoplay dans node.toml, un Pi branché à un
+# vidéoprojecteur reprend son show sans intervention.
+
+[Unit]
+Description=Toolbox node multimédia (player + mapping + contrôle réseau)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+WorkingDirectory=@PREFIX@
+ExecStart=@PREFIX@/toolbox-node
+Restart=always
+RestartSec=2
+# Limite mémoire de sécurité (un node ne doit jamais étouffer le Pi).
+MemoryMax=1G
+# Journal : stdout/stderr vont dans journald ; la page de logs de la web UI
+# garde son propre historique en mémoire.
+
+[Install]
+WantedBy=multi-user.target

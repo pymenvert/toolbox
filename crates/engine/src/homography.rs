@@ -56,6 +56,20 @@ impl Mat3 {
         ]))
     }
 
+    /// Produit matriciel `self · other` — composition de transformations :
+    /// `other` est appliquée d'abord, puis `self`.
+    pub fn mul(&self, other: &Mat3) -> Mat3 {
+        let a = &self.0;
+        let b = &other.0;
+        let mut m = [[0.0f64; 3]; 3];
+        for (r, row) in m.iter_mut().enumerate() {
+            for (c, cell) in row.iter_mut().enumerate() {
+                *cell = a[r][0] * b[0][c] + a[r][1] * b[1][c] + a[r][2] * b[2][c];
+            }
+        }
+        Mat3(m)
+    }
+
     /// Applique la matrice à un point (division perspective).
     pub fn apply(&self, u: f64, v: f64) -> (f64, f64) {
         let m = &self.0;
@@ -151,6 +165,7 @@ mod tests {
     fn mapping(corners: [(f32, f32); 4]) -> MappingState {
         MappingState {
             corners: corners.map(|(x, y)| Corner { x, y }),
+            ..MappingState::default()
         }
     }
 
@@ -217,6 +232,33 @@ mod tests {
         for p in [(0.5, 0.5), (0.25, 0.75), (0.1, 0.9), (0.999, 0.001)] {
             let (x, y) = h.apply(p.0, p.1);
             assert!(close(inv.apply(x, y), p));
+        }
+    }
+
+    #[test]
+    fn mul_composes_transforms() {
+        // Translation-like (affine) puis échelle : vérifie l'ordre de
+        // composition (other d'abord, self ensuite).
+        let scale = Mat3([[2.0, 0.0, 0.0], [0.0, 2.0, 0.0], [0.0, 0.0, 1.0]]);
+        let shift = Mat3([[1.0, 0.0, 0.5], [0.0, 1.0, 0.25], [0.0, 0.0, 1.0]]);
+        // self=scale, other=shift : p' = scale(shift(p)).
+        let composed = scale.mul(&shift);
+        assert!(close(composed.apply(0.0, 0.0), (1.0, 0.5)));
+        // Produit par l'identité : inchangé.
+        let same = Mat3::IDENTITY.mul(&scale);
+        assert_eq!(same, scale);
+        // A · A⁻¹ = I.
+        let h = from_mapping(&mapping([
+            (0.08, 0.05),
+            (0.97, 0.02),
+            (1.0, 0.93),
+            (0.03, 0.98),
+        ]))
+        .expect("homography");
+        let inv = h.inverse().expect("inverse");
+        let identity = h.mul(&inv);
+        for (got, want) in identity.to_gl().iter().zip(Mat3::IDENTITY.to_gl().iter()) {
+            assert!((got - want).abs() < 1e-6);
         }
     }
 

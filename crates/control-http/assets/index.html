@@ -1,0 +1,1275 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Toolbox — contrôle</title>
+<style>
+  :root {
+    --page: #0d0d0d; --surface: #1a1a19; --surface-2: #232322;
+    --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+    --hairline: #2c2c2a; --border: rgba(255,255,255,0.10);
+    --accent: #3987e5; --accent-2: #9085e9;
+    --good: #0ca30c; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b;
+    --radius: 10px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: var(--page); color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 14px; display: flex; overflow: hidden;
+  }
+  /* ---------- Sidebar ---------- */
+  nav {
+    width: 190px; min-width: 190px; background: var(--surface);
+    border-right: 1px solid var(--hairline); display: flex; flex-direction: column;
+    padding: 14px 10px; overflow-y: auto;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; padding: 6px 10px 16px; }
+  .brand .logo {
+    width: 30px; height: 30px; border-radius: 8px; flex: none;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    display: grid; place-items: center; font-weight: 700; font-size: 15px;
+  }
+  .brand b { font-size: 15px; letter-spacing: .3px; }
+  .brand small { display: block; color: var(--muted); font-weight: 400; }
+  nav a {
+    display: flex; align-items: center; gap: 10px; color: var(--ink-2);
+    text-decoration: none; padding: 9px 12px; border-radius: 8px; margin: 1px 0;
+    cursor: pointer; user-select: none; white-space: nowrap;
+  }
+  nav a:hover { background: var(--surface-2); color: var(--ink); }
+  nav a.active { background: var(--surface-2); color: var(--ink); box-shadow: inset 2px 0 0 var(--accent); }
+  nav a .ic { width: 18px; text-align: center; opacity: .9; flex: none; }
+  nav .spacer { flex: 1; }
+  .nodecard {
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 10px 12px; font-size: 12px; color: var(--ink-2); line-height: 1.6;
+  }
+  /* ---------- Layout ---------- */
+  main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  header {
+    min-height: 54px; display: flex; align-items: center; gap: 12px; padding: 8px 20px;
+    border-bottom: 1px solid var(--hairline); background: var(--surface); flex-wrap: wrap;
+  }
+  header h1 { font-size: 16px; font-weight: 600; }
+  header .grow { flex: 1; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 7px; padding: 5px 12px;
+    border-radius: 20px; background: var(--surface-2); border: 1px solid var(--border);
+    color: var(--ink-2); font-size: 12px; max-width: 100%;
+  }
+  .pill .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .pill .txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  button {
+    font: inherit; color: var(--ink); background: var(--surface-2);
+    border: 1px solid var(--border); border-radius: 8px; padding: 7px 14px; cursor: pointer;
+    min-height: 34px;
+  }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  button.danger { color: #ffb0b0; }
+  button.danger:hover { border-color: var(--critical); }
+  button.on { background: var(--surface-2); border-color: var(--accent); color: var(--ink); box-shadow: inset 0 0 0 1px var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  section.page { flex: 1; overflow: auto; padding: 18px; display: none; }
+  section.page.visible { display: block; }
+  .grid { display: grid; gap: 14px; }
+  .cols2 { grid-template-columns: 2fr 1fr; }
+  .cols11 { grid-template-columns: 1fr 1fr; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 16px; min-width: 0;
+  }
+  .card h3 { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .8px; margin-bottom: 12px; }
+  .hint { font-size: 12px; color: var(--muted); line-height: 1.6; margin-top: 10px; }
+  kbd { background: var(--surface-2); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; font-size: 11px; }
+  .rowbtns { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  /* ---------- Transport / seek ---------- */
+  .transport { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .transport button { width: 44px; height: 44px; border-radius: 50%; font-size: 15px; display: grid; place-items: center; padding: 0; flex: none; }
+  .transport button.play { width: 56px; height: 56px; background: var(--accent); border-color: var(--accent); font-size: 20px; }
+  .seek { flex: 1 1 220px; display: flex; align-items: center; gap: 10px; color: var(--ink-2); font-size: 12px; font-variant-numeric: tabular-nums; min-width: 180px; }
+  .seek .bar { flex: 1; height: 20px; position: relative; cursor: pointer; touch-action: none; display: flex; align-items: center; }
+  .seek .bar::before { content: ""; position: absolute; left: 0; right: 0; height: 6px; border-radius: 3px; background: var(--surface-2); }
+  .seek .bar i { position: absolute; left: 0; height: 6px; border-radius: 3px; background: var(--accent); width: 0; pointer-events: none; }
+  .mediaTitle { font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
+  .mediaSub { color: var(--muted); font-size: 12px; margin-top: 3px; }
+  /* ---------- Sliders ---------- */
+  .slider { display: grid; grid-template-columns: 105px 1fr 62px; align-items: center; gap: 12px; padding: 8px 0; }
+  .slider label { color: var(--ink-2); font-size: 13px; }
+  .slider output { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink); font-size: 13px; }
+  input[type=range] { -webkit-appearance: none; appearance: none; height: 26px; background: transparent; outline: none; width: 100%; touch-action: none; cursor: pointer; }
+  input[type=range]::-webkit-slider-runnable-track { height: 6px; border-radius: 3px; background: var(--surface-2); }
+  input[type=range]::-moz-range-track { height: 6px; border-radius: 3px; background: var(--surface-2); }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%; margin-top: -7px;
+    background: var(--accent); border: 3px solid #fff; cursor: pointer;
+  }
+  input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: var(--accent); border: 3px solid #fff; cursor: pointer; }
+  /* ---------- Playlist ---------- */
+  .pl { list-style: none; }
+  .pl li { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-bottom: 1px solid var(--hairline); border-radius: 6px; }
+  .pl li.cur { background: rgba(57,135,229,.12); box-shadow: inset 2px 0 0 var(--accent); }
+  .pl li .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
+  .pl li.cur .nm { color: var(--ink); font-weight: 600; }
+  .pl li .ix { color: var(--muted); font-size: 11px; width: 18px; text-align: right; flex: none; font-variant-numeric: tabular-nums; }
+  .mini { padding: 3px 8px; font-size: 12px; min-height: 30px; min-width: 30px; }
+  .plAddRow { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  .plAddRow select { flex: 1; min-width: 140px; }
+  .empty { color: var(--muted); font-size: 13px; padding: 12px 4px; }
+  /* ---------- Mapping ---------- */
+  .maplayout { display: grid; grid-template-columns: minmax(0,1fr) 300px; gap: 14px; align-items: start; }
+  #mapstage {
+    position: relative; background: #000; border: 1px solid var(--border);
+    border-radius: var(--radius); touch-action: none; aspect-ratio: 16/9; width: 100%;
+  }
+  #warp { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: var(--radius); }
+  .corner {
+    position: absolute; width: 30px; height: 30px; border-radius: 50%;
+    background: var(--accent); border: 3px solid #fff; cursor: grab;
+    transform: translate(-50%, -50%); display: grid; place-items: center;
+    font-size: 12px; font-weight: 700; user-select: none; touch-action: none;
+    box-shadow: 0 2px 10px rgba(0,0,0,.6); z-index: 2;
+  }
+  .corner:active { cursor: grabbing; }
+  .corner.sel { background: var(--accent-2); outline: 2px solid var(--accent-2); outline-offset: 2px; }
+  .mapside .row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--hairline); font-size: 13px; color: var(--ink-2); }
+  .mapside .row:last-child { border: none; }
+  .mapside .row b { color: var(--ink); font-variant-numeric: tabular-nums; font-weight: 500; }
+  .chipgrp { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chk { display: inline-flex; align-items: center; gap: 8px; color: var(--ink-2); font-size: 13px; cursor: pointer; padding: 6px 0; user-select: none; }
+  .chk input { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
+  /* ---------- Médias ---------- */
+  .drop {
+    border: 2px dashed var(--hairline); border-radius: var(--radius); padding: 26px;
+    text-align: center; color: var(--muted); margin-bottom: 14px; cursor: pointer;
+  }
+  .drop:hover, .drop.over { border-color: var(--accent); color: var(--ink-2); }
+  .upWrap { display: none; margin-bottom: 14px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 16px; }
+  .upWrap.show { display: block; }
+  .upTop { display: flex; justify-content: space-between; font-size: 12px; color: var(--ink-2); margin-bottom: 8px; gap: 10px; }
+  .upTop span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .upTrack { height: 8px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
+  .upTrack i { display: block; height: 100%; width: 0; background: var(--accent); border-radius: 4px; transition: width .1s linear; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: var(--muted); font-weight: 500; font-size: 12px; padding: 8px 10px; border-bottom: 1px solid var(--hairline); }
+  td { padding: 8px 10px; border-bottom: 1px solid var(--hairline); color: var(--ink-2); vertical-align: middle; }
+  td.path { color: var(--ink); overflow-wrap: anywhere; }
+  tr:hover td { background: var(--surface-2); }
+  td .acts { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  .badge { font-size: 11px; padding: 2px 8px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--border); color: var(--ink-2); white-space: nowrap; }
+  .confirm { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--warning); flex-wrap: wrap; }
+  /* ---------- Presets ---------- */
+  .presetRow { display: flex; gap: 8px; flex-wrap: wrap; }
+  .presetRow input { flex: 1; min-width: 160px; }
+  .plist { list-style: none; margin-top: 4px; }
+  .plist li { display: flex; align-items: center; gap: 8px; padding: 8px 4px; border-bottom: 1px solid var(--hairline); }
+  .plist li:last-child { border: none; }
+  .plist li .nm { flex: 1; color: var(--ink); overflow-wrap: anywhere; }
+  /* ---------- Logs ---------- */
+  .logbar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+  .chip {
+    padding: 5px 12px; border-radius: 16px; border: 1px solid var(--border);
+    background: transparent; color: var(--ink-2); font-size: 12px; cursor: pointer; min-height: 30px;
+  }
+  .chip.on { background: var(--surface-2); color: var(--ink); border-color: var(--accent); }
+  #logFilter { flex: 1 1 140px; min-width: 120px; }
+  #logview {
+    background: #111110; border: 1px solid var(--border); border-radius: var(--radius);
+    font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 12px;
+    padding: 12px; height: calc(100vh - 200px); min-height: 240px; overflow: auto; line-height: 1.7;
+  }
+  .lg { display: flex; gap: 10px; white-space: nowrap; }
+  .lg .t { color: var(--muted); font-variant-numeric: tabular-nums; flex: none; }
+  .lg .lv { width: 48px; font-weight: 700; flex: none; }
+  .lg .md { color: var(--ink-2); min-width: 70px; flex: none; }
+  .lv.INFO { color: var(--accent); } .lv.WARN { color: var(--warning); }
+  .lv.ERROR { color: var(--critical); } .lv.DEBUG { color: var(--muted); }
+  .lv.TRACE { color: #5e5c55; }
+  /* ---------- Système ---------- */
+  .tiles { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+  .tile { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
+  .tile .k { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+  .tile .v { font-size: 24px; font-weight: 650; letter-spacing: -.5px; overflow-wrap: anywhere; }
+  .tile .v small { font-size: 13px; color: var(--ink-2); font-weight: 400; margin-left: 3px; }
+  .tile.warn .v { color: var(--warning); }
+  /* ---------- Toasts ---------- */
+  #toasts { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 50; display: flex; flex-direction: column; gap: 8px; align-items: center; pointer-events: none; max-width: min(92vw, 480px); }
+  .toast {
+    background: var(--surface-2); border: 1px solid var(--border); color: var(--ink);
+    border-radius: 8px; padding: 9px 16px; font-size: 13px; box-shadow: 0 4px 18px rgba(0,0,0,.5);
+    opacity: 1; transition: opacity .3s; text-align: center;
+  }
+  .toast.err { border-color: var(--critical); color: #ffc9c9; }
+  .toast.out { opacity: 0; }
+  select, input[type=text] {
+    font: inherit; color: var(--ink); background: var(--surface-2);
+    border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; min-height: 34px;
+  }
+  input[type=text]:focus, select:focus { outline: 1px solid var(--accent); }
+  /* ---------- Responsive ---------- */
+  @media (max-width: 900px) {
+    body { flex-direction: column; }
+    nav {
+      width: 100%; min-width: 0; flex-direction: row; align-items: center;
+      padding: 8px; overflow-x: auto; overflow-y: hidden;
+      border-right: none; border-bottom: 1px solid var(--hairline);
+    }
+    .brand { padding: 0 8px; } .brand div b, .brand small { display: none; }
+    nav a { padding: 8px 10px; flex: none; }
+    nav .spacer, .nodecard { display: none; }
+    .cols2, .cols11, .maplayout { grid-template-columns: 1fr; }
+    header { padding: 8px 12px; }
+    section.page { padding: 12px; }
+    #logview { height: 50vh; }
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="brand"><div class="logo">T</div><div><b id="brandName">Toolbox</b><small id="brandVer">&nbsp;</small></div></div>
+  <a data-page="dashboard" class="active"><span class="ic">&#9672;</span><span>Dashboard</span></a>
+  <a data-page="mapping"><span class="ic">&#11034;</span><span>Mapping</span></a>
+  <a data-page="color"><span class="ic">&#9680;</span><span>Couleur</span></a>
+  <a data-page="media"><span class="ic">&#9636;</span><span>M&eacute;dias</span></a>
+  <a data-page="presets"><span class="ic">&#9733;</span><span>Presets</span></a>
+  <a data-page="logs"><span class="ic">&#9776;</span><span>Logs</span></a>
+  <a data-page="system"><span class="ic">&#9881;</span><span>Syst&egrave;me</span></a>
+  <div class="spacer"></div>
+  <div class="nodecard" id="nodecard">Toolbox</div>
+</nav>
+
+<main>
+  <header>
+    <h1 id="pagetitle">Dashboard</h1>
+    <span class="pill" id="transportPill" style="display:none"><span class="dot" id="transportDot"></span><span class="txt" id="transportTxt"></span></span>
+    <div class="grow"></div>
+    <span class="pill" id="connPill"><span class="dot" id="connDot" style="background:var(--critical)"></span><span class="txt" id="connTxt">Connexion&hellip;</span></span>
+  </header>
+
+  <!-- ================= DASHBOARD ================= -->
+  <section class="page visible" id="page-dashboard">
+    <div class="grid cols2">
+      <div class="card">
+        <h3>Lecture</h3>
+        <div style="margin-bottom:14px">
+          <div class="mediaTitle" id="curMedia">Aucun m&eacute;dia charg&eacute;</div>
+          <div class="mediaSub" id="curMediaSub">&nbsp;</div>
+        </div>
+        <div class="transport">
+          <button id="btnStop" title="Stop">&#9632;</button>
+          <button id="btnPlay" class="play" title="Lecture / Pause">&#9654;</button>
+          <button id="btnPrev" title="Pr&eacute;c&eacute;dent">&#9198;</button>
+          <button id="btnNext" title="Suivant">&#9197;</button>
+          <div class="seek">
+            <span id="posLab">--:--</span>
+            <div class="bar" id="seekbar"><i id="seekfill"></i></div>
+            <span id="durLab">--:--</span>
+          </div>
+        </div>
+        <div class="slider" style="margin-top:10px">
+          <label for="vol">Volume</label>
+          <input type="range" id="vol" min="0" max="1" step="0.01" value="1" data-fmt="pct">
+          <output id="volOut">100%</output>
+        </div>
+        <div class="rowbtns" style="margin-top:8px">
+          <span style="color:var(--muted);font-size:12px">Boucle :</span>
+          <button class="loopbtn mini" data-mode="off">Off</button>
+          <button class="loopbtn mini" data-mode="one">Un seul</button>
+          <button class="loopbtn mini" data-mode="all">Playlist</button>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Playlist</h3>
+        <ul class="pl" id="plList"></ul>
+        <div class="plAddRow">
+          <select id="plAdd"></select>
+          <button id="plAddBtn" class="mini">+ Ajouter</button>
+        </div>
+        <div class="hint">L&rsquo;&eacute;l&eacute;ment en cours est surlign&eacute;. Fl&egrave;ches &#8593;&#8595; pour r&eacute;ordonner.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= MAPPING ================= -->
+  <section class="page" id="page-mapping">
+    <div class="maplayout">
+      <div>
+        <div id="mapstage">
+          <canvas id="warp"></canvas>
+          <div class="corner" data-i="0" title="0 &middot; haut gauche">0</div>
+          <div class="corner" data-i="1" title="1 &middot; haut droit">1</div>
+          <div class="corner" data-i="2" title="2 &middot; bas droit">2</div>
+          <div class="corner" data-i="3" title="3 &middot; bas gauche">3</div>
+        </div>
+        <div class="hint">
+          Glisse les poign&eacute;es (souris ou tactile). Touche une poign&eacute;e puis
+          <kbd>&#8592;</kbd><kbd>&#8594;</kbd><kbd>&#8593;</kbd><kbd>&#8595;</kbd> : pas de 0.001, <kbd>Maj</kbd> + fl&egrave;ches : 0.01.
+          La d&eacute;formation affich&eacute;e est la vraie homographie du moteur.
+        </div>
+      </div>
+      <div class="mapside grid">
+        <div class="card">
+          <h3>Coins</h3>
+          <div class="row"><span>0 &middot; haut gauche</span><b id="c0">&ndash;</b></div>
+          <div class="row"><span>1 &middot; haut droit</span><b id="c1">&ndash;</b></div>
+          <div class="row"><span>2 &middot; bas droit</span><b id="c2">&ndash;</b></div>
+          <div class="row"><span>3 &middot; bas gauche</span><b id="c3">&ndash;</b></div>
+          <div class="rowbtns" style="margin-top:12px">
+            <button id="mapReset" class="danger">R&eacute;initialiser le mapping</button>
+          </div>
+        </div>
+        <div class="card">
+          <h3>Orientation</h3>
+          <div class="chipgrp">
+            <button class="rotbtn mini" data-deg="0">0&deg;</button>
+            <button class="rotbtn mini" data-deg="90">90&deg;</button>
+            <button class="rotbtn mini" data-deg="180">180&deg;</button>
+            <button class="rotbtn mini" data-deg="270">270&deg;</button>
+          </div>
+          <div style="display:flex;gap:18px;margin-top:8px;flex-wrap:wrap">
+            <label class="chk"><input type="checkbox" id="flipH"> Miroir horizontal</label>
+            <label class="chk"><input type="checkbox" id="flipV"> Miroir vertical</label>
+          </div>
+        </div>
+        <div class="card">
+          <h3>Recadrage</h3>
+          <div class="slider"><label for="cropL">Gauche</label><input type="range" id="cropL" data-edge="left" min="0" max="0.45" step="0.005" value="0" data-fmt="f3"><output>0.000</output></div>
+          <div class="slider"><label for="cropT">Haut</label><input type="range" id="cropT" data-edge="top" min="0" max="0.45" step="0.005" value="0" data-fmt="f3"><output>0.000</output></div>
+          <div class="slider"><label for="cropR">Droite</label><input type="range" id="cropR" data-edge="right" min="0" max="0.45" step="0.005" value="0" data-fmt="f3"><output>0.000</output></div>
+          <div class="slider"><label for="cropB">Bas</label><input type="range" id="cropB" data-edge="bottom" min="0" max="0.45" step="0.005" value="0" data-fmt="f3"><output>0.000</output></div>
+        </div>
+        <div class="card">
+          <h3>Mire de test</h3>
+          <div class="chipgrp">
+            <button class="mirebtn mini" data-pat="grid">Grille</button>
+            <button class="mirebtn mini" data-pat="checker">Damier</button>
+            <button class="mirebtn mini" data-pat="corners">Coins</button>
+            <button class="mirebtn mini" data-pat="off">Off</button>
+          </div>
+          <div class="hint">&laquo; Coins &raquo; identifie chaque angle sur le vid&eacute;oprojecteur.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= COULEUR ================= -->
+  <section class="page" id="page-color">
+    <div class="grid cols11">
+      <div class="card">
+        <h3>Correction</h3>
+        <div class="slider"><label>Luminosit&eacute;</label><input type="range" class="cs" data-p="brightness" min="0" max="2" step="0.01" value="1" data-fmt="f2"><output>1.00</output></div>
+        <div class="slider"><label>Contraste</label><input type="range" class="cs" data-p="contrast" min="0" max="2" step="0.01" value="1" data-fmt="f2"><output>1.00</output></div>
+        <div class="slider"><label>Gamma</label><input type="range" class="cs" data-p="gamma" min="0.2" max="4" step="0.01" value="1" data-fmt="f2"><output>1.00</output></div>
+        <div class="slider"><label>Saturation</label><input type="range" class="cs" data-p="saturation" min="0" max="2" step="0.01" value="1" data-fmt="f2"><output>1.00</output></div>
+        <div class="slider"><label>Teinte</label><input type="range" class="cs" data-p="hue" min="-180" max="180" step="1" value="0" data-fmt="deg"><output>0&deg;</output></div>
+      </div>
+      <div class="card">
+        <h3>Gains RVB</h3>
+        <div class="slider"><label style="color:#ff8f8f">Gain rouge</label><input type="range" class="cs" data-p="gain_r" min="0" max="2" step="0.01" value="1" data-fmt="f2"><output>1.00</output></div>
+        <div class="slider"><label style="color:#8fd98f">Gain vert</label><input type="range" class="cs" data-p="gain_g" min="0" max="2" step="0.01" value="1" data-fmt="f2"><output>1.00</output></div>
+        <div class="slider"><label style="color:#8fb8ff">Gain bleu</label><input type="range" class="cs" data-p="gain_b" min="0" max="2" step="0.01" value="1" data-fmt="f2"><output>1.00</output></div>
+        <div class="rowbtns" style="margin-top:14px">
+          <button id="colorReset" class="danger">Tout r&eacute;initialiser</button>
+        </div>
+        <div class="hint">Double-clic sur un curseur : retour &agrave; la valeur neutre.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= MEDIAS ================= -->
+  <section class="page" id="page-media">
+    <div class="drop" id="drop">&#11014;&nbsp; D&eacute;pose des fichiers ici ou clique pour parcourir</div>
+    <input type="file" id="fileInput" multiple style="display:none">
+    <div class="upWrap" id="upWrap">
+      <div class="upTop"><span id="upName"></span><span id="upPct">0%</span></div>
+      <div class="upTrack"><i id="upBar"></i></div>
+    </div>
+    <div class="card" style="padding:0;overflow-x:auto">
+      <table>
+        <thead><tr><th>Fichier</th><th style="width:90px">Taille</th><th style="text-align:right">Actions</th></tr></thead>
+        <tbody id="mediaBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ================= PRESETS ================= -->
+  <section class="page" id="page-presets">
+    <div class="card" style="max-width:640px">
+      <h3>Presets</h3>
+      <div class="presetRow">
+        <input type="text" id="presetName" placeholder="Nom du preset" maxlength="64">
+        <button id="presetSave" class="primary">Sauvegarder</button>
+      </div>
+      <ul class="plist" id="presetList"></ul>
+    </div>
+  </section>
+
+  <!-- ================= LOGS ================= -->
+  <section class="page" id="page-logs">
+    <div class="logbar">
+      <button class="chip lvchip on" data-lv="TRACE">trace</button>
+      <button class="chip lvchip on" data-lv="DEBUG">debug</button>
+      <button class="chip lvchip on" data-lv="INFO">info</button>
+      <button class="chip lvchip on" data-lv="WARN">warn</button>
+      <button class="chip lvchip on" data-lv="ERROR">error</button>
+      <input type="text" id="logFilter" placeholder="Filtrer le texte&hellip;">
+      <button class="chip on" id="logAuto">Auto-scroll</button>
+      <button class="chip" id="logClear">Vider</button>
+    </div>
+    <div id="logview"></div>
+  </section>
+
+  <!-- ================= SYSTEME ================= -->
+  <section class="page" id="page-system">
+    <div class="grid tiles" id="sysGrid"></div>
+  </section>
+</main>
+
+<div id="toasts"></div>
+<script>
+"use strict";
+/* ===================== Utilitaires ===================== */
+const $ = s => document.querySelector(s);
+const $$ = s => Array.from(document.querySelectorAll(s));
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+function fmtTime(s) {
+  if (s == null || !isFinite(s)) return "--:--";
+  s = Math.max(0, s);
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = Math.floor(s % 60);
+  const mm = String(m).padStart(2, "0"), ss = String(sec).padStart(2, "0");
+  return h > 0 ? h + ":" + mm + ":" + ss : mm + ":" + ss;
+}
+function fmtBytes(b) {
+  if (b == null) return "—";
+  const u = ["o", "Ko", "Mo", "Go", "To"];
+  let i = 0, v = b;
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+  return (i === 0 ? String(v) : v.toFixed(1)) + " " + u[i];
+}
+function fmtUptime(s) {
+  if (s == null) return "—";
+  const j = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
+  if (j > 0) return j + " j " + h + " h";
+  if (h > 0) return h + " h " + String(m).padStart(2, "0") + " min";
+  return m + " min " + String(Math.floor(s % 60)).padStart(2, "0") + " s";
+}
+function esc(t) { const d = document.createElement("div"); d.textContent = t == null ? "" : String(t); return d.innerHTML; }
+function baseName(p) { const i = String(p).lastIndexOf("/"); return i >= 0 ? p.slice(i + 1) : p; }
+
+/* Throttle ~30 msg/s avec envoi garanti de la derniere valeur */
+function throttler(fn, ms) {
+  ms = ms || 33;
+  let last = 0, timer = null, pend = null;
+  const t = function () {
+    pend = arguments;
+    const fire = () => { last = Date.now(); timer = null; const a = pend; pend = null; fn.apply(null, a); };
+    const now = Date.now();
+    if (now - last >= ms) { if (timer) { clearTimeout(timer); timer = null; } fire(); }
+    else if (!timer) { timer = setTimeout(fire, ms - (now - last)); }
+  };
+  t.flush = function () { if (timer) { clearTimeout(timer); timer = null; } if (pend) { const a = pend; pend = null; last = Date.now(); fn.apply(null, a); } };
+  return t;
+}
+
+/* ===================== Toasts ===================== */
+function toast(msg, kind) {
+  const box = $("#toasts");
+  const d = document.createElement("div");
+  d.className = "toast" + (kind ? " " + kind : "");
+  d.textContent = msg;
+  box.appendChild(d);
+  while (box.children.length > 4) box.removeChild(box.firstChild);
+  setTimeout(() => { d.classList.add("out"); setTimeout(() => d.remove(), 350); }, 4000);
+}
+
+/* ===================== API ===================== */
+async function api(path, opts) {
+  let r;
+  try { r = await fetch(path, opts); }
+  catch (e) { toast("Serveur injoignable", "err"); throw e; }
+  if (!r.ok) {
+    let m = "erreur HTTP " + r.status;
+    try { const j = await r.json(); if (j && j.error) m = j.error; } catch (e) { /* corps non JSON */ }
+    toast(m, "err");
+    throw new Error(m);
+  }
+  const ct = r.headers.get("content-type") || "";
+  return ct.indexOf("json") >= 0 ? r.json() : null;
+}
+
+/* ===================== Etat + WebSocket ===================== */
+let state = null;          // etat serveur complet (source de verite)
+let position = null, duration = null;
+let ws = null, wsOpen = false, wsDelay = 500, wsTimer = null;
+
+function sendCmd(cmd) {
+  if (wsOpen && ws && ws.readyState === 1) {
+    try { ws.send(JSON.stringify(cmd)); return; } catch (e) { /* retombe sur POST */ }
+  }
+  fetch("/api/command", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cmd)
+  }).then(r => { if (!r.ok) toast("Commande refusée (" + r.status + ")", "err"); })
+    .catch(() => toast("Serveur injoignable — commande perdue", "err"));
+}
+
+function setConn(st) {
+  const dot = $("#connDot"), txt = $("#connTxt");
+  if (st === true) { dot.style.background = "var(--good)"; txt.textContent = "Connecté"; }
+  else if (st === "connecting") { dot.style.background = "var(--warning)"; txt.textContent = "Connexion…"; }
+  else { dot.style.background = "var(--critical)"; txt.textContent = "Déconnecté"; }
+}
+
+function connectWS() {
+  setConn("connecting");
+  let sock;
+  try { sock = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws"); }
+  catch (e) { setConn(false); scheduleWS(); return; }
+  ws = sock;
+  sock.onopen = () => { wsOpen = true; wsDelay = 500; setConn(true); };
+  sock.onmessage = ev => { try { onEvent(JSON.parse(ev.data)); } catch (e) { /* message illisible */ } };
+  sock.onclose = () => { wsOpen = false; setConn(false); scheduleWS(); };
+  sock.onerror = () => { try { sock.close(); } catch (e) {} };
+}
+function scheduleWS() {
+  if (wsTimer) return;
+  wsTimer = setTimeout(() => { wsTimer = null; connectWS(); }, wsDelay);
+  wsDelay = Math.min(8000, wsDelay * 2);
+}
+
+function applyState(s) {
+  if (!s) return;
+  state = s;
+  renderTransport(); renderMediaInfo(); renderVolume(); renderLoop();
+  renderPlaylist(); renderMapping(); renderColor();
+}
+
+function onEvent(m) {
+  if (!m || typeof m !== "object") return;
+  const e = m.event;
+  if (e === "state_replaced") { applyState(m.state); return; }
+  if (e === "position") { position = m.position; duration = m.duration; renderSeek(); return; }
+  if (!state) return;
+  switch (e) {
+    case "transport_changed": state.player.transport = m.transport; renderTransport(); break;
+    case "media_loaded": state.player.media = m.path; renderMediaInfo(); renderPlaylist(); break;
+    case "seeked": position = m.seconds; renderSeek(); break;
+    case "loop_changed": state.player.loop_mode = m.mode; renderLoop(); break;
+    case "volume_changed": state.player.volume = m.volume; renderVolume(); break;
+    case "playlist_changed": state.player.playlist = m.items || []; state.player.playlist_index = (m.index === undefined ? null : m.index); renderPlaylist(); break;
+    case "playlist_position_changed":
+      state.player.playlist_index = (m.index === undefined ? null : m.index);
+      if (m.path !== undefined) state.player.media = m.path;
+      renderPlaylist(); renderMediaInfo(); break;
+    case "corner_moved": state.mapping.corners[m.index] = { x: m.x, y: m.y }; renderMapping(); break;
+    case "rotation_changed": state.mapping.rotation = "r" + m.degrees; renderMapping(); break;
+    case "flip_changed": state.mapping.flip_h = m.horizontal; state.mapping.flip_v = m.vertical; renderMapping(); break;
+    case "crop_changed": state.mapping.crop = { left: m.left, top: m.top, right: m.right, bottom: m.bottom }; renderMapping(); break;
+    case "color_changed": state.color[m.param] = m.value; renderColor(); break;
+    case "mapping_reset":
+      state.mapping = { corners: [{x:0,y:0},{x:1,y:0},{x:1,y:1},{x:0,y:1}], rotation: "r0",
+        flip_h: false, flip_v: false, crop: { left:0, top:0, right:0, bottom:0 } };
+      renderMapping(); break;
+    case "test_pattern_changed": state.test_pattern = m.pattern; renderMapping(); break;
+    case "preset_saved": toast("Preset « " + m.name + " » sauvegardé"); loadPresets(); break;
+    case "preset_loaded": toast("Preset « " + m.name + " » chargé"); loadPresets(); break;
+  }
+}
+
+/* ===================== Navigation ===================== */
+const pageTitles = { dashboard: "Dashboard", mapping: "Mapping", color: "Couleur",
+  media: "Médias", presets: "Presets", logs: "Logs", system: "Système" };
+$$("nav a").forEach(a => a.addEventListener("click", () => {
+  $$("nav a").forEach(x => x.classList.remove("active"));
+  a.classList.add("active");
+  const p = a.dataset.page;
+  $$(".page").forEach(s => s.classList.toggle("visible", s.id === "page-" + p));
+  $("#pagetitle").textContent = pageTitles[p];
+  if (p === "mapping") sizeStage();
+}));
+
+/* Curseurs generiques : throttle + valeur finale + pas de recalage pendant le drag */
+function fmtVal(inp, v) {
+  const f = inp.dataset.fmt;
+  if (f === "deg") return Math.round(v) + "°";
+  if (f === "pct") return Math.round(v * 100) + "%";
+  if (f === "f3") return (+v).toFixed(3);
+  return (+v).toFixed(2);
+}
+function sliderOut(inp) {
+  const o = inp.parentElement ? inp.parentElement.querySelector("output") : null;
+  if (o) o.textContent = fmtVal(inp, +inp.value);
+}
+function bindSlider(inp, send) {
+  const th = throttler(v => send(v), 33);
+  inp.addEventListener("pointerdown", () => { inp.dataset.drag = "1"; });
+  const end = () => { delete inp.dataset.drag; };
+  inp.addEventListener("pointerup", end);
+  inp.addEventListener("pointercancel", end);
+  inp.addEventListener("input", () => { sliderOut(inp); th(+inp.value); });
+  inp.addEventListener("change", () => { end(); sliderOut(inp); send(+inp.value); });
+}
+function sliderBusy(inp) { return inp.dataset.drag === "1"; }
+
+/* ===================== Dashboard ===================== */
+const btnPlay = $("#btnPlay");
+btnPlay.addEventListener("click", () => {
+  if (!state) return;
+  sendCmd({ cmd: state.player.transport === "playing" ? "pause" : "play" });
+});
+$("#btnStop").addEventListener("click", () => sendCmd({ cmd: "stop" }));
+$("#btnPrev").addEventListener("click", () => sendCmd({ cmd: "playlist_prev" }));
+$("#btnNext").addEventListener("click", () => sendCmd({ cmd: "playlist_next" }));
+$$(".loopbtn").forEach(b => b.addEventListener("click", () => sendCmd({ cmd: "set_loop", mode: b.dataset.mode })));
+bindSlider($("#vol"), v => sendCmd({ cmd: "set_volume", volume: clamp(v, 0, 1) }));
+
+function renderTransport() {
+  if (!state) return;
+  const t = state.player.transport;
+  btnPlay.innerHTML = t === "playing" ? "&#10074;&#10074;" : "&#9654;";
+  const pill = $("#transportPill"), dot = $("#transportDot"), txt = $("#transportTxt");
+  pill.style.display = "";
+  dot.style.background = t === "playing" ? "var(--good)" : (t === "paused" ? "var(--warning)" : "var(--muted)");
+  const lab = t === "playing" ? "En lecture" : (t === "paused" ? "En pause" : "Arrêté");
+  txt.textContent = state.player.media ? lab + " — " + baseName(state.player.media) : lab;
+}
+function renderMediaInfo() {
+  if (!state) return;
+  $("#curMedia").textContent = state.player.media ? state.player.media : "Aucun média chargé";
+  const ix = state.player.playlist_index;
+  $("#curMediaSub").innerHTML = (ix != null && state.player.playlist && state.player.playlist.length)
+    ? "Playlist : élément " + (ix + 1) + " / " + state.player.playlist.length : "&nbsp;";
+  renderTransport();
+  if (typeof renderMediaTable === "function") renderMediaTable();
+}
+function renderVolume() {
+  if (!state) return;
+  const inp = $("#vol");
+  if (!sliderBusy(inp)) { inp.value = state.player.volume; sliderOut(inp); }
+}
+function renderLoop() {
+  if (!state) return;
+  $$(".loopbtn").forEach(b => b.classList.toggle("on", b.dataset.mode === state.player.loop_mode));
+}
+
+/* --- barre de progression / seek --- */
+const seekbar = $("#seekbar");
+let seekDrag = false;
+const seekTh = throttler(t => sendCmd({ cmd: "seek", seconds: t }), 50);
+function seekAt(e, final) {
+  if (duration == null || !isFinite(duration) || duration <= 0) return;
+  const r = seekbar.getBoundingClientRect();
+  const t = clamp((e.clientX - r.left) / r.width, 0, 1) * duration;
+  position = t; paintSeek();
+  if (final) sendCmd({ cmd: "seek", seconds: t }); else seekTh(t);
+}
+seekbar.addEventListener("pointerdown", e => {
+  if (duration == null) return;
+  seekDrag = true; seekbar.setPointerCapture(e.pointerId); seekAt(e, false);
+});
+seekbar.addEventListener("pointermove", e => { if (seekDrag) seekAt(e, false); });
+seekbar.addEventListener("pointerup", e => { if (seekDrag) { seekAt(e, true); seekDrag = false; } });
+seekbar.addEventListener("pointercancel", () => { seekDrag = false; });
+function paintSeek() {
+  $("#posLab").textContent = fmtTime(position);
+  $("#durLab").textContent = fmtTime(duration);
+  const pc = (duration && position != null) ? clamp(position / duration, 0, 1) * 100 : 0;
+  $("#seekfill").style.width = pc + "%";
+}
+function renderSeek() { if (!seekDrag) paintSeek(); }
+
+/* --- playlist --- */
+function renderPlaylist() {
+  if (!state) return;
+  const ul = $("#plList");
+  const items = state.player.playlist || [];
+  const cur = state.player.playlist_index;
+  ul.innerHTML = "";
+  if (!items.length) {
+    ul.innerHTML = '<li class="empty" style="border:none">Playlist vide — ajoute un média ci-dessous.</li>';
+    return;
+  }
+  items.forEach((it, i) => {
+    const li = document.createElement("li");
+    if (i === cur) li.className = "cur";
+    li.innerHTML = '<span class="ix">' + (i + 1) + '</span><span class="nm">' + esc(it) + '</span>';
+    const mk = (label, title, fn, dis) => {
+      const b = document.createElement("button");
+      b.className = "mini"; b.innerHTML = label; b.title = title; b.disabled = !!dis;
+      b.addEventListener("click", fn); li.appendChild(b);
+    };
+    mk("&#9654;", "Lancer cet élément", () => sendCmd({ cmd: "playlist_go", index: i }));
+    mk("&#8593;", "Monter", () => movePl(i, -1), i === 0);
+    mk("&#8595;", "Descendre", () => movePl(i, 1), i === items.length - 1);
+    mk("&#10005;", "Retirer", () => {
+      const next = items.slice(); next.splice(i, 1);
+      sendCmd({ cmd: "playlist_set", items: next });
+    });
+    ul.appendChild(li);
+  });
+}
+function movePl(i, d) {
+  const items = (state.player.playlist || []).slice();
+  const j = i + d;
+  if (j < 0 || j >= items.length) return;
+  const tmp = items[i]; items[i] = items[j]; items[j] = tmp;
+  sendCmd({ cmd: "playlist_set", items: items });
+}
+$("#plAddBtn").addEventListener("click", () => {
+  const sel = $("#plAdd");
+  if (!sel.value || !state) return;
+  sendCmd({ cmd: "playlist_set", items: (state.player.playlist || []).concat([sel.value]) });
+});
+
+/* Espace = lecture/pause (hors champs de saisie) */
+document.addEventListener("keydown", e => {
+  if (e.code !== "Space") return;
+  const t = e.target;
+  const tag = t && t.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || tag === "BUTTON" || (t && t.isContentEditable)) return;
+  e.preventDefault();
+  if (state) sendCmd({ cmd: state.player.transport === "playing" ? "pause" : "play" });
+});
+
+/* ===================== Mapping ===================== */
+/* Homographie 4 coins — implémentation validée contre homography_ref.py (reprise telle quelle) */
+function homography(corners) {
+  const U = [[0,0],[1,0],[1,1],[0,1]], A = [], B = [];
+  for (let k = 0; k < 4; k++) {
+    const [u,v] = U[k], [x,y] = corners[k];
+    A.push([u,v,1,0,0,0,-u*x,-v*x]); B.push(x);
+    A.push([0,0,0,u,v,1,-u*y,-v*y]); B.push(y);
+  }
+  const M = A.map((r,i) => [...r, B[i]]), n = 8;
+  for (let c = 0; c < n; c++) {
+    let p = c;
+    for (let r = c; r < n; r++) if (Math.abs(M[r][c]) > Math.abs(M[p][c])) p = r;
+    [M[c], M[p]] = [M[p], M[c]];
+    if (Math.abs(M[c][c]) < 1e-12) return null;
+    for (let r = c+1; r < n; r++) { const f = M[r][c]/M[c][c]; for (let j = c; j <= n; j++) M[r][j] -= f*M[c][j]; }
+  }
+  const h = new Array(n).fill(0);
+  for (let r = n-1; r >= 0; r--) { let s = M[r][n]; for (let j = r+1; j < n; j++) s -= M[r][j]*h[j]; h[r] = s/M[r][r]; }
+  return [[h[0],h[1],h[2]],[h[3],h[4],h[5]],[h[6],h[7],1]];
+}
+
+const stage = $("#mapstage");
+const warpCanvas = $("#warp");
+const wctx = warpCanvas.getContext("2d");
+let corners = [[0,0],[1,0],[1,1],[0,1]];   // copie locale pour le rendu (peinture pendant drag)
+let selectedCorner = null, dragCorner = null;
+let srcDirty = true, srcCache = null;
+
+/* --- mires (640x360) --- */
+const PW = 640, PH = 360;
+function newPat() { const c = document.createElement("canvas"); c.width = PW; c.height = PH; return c; }
+function patDefault() {
+  const cv = newPat(), c = cv.getContext("2d");
+  c.fillStyle = "#151516"; c.fillRect(0,0,PW,PH);
+  c.strokeStyle = "#3987e5"; c.lineWidth = 1;
+  for (let x = 0; x <= PW; x += 40) { c.beginPath(); c.moveTo(x,0); c.lineTo(x,PH); c.stroke(); }
+  for (let y = 0; y <= PH; y += 40) { c.beginPath(); c.moveTo(0,y); c.lineTo(PW,y); c.stroke(); }
+  c.strokeStyle = "#ffffff"; c.lineWidth = 2;
+  c.beginPath(); c.moveTo(PW/2,0); c.lineTo(PW/2,PH); c.moveTo(0,PH/2); c.lineTo(PW,PH/2); c.stroke();
+  c.beginPath(); c.arc(PW/2, PH/2, 80, 0, Math.PI*2); c.stroke();
+  c.fillStyle = "#fff"; c.font = "700 26px system-ui"; c.textAlign = "center";
+  c.fillText("TOOLBOX · SORTIE", PW/2, PH/2 - 100);
+  return cv;
+}
+function patGrid() {
+  const cv = newPat(), c = cv.getContext("2d");
+  c.fillStyle = "#000"; c.fillRect(0,0,PW,PH);
+  c.strokeStyle = "#e8e8e8"; c.lineWidth = 1;
+  for (let x = 0; x <= PW; x += 32) { c.beginPath(); c.moveTo(x,0); c.lineTo(x,PH); c.stroke(); }
+  for (let y = 0; y <= PH; y += 32) { c.beginPath(); c.moveTo(0,y); c.lineTo(PW,y); c.stroke(); }
+  c.strokeStyle = "#3987e5"; c.lineWidth = 3;
+  c.beginPath(); c.moveTo(PW/2,0); c.lineTo(PW/2,PH); c.moveTo(0,PH/2); c.lineTo(PW,PH/2); c.stroke();
+  c.beginPath(); c.arc(PW/2, PH/2, 90, 0, Math.PI*2); c.stroke();
+  return cv;
+}
+function patChecker() {
+  const cv = newPat(), c = cv.getContext("2d"), s = 40;
+  for (let j = 0; j * s < PH; j++) for (let i = 0; i * s < PW; i++) {
+    c.fillStyle = (i + j) % 2 ? "#ffffff" : "#111111";
+    c.fillRect(i*s, j*s, s, s);
+  }
+  return cv;
+}
+function patCorners() {
+  const cv = newPat(), c = cv.getContext("2d");
+  c.fillStyle = "#000"; c.fillRect(0,0,PW,PH);
+  c.strokeStyle = "#333"; c.lineWidth = 1;
+  c.strokeRect(0.5,0.5,PW-1,PH-1);
+  const spots = [[46,52,"0","#3987e5"],[PW-46,52,"1","#0ca30c"],[PW-46,PH-30,"2","#fab219"],[46,PH-30,"3","#d03b3b"]];
+  spots.forEach(sp => {
+    c.fillStyle = sp[3];
+    c.beginPath(); c.arc(sp[0], sp[1] - 8, 26, 0, Math.PI*2); c.fill();
+    c.fillStyle = "#fff"; c.font = "700 28px system-ui"; c.textAlign = "center";
+    c.fillText(sp[2], sp[0], sp[1]);
+  });
+  c.fillStyle = "#888"; c.font = "600 16px system-ui"; c.textAlign = "center";
+  c.fillText("IDENTIFICATION DES COINS", PW/2, PH/2);
+  return cv;
+}
+const patterns = { grid: patGrid(), checker: patChecker(), corners: patCorners(), base: patDefault() };
+
+/* --- source = mire + crop + rotation + flips (aperçu fidèle de la chaîne) --- */
+function buildSource() {
+  const pat = state && state.test_pattern ? (patterns[state.test_pattern] || patterns.base) : patterns.base;
+  const cr = state ? state.mapping.crop : { left:0, top:0, right:0, bottom:0 };
+  const c1 = newPat(), g = c1.getContext("2d");
+  const sw = Math.max(1, PW * (1 - cr.left - cr.right)), sh = Math.max(1, PH * (1 - cr.top - cr.bottom));
+  g.drawImage(pat, cr.left * PW, cr.top * PH, sw, sh, 0, 0, PW, PH);
+  const out = newPat(), o = out.getContext("2d");
+  const deg = state ? ({ r0:0, r90:90, r180:180, r270:270 }[state.mapping.rotation] || 0) : 0;
+  o.translate(PW/2, PH/2);
+  o.rotate(deg * Math.PI / 180);
+  o.scale(state && state.mapping.flip_h ? -1 : 1, state && state.mapping.flip_v ? -1 : 1);
+  if (deg === 90 || deg === 270) o.drawImage(c1, -PH/2, -PW/2, PH, PW);
+  else o.drawImage(c1, -PW/2, -PH/2, PW, PH);
+  return out;
+}
+
+function drawWarp() {
+  const W = warpCanvas.width, H = warpCanvas.height;
+  if (!W || !H) return;
+  wctx.setTransform(1,0,0,1,0,0);
+  wctx.fillStyle = "#000"; wctx.fillRect(0,0,W,H);
+  if (srcDirty || !srcCache) { srcCache = buildSource(); srcDirty = false; }
+  const Hm = homography(corners);
+  if (!Hm) return;
+  const src = srcCache, N = 24, sw = src.width/N, sh = src.height/N;
+  const P = (u,v) => { const w = Hm[2][0]*u + Hm[2][1]*v + 1;
+    return [ (Hm[0][0]*u+Hm[0][1]*v+Hm[0][2])/w*W, (Hm[1][0]*u+Hm[1][1]*v+Hm[1][2])/w*H ]; };
+  for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
+    const p0 = P(i/N, j/N), p1 = P((i+1)/N, j/N), p2 = P(i/N, (j+1)/N);
+    wctx.save();
+    wctx.setTransform((p1[0]-p0[0])/sw, (p1[1]-p0[1])/sw, (p2[0]-p0[0])/sh, (p2[1]-p0[1])/sh, p0[0], p0[1]);
+    wctx.drawImage(src, i*sw, j*sh, sw+1, sh+1, 0, 0, sw+1, sh+1);
+    wctx.restore();
+  }
+}
+
+function sizeStage() {
+  warpCanvas.width = stage.clientWidth || 640;
+  warpCanvas.height = stage.clientHeight || 360;
+  syncHandles(); drawWarp();
+}
+function syncHandles() {
+  $$(".corner").forEach(el => {
+    const i = +el.dataset.i, x = corners[i][0], y = corners[i][1];
+    el.style.left = clamp(x, -0.03, 1.03) * 100 + "%";
+    el.style.top = clamp(y, -0.03, 1.03) * 100 + "%";
+    el.classList.toggle("sel", selectedCorner === i);
+  });
+  corners.forEach((c, i) => { $("#c" + i).textContent = c[0].toFixed(3) + " , " + c[1].toFixed(3); });
+}
+
+const cornerTh = throttler((i, x, y) => sendCmd({ cmd: "corner_set", index: i, x: x, y: y }), 33);
+
+$$(".corner").forEach(el => {
+  const idx = +el.dataset.i;
+  el.addEventListener("pointerdown", e => {
+    e.preventDefault();
+    selectedCorner = idx; dragCorner = idx;
+    el.setPointerCapture(e.pointerId);
+    syncHandles();
+  });
+  el.addEventListener("pointermove", e => {
+    if (dragCorner !== idx) return;
+    const r = stage.getBoundingClientRect();
+    const x = clamp((e.clientX - r.left) / r.width, -0.5, 1.5);
+    const y = clamp((e.clientY - r.top) / r.height, -0.5, 1.5);
+    corners[idx] = [x, y];
+    syncHandles(); drawWarp();
+    cornerTh(idx, x, y);
+  });
+  const release = () => {
+    if (dragCorner !== idx) return;
+    dragCorner = null;
+    sendCmd({ cmd: "corner_set", index: idx, x: corners[idx][0], y: corners[idx][1] });
+  };
+  el.addEventListener("pointerup", release);
+  el.addEventListener("pointercancel", release);
+});
+
+document.addEventListener("keydown", e => {
+  if (selectedCorner === null) return;
+  if (!$("#page-mapping").classList.contains("visible")) return;
+  const t = e.target, tag = t && t.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+  const step = e.shiftKey ? 0.01 : 0.001;
+  const d = { ArrowLeft: [-step,0], ArrowRight: [step,0], ArrowUp: [0,-step], ArrowDown: [0,step] }[e.key];
+  if (!d) return;
+  e.preventDefault();
+  const i = selectedCorner;
+  corners[i] = [clamp(corners[i][0] + d[0], -0.5, 1.5), clamp(corners[i][1] + d[1], -0.5, 1.5)];
+  syncHandles(); drawWarp();
+  cornerTh(i, corners[i][0], corners[i][1]);
+});
+
+$$(".rotbtn").forEach(b => b.addEventListener("click", () => sendCmd({ cmd: "set_rotation", degrees: +b.dataset.deg })));
+$("#flipH").addEventListener("change", sendFlip);
+$("#flipV").addEventListener("change", sendFlip);
+function sendFlip() {
+  sendCmd({ cmd: "set_flip", horizontal: $("#flipH").checked, vertical: $("#flipV").checked });
+}
+const cropTh = throttler(() => {
+  sendCmd({ cmd: "set_crop",
+    left: +$("#cropL").value, top: +$("#cropT").value,
+    right: +$("#cropR").value, bottom: +$("#cropB").value });
+}, 33);
+["#cropL", "#cropT", "#cropR", "#cropB"].forEach(id => bindSlider($(id), () => cropTh()));
+$$(".mirebtn").forEach(b => b.addEventListener("click", () => {
+  sendCmd({ cmd: "set_test_pattern", pattern: b.dataset.pat === "off" ? null : b.dataset.pat });
+}));
+$("#mapReset").addEventListener("click", () => sendCmd({ cmd: "mapping_reset" }));
+
+function renderMapping() {
+  if (!state) return;
+  const mp = state.mapping;
+  for (let i = 0; i < 4; i++) {
+    if (dragCorner === i) continue;               // on peint localement pendant le drag
+    corners[i] = [mp.corners[i].x, mp.corners[i].y];
+  }
+  $$(".rotbtn").forEach(b => b.classList.toggle("on", "r" + b.dataset.deg === mp.rotation));
+  $("#flipH").checked = !!mp.flip_h;
+  $("#flipV").checked = !!mp.flip_v;
+  const ce = { "#cropL": mp.crop.left, "#cropT": mp.crop.top, "#cropR": mp.crop.right, "#cropB": mp.crop.bottom };
+  Object.keys(ce).forEach(id => {
+    const inp = $(id);
+    if (!sliderBusy(inp)) { inp.value = ce[id]; sliderOut(inp); }
+  });
+  $$(".mirebtn").forEach(b => {
+    const pat = b.dataset.pat === "off" ? null : b.dataset.pat;
+    b.classList.toggle("on", pat === (state.test_pattern || null));
+  });
+  srcDirty = true;
+  syncHandles(); drawWarp();
+}
+if (window.ResizeObserver) new ResizeObserver(sizeStage).observe(stage);
+window.addEventListener("resize", sizeStage);
+
+/* ===================== Couleur ===================== */
+const NEUTRAL = { brightness:1, contrast:1, gamma:1, saturation:1, hue:0, gain_r:1, gain_g:1, gain_b:1 };
+$$(".cs").forEach(inp => {
+  const p = inp.dataset.p;
+  bindSlider(inp, v => sendCmd({ cmd: "color_set", param: p, value: v }));
+  inp.addEventListener("dblclick", () => {
+    inp.value = NEUTRAL[p]; sliderOut(inp);
+    sendCmd({ cmd: "color_set", param: p, value: NEUTRAL[p] });
+  });
+});
+$("#colorReset").addEventListener("click", () => {
+  Object.keys(NEUTRAL).forEach(p => sendCmd({ cmd: "color_set", param: p, value: NEUTRAL[p] }));
+  toast("Couleur remise au neutre");
+});
+function renderColor() {
+  if (!state) return;
+  $$(".cs").forEach(inp => {
+    if (sliderBusy(inp)) return;
+    const v = state.color[inp.dataset.p];
+    if (v !== undefined) { inp.value = v; sliderOut(inp); }
+  });
+}
+
+/* ===================== Médias ===================== */
+let mediaList = [];
+let pendingDeleteMedia = null;
+async function loadMedia() {
+  try { mediaList = await api("/api/media") || []; } catch (e) { return; }
+  renderMediaTable(); renderPlAdd();
+}
+function renderPlAdd() {
+  const sel = $("#plAdd");
+  const old = sel.value;
+  sel.innerHTML = "";
+  if (!mediaList.length) {
+    const o = document.createElement("option");
+    o.value = ""; o.textContent = "— médiathèque vide —";
+    sel.appendChild(o); return;
+  }
+  mediaList.forEach(m => {
+    const o = document.createElement("option");
+    o.value = m.path; o.textContent = m.path;
+    sel.appendChild(o);
+  });
+  if (old) sel.value = old;
+  if (!sel.value) sel.selectedIndex = 0;
+}
+function renderMediaTable() {
+  const tb = $("#mediaBody");
+  tb.innerHTML = "";
+  if (!mediaList.length) {
+    tb.innerHTML = '<tr><td colspan="3" class="empty">Aucun média — dépose un fichier ci-dessus.</td></tr>';
+    return;
+  }
+  mediaList.forEach(m => {
+    const tr = document.createElement("tr");
+    const cur = state && state.player.media === m.path;
+    const td1 = document.createElement("td");
+    td1.className = "path";
+    td1.innerHTML = esc(m.path) + (cur ? ' <span class="badge" style="color:var(--good)">chargé</span>' : "");
+    const td2 = document.createElement("td");
+    td2.textContent = fmtBytes(m.bytes);
+    const td3 = document.createElement("td");
+    const acts = document.createElement("div"); acts.className = "acts";
+    if (pendingDeleteMedia === m.path) {
+      const sp = document.createElement("span"); sp.className = "confirm";
+      sp.textContent = "Supprimer « " + baseName(m.path) + " » ?";
+      const yes = document.createElement("button"); yes.className = "mini danger"; yes.textContent = "Oui";
+      yes.addEventListener("click", async () => {
+        pendingDeleteMedia = null;
+        try { await api("/api/media/" + encodeURIComponent(m.path), { method: "DELETE" }); toast("« " + baseName(m.path) + " » supprimé"); } catch (e) {}
+        loadMedia();
+      });
+      const no = document.createElement("button"); no.className = "mini"; no.textContent = "Annuler";
+      no.addEventListener("click", () => { pendingDeleteMedia = null; renderMediaTable(); });
+      acts.appendChild(sp); acts.appendChild(yes); acts.appendChild(no);
+    } else {
+      const mk = (label, title, fn, cls) => {
+        const b = document.createElement("button");
+        b.className = "mini" + (cls ? " " + cls : ""); b.textContent = label; b.title = title;
+        b.addEventListener("click", fn); acts.appendChild(b);
+      };
+      mk("Charger", "Charger dans le lecteur", () => sendCmd({ cmd: "load", path: m.path }));
+      mk("+ Playlist", "Ajouter à la playlist", () => {
+        if (!state) return;
+        sendCmd({ cmd: "playlist_set", items: (state.player.playlist || []).concat([m.path]) });
+        toast("« " + baseName(m.path) + " » ajouté à la playlist");
+      });
+      mk("Renommer", "Renommer le fichier", async () => {
+        const to = window.prompt("Nouveau nom pour « " + m.path + " » :", m.path);
+        if (!to || to === m.path) return;
+        try {
+          await api("/api/media-rename", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ from: m.path, to: to })
+          });
+          toast("Renommé en « " + to + " »");
+        } catch (e) {}
+        loadMedia();
+      });
+      mk("Supprimer", "Supprimer le fichier", () => { pendingDeleteMedia = m.path; renderMediaTable(); }, "danger");
+    }
+    td3.appendChild(acts);
+    tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3);
+    tb.appendChild(tr);
+  });
+}
+
+/* --- upload (PUT brut + progression via XHR) --- */
+const drop = $("#drop"), fileInput = $("#fileInput");
+drop.addEventListener("click", () => fileInput.click());
+fileInput.addEventListener("change", () => { uploadQueue(Array.from(fileInput.files)); fileInput.value = ""; });
+["dragenter", "dragover"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("over"); }));
+["dragleave", "drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("over"); }));
+drop.addEventListener("drop", e => {
+  if (e.dataTransfer && e.dataTransfer.files) uploadQueue(Array.from(e.dataTransfer.files));
+});
+let uploading = false;
+function uploadQueue(files) {
+  if (!files.length) return;
+  if (uploading) { toast("Un envoi est déjà en cours, patiente…", "err"); return; }
+  const next = list => {
+    if (!list.length) { uploading = false; setUpVisible(false); loadMedia(); return; }
+    uploadOne(list[0], () => next(list.slice(1)));
+  };
+  uploading = true; next(files);
+}
+function setUpVisible(v) { $("#upWrap").classList.toggle("show", v); }
+function uploadOne(file, done) {
+  setUpVisible(true);
+  $("#upName").textContent = file.name;
+  $("#upPct").textContent = "0%"; $("#upBar").style.width = "0%";
+  const xhr = new XMLHttpRequest();
+  xhr.open("PUT", "/api/media/" + encodeURIComponent(file.name));
+  xhr.upload.onprogress = e => {
+    if (!e.lengthComputable) return;
+    const p = Math.round(e.loaded / e.total * 100);
+    $("#upPct").textContent = p + "%"; $("#upBar").style.width = p + "%";
+  };
+  xhr.onload = () => {
+    if (xhr.status === 201) toast("« " + file.name + " » importé");
+    else {
+      let msg = "erreur " + xhr.status;
+      try { const j = JSON.parse(xhr.responseText); if (j && j.error) msg = j.error; } catch (e) {}
+      if (xhr.status === 413) msg = "fichier trop volumineux — " + msg;
+      toast("Import de « " + file.name + " » refusé : " + msg, "err");
+    }
+    done();
+  };
+  xhr.onerror = () => { toast("Échec de l’envoi de « " + file.name + " »", "err"); done(); };
+  xhr.send(file);
+}
+
+/* ===================== Presets ===================== */
+let presets = [], pendingDeletePreset = null;
+async function loadPresets() {
+  try { presets = await api("/api/presets") || []; } catch (e) { return; }
+  renderPresets();
+}
+function renderPresets() {
+  const ul = $("#presetList");
+  ul.innerHTML = "";
+  if (!presets.length) {
+    ul.innerHTML = '<li class="empty" style="border:none">Aucun preset sauvegardé.</li>';
+    return;
+  }
+  presets.forEach(name => {
+    const li = document.createElement("li");
+    const nm = document.createElement("span"); nm.className = "nm"; nm.textContent = name;
+    li.appendChild(nm);
+    if (pendingDeletePreset === name) {
+      const sp = document.createElement("span"); sp.className = "confirm"; sp.textContent = "Supprimer ?";
+      const yes = document.createElement("button"); yes.className = "mini danger"; yes.textContent = "Oui";
+      yes.addEventListener("click", async () => {
+        pendingDeletePreset = null;
+        try { await api("/api/presets/" + encodeURIComponent(name), { method: "DELETE" }); toast("Preset « " + name + " » supprimé"); } catch (e) {}
+        loadPresets();
+      });
+      const no = document.createElement("button"); no.className = "mini"; no.textContent = "Annuler";
+      no.addEventListener("click", () => { pendingDeletePreset = null; renderPresets(); });
+      li.appendChild(sp); li.appendChild(yes); li.appendChild(no);
+    } else {
+      const load = document.createElement("button"); load.className = "mini"; load.textContent = "Charger";
+      load.addEventListener("click", () => sendCmd({ cmd: "preset_load", name: name }));
+      const del = document.createElement("button"); del.className = "mini danger"; del.textContent = "Supprimer";
+      del.addEventListener("click", () => { pendingDeletePreset = name; renderPresets(); });
+      li.appendChild(load); li.appendChild(del);
+    }
+    ul.appendChild(li);
+  });
+}
+$("#presetSave").addEventListener("click", () => {
+  const name = $("#presetName").value.trim();
+  if (!name) { toast("Donne un nom au preset", "err"); return; }
+  sendCmd({ cmd: "preset_save", name: name });
+  $("#presetName").value = "";
+});
+$("#presetName").addEventListener("keydown", e => { if (e.key === "Enter") $("#presetSave").click(); });
+
+/* ===================== Logs ===================== */
+const logview = $("#logview");
+const logLevels = { TRACE:true, DEBUG:true, INFO:true, WARN:true, ERROR:true };
+let logText = "", logAuto = true;
+let logWs = null, logDelay = 500, logTimer = null;
+const LOG_MAX = 1500;
+
+function connectLogWS() {
+  let sock;
+  try { sock = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws/logs"); }
+  catch (e) { scheduleLogWS(); return; }
+  logWs = sock;
+  sock.onopen = () => { logDelay = 500; };
+  sock.onmessage = ev => { try { addLog(JSON.parse(ev.data)); } catch (e) {} };
+  sock.onclose = () => scheduleLogWS();
+  sock.onerror = () => { try { sock.close(); } catch (e) {} };
+}
+function scheduleLogWS() {
+  if (logTimer) return;
+  logTimer = setTimeout(() => { logTimer = null; connectLogWS(); }, logDelay);
+  logDelay = Math.min(8000, logDelay * 2);
+}
+function logVisible(el) {
+  const okLv = logLevels[el.dataset.lv];
+  const okTx = !logText || (el.dataset.txt || "").indexOf(logText) >= 0;
+  return okLv && okTx;
+}
+function addLog(m) {
+  if (!m || m.level === undefined) return;
+  const d = new Date(m.ts_ms);
+  const t = isFinite(d.getTime())
+    ? d.toTimeString().slice(0, 8) + "." + String(Math.floor(m.ts_ms % 1000)).padStart(3, "0") : "--:--:--";
+  const div = document.createElement("div");
+  div.className = "lg";
+  div.dataset.lv = m.level;
+  div.dataset.txt = ((m.target || "") + " " + (m.message || "")).toLowerCase();
+  const mk = (cls, txt) => { const s = document.createElement("span"); s.className = cls; s.textContent = txt; return s; };
+  div.appendChild(mk("t", t));
+  div.appendChild(mk("lv " + m.level, m.level));
+  div.appendChild(mk("md", m.target || ""));
+  div.appendChild(mk("msg", m.message || ""));
+  if (!logVisible(div)) div.style.display = "none";
+  logview.appendChild(div);
+  while (logview.children.length > LOG_MAX) logview.removeChild(logview.firstChild);
+  if (logAuto) logview.scrollTop = logview.scrollHeight;
+}
+function refilterLogs() {
+  $$("#logview .lg").forEach(el => { el.style.display = logVisible(el) ? "" : "none"; });
+  if (logAuto) logview.scrollTop = logview.scrollHeight;
+}
+$$(".lvchip").forEach(ch => ch.addEventListener("click", () => {
+  ch.classList.toggle("on");
+  logLevels[ch.dataset.lv] = ch.classList.contains("on");
+  refilterLogs();
+}));
+$("#logFilter").addEventListener("input", function () { logText = this.value.trim().toLowerCase(); refilterLogs(); });
+$("#logAuto").addEventListener("click", function () {
+  logAuto = !logAuto;
+  this.classList.toggle("on", logAuto);
+  if (logAuto) logview.scrollTop = logview.scrollHeight;
+});
+$("#logClear").addEventListener("click", () => { logview.innerHTML = ""; });
+
+/* ===================== Système ===================== */
+let healthInfo = null;
+function tile(k, v, unit, sub, warn) {
+  return '<div class="tile' + (warn ? " warn" : "") + '"><div class="k">' + esc(k) + '</div><div class="v">' +
+    esc(v) + (unit ? '<small>' + esc(unit) + '</small>' : "") + '</div>' +
+    (sub ? '<div class="sub" style="font-size:11px;color:var(--muted);margin-top:4px">' + esc(sub) + '</div>' : "") + '</div>';
+}
+async function loadSystem() {
+  let sys = null;
+  try {
+    const r = await fetch("/api/system");
+    if (r.ok) sys = await r.json();
+    const rh = await fetch("/api/health");
+    if (rh.ok) healthInfo = await rh.json();
+  } catch (e) { /* hors ligne : l'indicateur WS suffit */ }
+  if (healthInfo) {
+    $("#brandName").textContent = healthInfo.name || "Toolbox";
+    $("#brandVer").textContent = healthInfo.version ? "v" + healthInfo.version : "";
+    $("#nodecard").innerHTML = "<b style='color:var(--ink)'>" + esc(healthInfo.name || "Toolbox") + "</b><br>" +
+      (healthInfo.version ? "v" + esc(healthInfo.version) + " · " : "") + "up " + fmtUptime(healthInfo.uptime_s);
+  }
+  const g = $("#sysGrid");
+  if (!sys) {
+    if ($("#page-system").classList.contains("visible") && !g.children.length)
+      g.innerHTML = '<div class="empty">Informations système indisponibles.</div>';
+    return;
+  }
+  let html = "";
+  html += tile("Uptime", fmtUptime(sys.uptime_s), "", "");
+  if (sys.load_1min != null) html += tile("Charge (1 min)", sys.load_1min.toFixed(2), "", "");
+  if (sys.mem_total_mb != null && sys.mem_available_mb != null) {
+    const used = sys.mem_total_mb - sys.mem_available_mb;
+    html += tile("Mémoire", (used / 1024).toFixed(1), "/ " + (sys.mem_total_mb / 1024).toFixed(1) + " Go",
+      sys.mem_available_mb + " Mo disponibles", used / sys.mem_total_mb > 0.9);
+  }
+  if (sys.temperature_c != null)
+    html += tile("Température", sys.temperature_c.toFixed(1), "°C", sys.temperature_c >= 75 ? "surveiller (throttle proche)" : "", sys.temperature_c >= 75);
+  html += tile("Plateforme", (sys.os || "?") + " / " + (sys.arch || "?"), "", "");
+  if (healthInfo) html += tile("Node", healthInfo.name || "Toolbox", "", (healthInfo.version ? "v" + healthInfo.version : "") + " · " + (healthInfo.status || ""));
+  g.innerHTML = html;
+}
+
+/* ===================== Initialisation ===================== */
+(function init() {
+  $$("input[type=range]").forEach(sliderOut);
+  fetch("/api/state").then(r => r.ok ? r.json() : null).then(s => { if (s && !state) applyState(s); }).catch(() => {});
+  connectWS();
+  connectLogWS();
+  loadMedia();
+  loadPresets();
+  loadSystem();
+  setInterval(loadSystem, 5000);
+  sizeStage();
+  paintSeek();
+})();
+</script>
+</body>
+</html>

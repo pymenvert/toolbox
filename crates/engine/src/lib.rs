@@ -1,14 +1,24 @@
 //! # toolbox-engine
 //!
-//! Moteur de rendu. Pour l'instant : les mathématiques du mapping
-//! (homographie 4 coins), validées contre l'implémentation de référence
-//! `tools/mapping/homography_ref.py`. La partie pipeline vidéo (GStreamer)
-//! et le rendu GL arrivent en phase 1, après validation du bench phase 0.
+//! Moteur de rendu et de lecture :
+//! - [`homography`] : mathématiques du mapping 4 coins, validées contre
+//!   l'implémentation de référence `tools/mapping/homography_ref.py` ;
+//! - [`render`] : état du node → matrices + uniformes prêts pour le shader ;
+//! - [`player`] : machine à états de lecture derrière le trait
+//!   [`PlayerBackend`] — le backend GStreamer (Pi/desktop) s'y branchera,
+//!   [`MemoryBackend`] simule en attendant.
 //!
 //! Les shaders GLSL vivent dans `shaders/` à la racine du crate et sont
 //! embarqués dans le binaire via `include_str!` (voir [`shaders`]).
 
 pub mod homography;
+pub mod player;
+pub mod render;
+
+pub use player::{
+    BackendEvent, MemoryBackend, PlaybackPosition, Player, PlayerBackend, PlayerError,
+};
+pub use render::{ColorUniforms, RenderParams};
 
 /// Sources GLSL embarquées (GLES 3.0). Un seul endroit à modifier.
 pub mod shaders {

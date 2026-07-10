@@ -11,6 +11,9 @@ pub enum CoreError {
     #[error("index de coin invalide : {0} (attendu 0..=3)")]
     InvalidCorner(u8),
 
+    #[error("rotation invalide : {0}° (attendu 0, 90, 180 ou 270)")]
+    InvalidRotation(u16),
+
     #[error("valeur hors bornes pour {param} : {value} (attendu {min}..={max})")]
     OutOfRange {
         param: &'static str,
@@ -18,6 +21,21 @@ pub enum CoreError {
         min: f64,
         max: f64,
     },
+
+    #[error("chemin de média invalide : {0:?} (relatif au dossier media/, sans '..')")]
+    InvalidMediaPath(String),
+
+    #[error("média introuvable : {0}")]
+    MediaNotFound(String),
+
+    #[error("un média nommé {0:?} existe déjà")]
+    MediaAlreadyExists(String),
+
+    #[error("type de fichier refusé : {0:?} (extensions médias uniquement)")]
+    UnsupportedMediaType(String),
+
+    #[error("fichier trop volumineux : {name} (maximum {max} octets)")]
+    MediaTooLarge { name: String, max: u64 },
 
     #[error("preset introuvable : {0}")]
     PresetNotFound(String),

@@ -65,7 +65,9 @@ impl PresetStore {
         Ok(())
     }
 
-    /// Charge le preset `name`.
+    /// Charge le preset `name`. L'état est **validé** après lecture : un
+    /// fichier corrompu ou édité à la main avec des valeurs hors bornes est
+    /// refusé plutôt que de devenir l'état du node.
     pub fn load(&self, name: &str) -> Result<NodeState, CoreError> {
         validate_name(name)?;
         let path = self.path_of(name);
@@ -73,7 +75,9 @@ impl PresetStore {
             return Err(CoreError::PresetNotFound(name.to_string()));
         }
         let bytes = fs::read(&path).map_err(|e| CoreError::io(path.display().to_string(), e))?;
-        Ok(serde_json::from_slice(&bytes)?)
+        let state: NodeState = serde_json::from_slice(&bytes)?;
+        state.validate()?;
+        Ok(state)
     }
 
     /// Liste les presets disponibles (triés, sans extension).
@@ -166,6 +170,24 @@ mod tests {
                 "should reject {bad:?}"
             );
         }
+    }
+
+    #[test]
+    fn tampered_preset_is_rejected_on_load() {
+        let (_tmp, store) = store();
+        store.save("ok", &NodeState::default()).expect("save");
+        // Volume hors bornes écrit à la main dans le fichier.
+        let path = store.dir().join("ok.json");
+        let text = std::fs::read_to_string(&path).expect("read");
+        std::fs::write(&path, text.replace("\"volume\": 1.0", "\"volume\": 42.0")).expect("tamper");
+        assert!(matches!(
+            store.load("ok"),
+            Err(CoreError::OutOfRange { .. })
+        ));
+
+        // JSON illisible → erreur propre, pas de panic.
+        std::fs::write(&path, b"{pas du json").expect("corrupt");
+        assert!(store.load("ok").is_err());
     }
 
     #[test]

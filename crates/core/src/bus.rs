@@ -3,14 +3,19 @@
 //! Pattern repris de HPlayer2/3 (bus unique, interfaces découplées), en typé :
 //! - les producteurs (OSC, MIDI, HTTP, séquenceur…) envoient des [`Command`]
 //!   via un [`BusHandle`] cloné ;
-//! - le bus applique la commande à l'état (validation incluse) ;
-//! - l'[`Event`] résultant est diffusé à tous les abonnés (moteur de rendu,
-//!   web UI, feedback OSC, logs). Les erreurs sont tracées, jamais avalées.
+//! - le bus applique la commande à l'état (validation incluse) ; les commandes
+//!   de preset passent par le [`PresetStore`] attaché ;
+//! - les [`Event`] résultants sont diffusés à tous les abonnés (moteur de
+//!   rendu, web UI, feedback OSC, logs). Les erreurs sont tracées, jamais
+//!   avalées ;
+//! - l'état courant est publié sur un canal `watch` : n'importe quel module
+//!   peut obtenir un instantané cohérent sans interroger le bus.
 
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::{broadcast, mpsc, watch};
 use tracing::{info, warn};
 
 use crate::command::Command;
+use crate::preset::PresetStore;
 use crate::state::{Event, NodeState};
 
 /// Origine d'une commande, pour les logs et le debug terrain
@@ -39,22 +44,41 @@ impl std::fmt::Display for Source {
     }
 }
 
-/// Poignée clonable pour envoyer des commandes et s'abonner aux événements.
+/// Poignée clonable : envoyer des commandes, s'abonner aux événements,
+/// obtenir un instantané de l'état.
 #[derive(Debug, Clone)]
 pub struct BusHandle {
     commands: mpsc::Sender<(Source, Command)>,
     events: broadcast::Sender<Event>,
+    state: watch::Receiver<NodeState>,
 }
 
 impl BusHandle {
-    /// Envoie une commande. Retourne `false` si le bus est arrêté.
+    /// Envoie une commande (attend si la file est pleine — backpressure).
+    /// Retourne `false` si le bus est arrêté.
     pub async fn send(&self, source: Source, command: Command) -> bool {
         self.commands.send((source, command)).await.is_ok()
+    }
+
+    /// Variante non bloquante pour les contextes synchrones (callback MIDI,
+    /// thread OSC). Retourne `false` si la file est pleine ou le bus arrêté.
+    pub fn try_send(&self, source: Source, command: Command) -> bool {
+        self.commands.try_send((source, command)).is_ok()
     }
 
     /// S'abonne au flux d'événements (chaque abonné reçoit tout).
     pub fn subscribe(&self) -> broadcast::Receiver<Event> {
         self.events.subscribe()
+    }
+
+    /// Instantané cohérent de l'état courant.
+    pub fn snapshot(&self) -> NodeState {
+        self.state.borrow().clone()
+    }
+
+    /// Récepteur `watch` : `changed().await` pour réagir à chaque mutation.
+    pub fn state_watch(&self) -> watch::Receiver<NodeState> {
+        self.state.clone()
     }
 }
 
@@ -63,6 +87,8 @@ pub struct Bus {
     state: NodeState,
     rx: mpsc::Receiver<(Source, Command)>,
     events: broadcast::Sender<Event>,
+    state_tx: watch::Sender<NodeState>,
+    presets: Option<PresetStore>,
     handle: BusHandle,
 }
 
@@ -71,18 +97,30 @@ impl Bus {
     /// `event_capacity` borne le buffer de diffusion (un abonné trop lent
     /// perd les événements les plus anciens, signalé par `RecvError::Lagged`).
     pub fn new(command_capacity: usize, event_capacity: usize) -> Self {
-        let (tx, rx) = mpsc::channel(command_capacity);
-        let (events, _) = broadcast::channel(event_capacity);
+        let (tx, rx) = mpsc::channel(command_capacity.max(1));
+        let (events, _) = broadcast::channel(event_capacity.max(1));
+        let (state_tx, state_rx) = watch::channel(NodeState::default());
         let handle = BusHandle {
             commands: tx,
             events: events.clone(),
+            state: state_rx,
         };
         Self {
             state: NodeState::default(),
             rx,
             events,
+            state_tx,
+            presets: None,
             handle,
         }
+    }
+
+    /// Attache un dépôt de presets : `preset_save`/`preset_load` deviennent
+    /// fonctionnels. Sans dépôt, ces commandes sont refusées (et tracées).
+    #[must_use]
+    pub fn with_presets(mut self, store: PresetStore) -> Self {
+        self.presets = Some(store);
+        self
     }
 
     pub fn handle(&self) -> BusHandle {
@@ -95,26 +133,67 @@ impl Bus {
     }
 
     /// Traite une commande immédiatement (utilisé par la boucle et les tests).
-    pub fn dispatch(&mut self, source: Source, command: &Command) -> Option<Event> {
-        Self::process(&mut self.state, &self.events, source, command)
+    /// Retourne les événements émis (vide si la commande a été refusée).
+    pub fn dispatch(&mut self, source: Source, command: &Command) -> Vec<Event> {
+        Self::process(
+            &mut self.state,
+            &self.events,
+            &self.state_tx,
+            self.presets.as_ref(),
+            source,
+            command,
+        )
     }
 
     fn process(
         state: &mut NodeState,
         events: &broadcast::Sender<Event>,
+        state_tx: &watch::Sender<NodeState>,
+        presets: Option<&PresetStore>,
         source: Source,
         command: &Command,
-    ) -> Option<Event> {
-        match state.apply(command) {
-            Ok(event) => {
-                info!(%source, ?command, ?event, "commande appliquée");
-                // send() n'échoue que s'il n'y a aucun abonné : pas une erreur.
-                let _ = events.send(event.clone());
-                Some(event)
+    ) -> Vec<Event> {
+        let result = match command {
+            Command::PresetSave { name } => match presets {
+                Some(store) => store
+                    .save(name, state)
+                    .map(|()| vec![Event::PresetSaved { name: name.clone() }]),
+                None => Err(crate::error::CoreError::InvalidCommand(
+                    "aucun dépôt de presets configuré".into(),
+                )),
+            },
+            Command::PresetLoad { name } => match presets {
+                Some(store) => store.load(name).map(|loaded| {
+                    *state = loaded;
+                    vec![
+                        Event::PresetLoaded { name: name.clone() },
+                        Event::StateReplaced {
+                            state: Box::new(state.clone()),
+                        },
+                    ]
+                }),
+                None => Err(crate::error::CoreError::InvalidCommand(
+                    "aucun dépôt de presets configuré".into(),
+                )),
+            },
+            other => state.apply(other),
+        };
+
+        match result {
+            Ok(emitted) => {
+                // Publier l'état AVANT les événements : un abonné réveillé par
+                // un événement qui fait un snapshot voit déjà l'état à jour.
+                state_tx.send_replace(state.clone());
+                for event in &emitted {
+                    info!(%source, ?command, ?event, "commande appliquée");
+                    // send() n'échoue que s'il n'y a aucun abonné : pas une erreur.
+                    let _ = events.send(event.clone());
+                }
+                emitted
             }
             Err(err) => {
                 warn!(%source, ?command, %err, "commande refusée");
-                None
+                Vec::new()
             }
         }
     }
@@ -129,12 +208,21 @@ impl Bus {
             mut state,
             mut rx,
             events,
+            state_tx,
+            presets,
             handle,
         } = self;
         drop(handle);
         info!("bus démarré");
         while let Some((source, command)) = rx.recv().await {
-            Self::process(&mut state, &events, source, &command);
+            Self::process(
+                &mut state,
+                &events,
+                &state_tx,
+                presets.as_ref(),
+                source,
+                &command,
+            );
         }
         info!("bus arrêté (tous les émetteurs fermés)");
     }
@@ -143,6 +231,7 @@ impl Bus {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::Transport;
 
     #[tokio::test]
     async fn command_produces_event_for_subscribers() {
@@ -182,7 +271,7 @@ mod tests {
         let mut events = handle.subscribe();
 
         // play sans média : refusé, aucun événement.
-        assert!(bus.dispatch(Source::Osc, &Command::Play).is_none());
+        assert!(bus.dispatch(Source::Osc, &Command::Play).is_empty());
         assert!(events.try_recv().is_err());
     }
 
@@ -211,5 +300,131 @@ mod tests {
         let expected = Event::VolumeChanged { volume: 0.5 };
         assert_eq!(a.try_recv().expect("a"), expected);
         assert_eq!(b.try_recv().expect("b"), expected);
+    }
+
+    #[tokio::test]
+    async fn snapshot_follows_mutations() {
+        let mut bus = Bus::new(16, 16);
+        let handle = bus.handle();
+        assert_eq!(handle.snapshot(), NodeState::default());
+
+        bus.dispatch(Source::Http, &Command::SetVolume { volume: 0.25 });
+        assert_eq!(handle.snapshot().player.volume, 0.25);
+
+        // Une commande refusée ne change pas l'instantané.
+        bus.dispatch(Source::Http, &Command::SetVolume { volume: 9.0 });
+        assert_eq!(handle.snapshot().player.volume, 0.25);
+    }
+
+    #[tokio::test]
+    async fn try_send_works_from_sync_context() {
+        let bus = Bus::new(4, 4);
+        let handle = bus.handle();
+        let mut events = handle.subscribe();
+        tokio::spawn(bus.run());
+
+        assert!(handle.try_send(
+            Source::Midi,
+            Command::Load {
+                path: "a.mp4".into()
+            }
+        ));
+        let ev = events.recv().await.expect("event");
+        assert_eq!(
+            ev,
+            Event::MediaLoaded {
+                path: "a.mp4".into()
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn preset_save_and_load_via_bus() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = PresetStore::open(dir.path().join("presets")).expect("open");
+        let mut bus = Bus::new(16, 16).with_presets(store);
+        let handle = bus.handle();
+
+        // Construire un état, le sauvegarder.
+        bus.dispatch(
+            Source::Http,
+            &Command::Load {
+                path: "clips/a.mp4".into(),
+            },
+        );
+        bus.dispatch(Source::Http, &Command::SetVolume { volume: 0.4 });
+        let saved = bus.dispatch(
+            Source::Http,
+            &Command::PresetSave {
+                name: "scene".into(),
+            },
+        );
+        assert_eq!(
+            saved,
+            vec![Event::PresetSaved {
+                name: "scene".into()
+            }]
+        );
+
+        // Modifier l'état, puis recharger le preset : état restauré + événements.
+        bus.dispatch(Source::Http, &Command::SetVolume { volume: 1.0 });
+        let mut events = handle.subscribe();
+        let emitted = bus.dispatch(
+            Source::Http,
+            &Command::PresetLoad {
+                name: "scene".into(),
+            },
+        );
+        assert_eq!(emitted.len(), 2);
+        assert_eq!(
+            emitted[0],
+            Event::PresetLoaded {
+                name: "scene".into()
+            }
+        );
+        let Event::StateReplaced { state } = &emitted[1] else {
+            panic!("attendu StateReplaced, reçu {:?}", emitted[1]);
+        };
+        assert_eq!(state.player.volume, 0.4);
+        assert_eq!(state.player.media.as_deref(), Some("clips/a.mp4"));
+        assert_eq!(handle.snapshot().player.volume, 0.4);
+        // Les abonnés reçoivent les deux événements.
+        assert!(matches!(
+            events.try_recv().expect("ev1"),
+            Event::PresetLoaded { .. }
+        ));
+        assert!(matches!(
+            events.try_recv().expect("ev2"),
+            Event::StateReplaced { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn preset_commands_without_store_are_rejected() {
+        let mut bus = Bus::new(4, 4);
+        assert!(bus
+            .dispatch(Source::Osc, &Command::PresetSave { name: "x".into() })
+            .is_empty());
+        assert!(bus
+            .dispatch(Source::Osc, &Command::PresetLoad { name: "x".into() })
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn missing_preset_leaves_state_untouched() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = PresetStore::open(dir.path().join("presets")).expect("open");
+        let mut bus = Bus::new(4, 4).with_presets(store);
+        bus.dispatch(Source::Http, &Command::SetVolume { volume: 0.7 });
+
+        let emitted = bus.dispatch(
+            Source::Http,
+            &Command::PresetLoad {
+                name: "fantome".into(),
+            },
+        );
+        assert!(emitted.is_empty());
+        assert_eq!(bus.state().player.volume, 0.7);
+        assert_eq!(bus.state().player.transport, Transport::Stopped);
     }
 }

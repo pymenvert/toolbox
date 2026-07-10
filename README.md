@@ -1,33 +1,91 @@
 # Toolbox
 
-Node multimédia open source (MIT) : player vidéo, projection mapping,
-contrôle OSC/MIDI/HTTP, web UI, séquenceur. Cibles : Raspberry Pi 4/5,
-Linux, Windows.
+Node multimédia open source (MIT) : player vidéo, projection mapping 4 coins,
+correction couleur, playlists, presets, mires de test, contrôle **web UI /
+OSC / MIDI / REST / WebSocket**, page de logs et monitoring intégrés.
+Cibles : Raspberry Pi 4/5, Linux, Windows.
 
 > Cadrage complet (décisions, plan, architecture, recherches) : dossier
 > `Toolbox/docs/` du projet — ce repo ne contient que le code.
 
-## État
+## État — V1 logicielle
 
-Phase 0 — dérisquage : squelette du workspace + bench vidéo.
+Toute la chaîne de contrôle est fonctionnelle et testée (140+ tests, CI
+Linux + Windows + check ARM64). Le rendu vidéo réel (GStreamer + GLES)
+arrive dès la validation du bench phase 0 sur le matériel : en attendant, un
+backend simulé fait vivre transport/position/boucles/playlists de bout en
+bout — l'UI, l'OSC et le MIDI sont donc démontrables sur n'importe quel PC.
+
+## Démarrage rapide
+
+**Binaires prêts** : onglet *Actions* de GitHub → dernier run vert →
+*Artifacts* → `toolbox-node-windows-x64`, `toolbox-node-linux-x64` ou
+`toolbox-node-raspberrypi-arm64`.
+
+```bash
+# ou compilation locale (Linux : sudo apt install libasound2-dev)
+cargo run -p toolbox-node             # config : ./node.toml optionnel
+```
+
+Puis ouvrez **http://localhost:8080/** — dashboard, mapping, couleur,
+médias (upload), presets, logs en direct, monitoring.
+
+- Version portable : `deploy/run-portable.sh` / `run-portable.bat` à côté du binaire.
+- Installation Pi/Linux + service systemd (kiosque) : `deploy/install.sh`.
+- Configuration complète documentée : [`node.toml.example`](node.toml.example).
+
+## Contrôle à distance
+
+Une commande = un JSON, identique partout (REST, WebSocket, MIDI) avec un
+équivalent OSC :
+
+| Action | JSON (`POST /api/command` ou WS) | OSC (UDP :9000) |
+|---|---|---|
+| Lecture / pause / stop | `{"cmd":"play"}` … | `/play` `/pause` `/stop` |
+| Charger un média | `{"cmd":"load","path":"clip.mp4"}` | `/load clip.mp4` |
+| Seek / volume | `{"cmd":"seek","seconds":12.5}` | `/seek 12.5` `/volume 0.8` |
+| Boucle | `{"cmd":"set_loop","mode":"one"}` | `/loop one` |
+| Playlist | `playlist_set/go/next/prev` | `/playlist/…` |
+| Coin de mapping | `{"cmd":"corner_set","index":2,"x":0.9,"y":1.0}` | `/corner/2 0.9 1.0` |
+| Rotation / flip / crop | `set_rotation`, `set_flip`, `set_crop` | `/rotation 90` `/flip 1 0` `/crop …` |
+| Couleur (8 paramètres) | `{"cmd":"color_set","param":"gamma","value":1.2}` | `/color/gamma 1.2` |
+| Mires de test | `{"cmd":"set_test_pattern","pattern":"grid"}` | `/pattern grid` |
+| Presets | `preset_save` / `preset_load` | `/preset/save nom` |
+
+Détails : table complète dans `crates/core/src/command.rs` (contrat figé par
+tests) ; événements temps réel sur `GET /ws`.
 
 ## Structure
 
 ```
-crates/core/   bus de commandes, état, presets, config   [fait, testé]
-crates/node/   binaire (assemble les modules)            [squelette]
-tools/bench/   bench décodage/rendu à lancer sur les Pi  [fait]
-webui/         web UI Svelte                              [phase 1]
-deploy/        installeur, image Pi, portable             [phase 4]
+crates/core/          bus de commandes, état validé, presets, médiathèque,
+                      ring buffer de logs, config           [fait, testé]
+crates/engine/        homographie (validée vs référence Python), paramètres
+                      de rendu (rotation/flip/crop/couleur), player + backend
+                      simulé ; GStreamer à venir            [fait, testé]
+crates/control-http/  REST + WebSocket + web UI embarquée + monitoring
+                                                            [fait, testé]
+crates/control-osc/   OSC UDP (Chataigne)                   [fait, testé]
+crates/control-midi/  notes/CC → commandes (bindings TOML)  [fait, testé*]
+crates/node/          binaire : assemble les modules        [fait]
+deploy/               installeur, systemd, portable         [fait]
+tools/bench/          bench décodage à lancer sur les Pi    [fait]
+webui/                (réservé : UI Svelte phase suivante — l'UI V1 vanilla
+                      est embarquée dans control-http)
 ```
+\* la traduction MIDI est testée ; l'ouverture du port reste à valider sur matériel.
 
 ## Développement
 
 ```bash
-cargo test          # tests
-cargo clippy        # lints (unwrap interdit)
-cargo run -p toolbox-node   # lance le node (config: ./node.toml optionnel)
+cargo test --workspace        # tous les tests
+cargo clippy --workspace --all-targets -- -D warnings
+cargo run -p toolbox-node
 ```
+
+La CI (GitHub Actions) vérifie format + clippy + tests sur Linux et Windows,
+compile pour ARM64 et publie les binaires en artefacts. En cas d'échec, les
+logs sont poussés sur les branches `ci-logs-*`.
 
 ## Bench phase 0 (sur Pi 4 / Pi 5 / desktop)
 

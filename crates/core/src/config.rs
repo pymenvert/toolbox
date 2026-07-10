@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::command::Command;
 use crate::error::CoreError;
 
 /// Résolution de sortie. `auto` = résolution native de l'écran/VP détectée.
@@ -59,6 +60,8 @@ impl Default for Modules {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Ports {
+    /// Adresse d'écoute ("0.0.0.0" = accessible depuis le téléphone/réseau).
+    pub bind: String,
     pub http: u16,
     pub osc: u16,
 }
@@ -66,8 +69,90 @@ pub struct Ports {
 impl Default for Ports {
     fn default() -> Self {
         Self {
+            bind: "0.0.0.0".to_string(),
             http: 8080,
             osc: 9000,
+        }
+    }
+}
+
+/// Comportement au démarrage (mode kiosque P1.9) : charger un preset et,
+/// si demandé, lancer la lecture — le node redémarre seul en plein show.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Startup {
+    /// Preset chargé au démarrage, s'il existe.
+    pub preset: Option<String>,
+    /// Lance la lecture après chargement du preset.
+    pub autoplay: bool,
+}
+
+/// Cible d'un contrôleur continu MIDI (CC) : la valeur 0..127 est mise à
+/// l'échelle des bornes du paramètre.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScaleTarget {
+    Volume,
+    Brightness,
+    Contrast,
+    Gamma,
+    Saturation,
+    Hue,
+    GainR,
+    GainG,
+    GainB,
+}
+
+/// Un binding MIDI : note ou CC → commande fixe ou paramètre continu.
+///
+/// ```toml
+/// [[midi.bindings]]
+/// note = 60                      # note-on 60 (C4)
+/// command = { cmd = "play" }
+///
+/// [[midi.bindings]]
+/// cc = 7
+/// scale = "volume"               # CC7 0..127 → volume 0..1
+/// ```
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MidiBinding {
+    /// Numéro de note (note-on) déclencheuse.
+    pub note: Option<u8>,
+    /// Numéro de contrôleur continu (CC).
+    pub cc: Option<u8>,
+    /// Canal MIDI 1..=16 (absent = tous les canaux).
+    pub channel: Option<u8>,
+    /// Commande envoyée telle quelle (pour `note`, ou `cc` en tout-ou-rien).
+    pub command: Option<Command>,
+    /// Paramètre continu piloté par la valeur du CC.
+    pub scale: Option<ScaleTarget>,
+}
+
+/// Réglages MIDI.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MidiSettings {
+    /// Sous-chaîne du nom du port à ouvrir (absent = premier port trouvé).
+    pub port: Option<String>,
+    pub bindings: Vec<MidiBinding>,
+}
+
+/// Bornes de ressources — un node de spectacle ne doit jamais saturer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Limits {
+    /// Taille maximale d'un upload de média, en Mo.
+    pub max_upload_mb: u64,
+    /// Nombre d'entrées gardées par la page de logs.
+    pub log_buffer: usize,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            max_upload_mb: 2048,
+            log_buffer: 1000,
         }
     }
 }
@@ -93,7 +178,7 @@ impl Default for Paths {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct NodeConfig {
     /// Nom du node sur le réseau (mDNS, page fleet). Défaut : hostname.
@@ -102,6 +187,9 @@ pub struct NodeConfig {
     pub modules: Modules,
     pub ports: Ports,
     pub paths: Paths,
+    pub startup: Startup,
+    pub limits: Limits,
+    pub midi: MidiSettings,
 }
 
 impl NodeConfig {
@@ -170,5 +258,49 @@ mod tests {
     fn resolution_auto_parses() {
         let cfg: NodeConfig = toml::from_str("[resolution]\nmode = \"auto\"").expect("parse");
         assert_eq!(cfg.resolution, Resolution::Auto);
+    }
+
+    #[test]
+    fn midi_bindings_parse_from_toml() {
+        let cfg: NodeConfig = toml::from_str(
+            r#"
+            [midi]
+            port = "APC"
+
+            [[midi.bindings]]
+            note = 60
+            command = { cmd = "play" }
+
+            [[midi.bindings]]
+            cc = 7
+            scale = "volume"
+
+            [[midi.bindings]]
+            note = 61
+            channel = 10
+            command = { cmd = "set_loop", mode = "all" }
+            "#,
+        )
+        .expect("parse");
+        assert_eq!(cfg.midi.port.as_deref(), Some("APC"));
+        assert_eq!(cfg.midi.bindings.len(), 3);
+        assert_eq!(cfg.midi.bindings[0].note, Some(60));
+        assert_eq!(cfg.midi.bindings[0].command, Some(Command::Play));
+        assert_eq!(cfg.midi.bindings[1].cc, Some(7));
+        assert_eq!(cfg.midi.bindings[1].scale, Some(ScaleTarget::Volume));
+        assert_eq!(cfg.midi.bindings[2].channel, Some(10));
+    }
+
+    #[test]
+    fn startup_and_limits_parse_with_defaults() {
+        let cfg: NodeConfig = toml::from_str(
+            "[startup]\npreset = \"show\"\nautoplay = true\n\n[limits]\nmax_upload_mb = 100",
+        )
+        .expect("parse");
+        assert_eq!(cfg.startup.preset.as_deref(), Some("show"));
+        assert!(cfg.startup.autoplay);
+        assert_eq!(cfg.limits.max_upload_mb, 100);
+        assert_eq!(cfg.limits.log_buffer, 1000);
+        assert_eq!(cfg.ports.bind, "0.0.0.0");
     }
 }

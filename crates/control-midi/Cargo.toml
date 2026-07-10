@@ -1,15 +1,14 @@
 [package]
-name = "toolbox-engine"
-description = "Moteur de rendu et de lecture : mapping (homographie), paramètres shader, player. La partie GStreamer arrive avec le matériel."
+name = "toolbox-control-midi"
+description = "Contrôle MIDI du node : notes/CC → commandes du bus, bindings configurables dans node.toml"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
 toolbox-core = { path = "../core" }
-serde = { workspace = true }
+midir = "0.10"
 thiserror = { workspace = true }
-tokio = { workspace = true }
 tracing = { workspace = true }
 
 [lints]

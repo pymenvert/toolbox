@@ -20,6 +20,11 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Dépendances système (ALSA pour le MIDI)
+        run: |
+          set -o pipefail
+          sudo apt-get update 2>&1 | tail -1
+          sudo apt-get install -y libasound2-dev 2>&1 | tail -1
       - name: Format
         run: cargo fmt --all --check 2>&1 | tee fmt.log
       - name: Clippy (warnings = erreurs)
@@ -41,7 +46,33 @@ jobs:
           git commit -qm "logs check $GITHUB_RUN_ID"
           git push -f origin ci-logs-check
 
+  # Multi-plateforme : mêmes tests sous Windows (cible desktop de Pym).
+  check-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Tests (Windows)
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --workspace 2>&1 | tee windows.log
+      - name: Publier les logs en cas d'échec
+        if: failure()
+        shell: bash
+        run: |
+          git config user.email "ci@toolbox" && git config user.name "CI"
+          git checkout -q --orphan ci-logs-windows
+          git rm -rfq --cached .
+          echo "run $GITHUB_RUN_ID commit $GITHUB_SHA" > run.txt
+          for f in run.txt windows.log; do if [ -f "$f" ]; then git add -f "$f"; fi; done
+          git commit -qm "logs windows $GITHUB_RUN_ID"
+          git push -f origin ci-logs-windows
+
   # Vérifie que ça compile pour les Pi (ARM64) sans exécuter.
+  # --no-default-features : le MIDI (ALSA) demande les libs système ARM,
+  # il est vérifié en natif par les autres jobs.
   check-arm64:
     runs-on: ubuntu-latest
     steps:
@@ -53,7 +84,8 @@ jobs:
       - name: Check aarch64
         run: |
           set -o pipefail
-          cargo check --workspace --target aarch64-unknown-linux-gnu 2>&1 | tee arm64.log
+          cargo check --workspace --exclude toolbox-control-midi --no-default-features \
+            --target aarch64-unknown-linux-gnu 2>&1 | tee arm64.log
       - name: Publier les logs en cas d'échec
         if: failure()
         run: |
@@ -73,7 +105,7 @@ jobs:
         run: |
           set -o pipefail
           sudo apt-get install -y shellcheck 2>&1 | tee apt.log
-          shellcheck tools/bench/*.sh 2>&1 | tee sc.log
+          shellcheck tools/bench/*.sh deploy/*.sh 2>&1 | tee sc.log
       - name: Publier les logs en cas d'échec
         if: failure()
         run: |
@@ -84,3 +116,55 @@ jobs:
           for f in run.txt apt.log sc.log; do if [ -f "$f" ]; then git add -f "$f"; fi; done
           git commit -qm "logs shellcheck $GITHUB_RUN_ID"
           git push -f origin ci-logs-shellcheck
+
+  # Binaires téléchargeables depuis l'onglet Actions (login GitHub requis) :
+  # toolbox-node pour Linux x64, Windows x64 et Raspberry Pi (ARM64).
+  build-artifacts:
+    needs: [check]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: toolbox-node-linux-x64
+            binary: target/release/toolbox-node
+          - os: windows-latest
+            artifact: toolbox-node-windows-x64
+            binary: target/release/toolbox-node.exe
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Dépendances système (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - name: Build release
+        shell: bash
+        run: cargo build --release -p toolbox-node
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.binary }}
+          if-no-files-found: error
+
+  build-arm64:
+    needs: [check]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-gnu
+      - uses: Swatinem/rust-cache@v2
+      - name: Linker croisé ARM64
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+      - name: Build release ARM64 (sans MIDI — ALSA croisé indisponible)
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+        run: cargo build --release -p toolbox-node --no-default-features --target aarch64-unknown-linux-gnu
+      - uses: actions/upload-artifact@v4
+        with:
+          name: toolbox-node-raspberrypi-arm64
+          path: target/aarch64-unknown-linux-gnu/release/toolbox-node
+          if-no-files-found: error
