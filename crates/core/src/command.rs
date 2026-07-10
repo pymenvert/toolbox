@@ -71,6 +71,7 @@ pub enum TestPattern {
 /// | `set_test_pattern` | `/pattern <name|off>`        |
 /// | `preset_save`      | `/preset/save <name>`        |
 /// | `preset_load`      | `/preset/load <name>`        |
+/// | `preset_fade`      | `/preset/fade <name> <s>`    |
 /// | `sync_arm`         | `/sync/arm`                  |
 /// | `sync_start_at`    | `/sync/startAt <unix f64>`   |
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -158,6 +159,14 @@ pub enum Command {
     },
     PresetLoad {
         name: String,
+    },
+    /// Fondu vers le preset `name` en `seconds` secondes : coins, recadrage,
+    /// couleur, effets et volume glissent en continu ; rotation, miroirs,
+    /// mire et bypass basculent à la fin. Le média et la lecture en cours ne
+    /// sont PAS touchés (un fondu n'interrompt jamais le show).
+    PresetFade {
+        name: String,
+        seconds: f32,
     },
     /// Arme la synchro multi-node : média prêt, position 0, en pause.
     /// (`/sync/arm` — envoyé à tous les nodes avant un départ commun.)
@@ -348,6 +357,14 @@ mod tests {
                 })
                 .expect("ser"),
                 r#"{"cmd":"effect_set","param":"pixelate","value":0.5}"#,
+            ),
+            (
+                serde_json::to_string(&Command::PresetFade {
+                    name: "scene_02".into(),
+                    seconds: 2.5,
+                })
+                .expect("ser"),
+                r#"{"cmd":"preset_fade","name":"scene_02","seconds":2.5}"#,
             ),
         ];
         for (got, want) in cases {

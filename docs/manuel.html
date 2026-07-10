@@ -275,7 +275,9 @@ footer { margin-top: 60px; padding-top: 24px; border-top: 1px solid var(--lisere
     <div class="carte"><h4>Médias</h4><p>Dépôt de fichiers, renommage, suppression.
       Les fichiers copiés directement dans <code>media/</code> apparaissent aussi.</p></div>
     <div class="carte"><h4>Presets</h4><p>L'état complet du node (média, mapping,
-      couleur, playlist) sauvegardé sous un nom, rechargeable en un clic.</p></div>
+      couleur, playlist) sauvegardé sous un nom, rechargeable en un clic — ou en
+      fondu (durée réglable) : coins, couleur, effets et volume glissent vers la
+      scène cible sans interrompre la lecture.</p></div>
     <div class="carte"><h4>Logs &amp; Système</h4><p>Journal en direct du node,
       charge machine, mémoire, température (Pi).</p></div>
   </div>
@@ -399,6 +401,7 @@ footer { margin-top: 60px; padding-top: 24px; border-top: 1px solid var(--lisere
       <tr><td><code>/mapping/save</code> · <code>/mapping/load</code></td><td>nom</td><td>Mappings enregistrés</td></tr>
       <tr><td><code>/pattern</code></td><td><code>grid|checker|corners|off</code></td><td>Mire de test</td></tr>
       <tr><td><code>/preset/save</code> · <code>/preset/load</code></td><td>nom</td><td>Presets d'état complet</td></tr>
+      <tr><td><code>/preset/fade</code></td><td>nom, secondes</td><td>Fondu vers le preset : coins, couleur, effets et volume glissent — la lecture continue</td></tr>
       <tr><td><code>/sync/arm</code></td><td>—</td><td>Arme : média prêt, pause à 0 (à envoyer à tous les nodes)</td></tr>
       <tr><td><code>/sync/startAt</code></td><td>heure Unix (double)</td><td>Départ commun au timestamp — horloges NTP partagées</td></tr>
     </tbody>

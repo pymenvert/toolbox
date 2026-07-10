@@ -117,6 +117,17 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let mut services: Vec<(&'static str, tokio::task::JoinHandle<()>)> = Vec::new();
 
+    // Fader : mène les fondus entre presets (`preset_fade`) en commandes
+    // interpolées sur le bus.
+    services.push((
+        "fader",
+        tokio::spawn(toolbox_core::fader::run(
+            handle.clone(),
+            presets.clone(),
+            shutdown_rx.clone(),
+        )),
+    ));
+
     // Canaux de la sortie vidéo : frames décodées (backend → fenêtre),
     // réglages à chaud (API web → fenêtre, initialisés depuis [output]) et
     // écrans détectés (fenêtre → API web).

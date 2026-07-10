@@ -466,6 +466,11 @@
         <input type="text" id="presetName" placeholder="Nom du preset" maxlength="64">
         <button id="presetSave" class="primary">Sauvegarder</button>
       </div>
+      <div class="presetRow" style="align-items:center;gap:8px">
+        <label for="presetFadeSecs" class="muted" style="font-size:.85em">Fondu (s)</label>
+        <input type="number" id="presetFadeSecs" value="2" min="0.1" max="60" step="0.5" style="width:80px">
+        <span class="muted" style="font-size:.8em">« Fondu » glisse coins, couleur, effets et volume — la lecture continue.</span>
+      </div>
       <ul class="plist" id="presetList"></ul>
     </div>
   </section>
@@ -668,6 +673,7 @@ function onEvent(m) {
     case "test_pattern_changed": state.test_pattern = m.pattern; renderMapping(); break;
     case "preset_saved": toast("Preset « " + m.name + " » sauvegardé"); loadPresets(); break;
     case "preset_loaded": toast("Preset « " + m.name + " » chargé"); loadPresets(); break;
+    case "preset_fade_started": toast("Fondu vers « " + m.name + " » (" + m.seconds + " s)"); break;
   }
 }
 
@@ -1329,9 +1335,15 @@ function renderPresets() {
     } else {
       const load = document.createElement("button"); load.className = "mini"; load.textContent = "Charger";
       load.addEventListener("click", () => sendCmd({ cmd: "preset_load", name: name }));
+      const fade = document.createElement("button"); fade.className = "mini"; fade.textContent = "Fondu";
+      fade.addEventListener("click", () => {
+        const seconds = parseFloat($("#presetFadeSecs").value);
+        if (!(seconds > 0)) { toast("Durée de fondu invalide", "err"); return; }
+        sendCmd({ cmd: "preset_fade", name: name, seconds: seconds });
+      });
       const del = document.createElement("button"); del.className = "mini danger"; del.textContent = "Supprimer";
       del.addEventListener("click", () => { pendingDeletePreset = name; renderPresets(); });
-      li.appendChild(load); li.appendChild(del);
+      li.appendChild(load); li.appendChild(fade); li.appendChild(del);
     }
     ul.appendChild(li);
   });

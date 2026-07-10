@@ -13,6 +13,7 @@
 //! `/flip h v` `/crop l t r b` `/color/<param> f` `/mapping/reset`
 //! `/mapping/enabled 0|1` `/mapping/save nom` `/mapping/load nom`
 //! `/pattern grid|checker|corners|off` `/preset/save nom` `/preset/load nom`
+//! `/preset/fade nom secondes`
 //!
 //! Un message invalide est tracé (visible dans la page de logs) et ignoré :
 //! l'OSC ne plante jamais le node.
@@ -243,6 +244,10 @@ pub fn event_to_osc(event: &toolbox_core::Event) -> Option<OscMessage> {
         Event::PresetLoaded { name } => {
             message("/preset/loaded", vec![OscType::String(name.clone())])
         }
+        Event::PresetFadeStarted { name, seconds } => message(
+            "/preset/fade",
+            vec![OscType::String(name.clone()), OscType::Float(*seconds)],
+        ),
         Event::MappingLoaded { name, .. } => {
             message("/mapping/loaded", vec![OscType::String(name.clone())])
         }
@@ -366,6 +371,10 @@ pub fn map_message(addr: &str, args: &[OscType]) -> Result<Command, MapError> {
         "/preset/load" => string_arg(args, 0)
             .map(|name| Command::PresetLoad { name })
             .ok_or_else(|| bad("attendu : nom (string)")),
+        "/preset/fade" => match (string_arg(args, 0), float_arg(args, 1)) {
+            (Some(name), Some(seconds)) => Ok(Command::PresetFade { name, seconds }),
+            _ => Err(bad("attendu : nom (string) puis durée en secondes (float)")),
+        },
         other => {
             if let Some(rest) = other.strip_prefix("/corner/") {
                 let index: u8 = rest
@@ -693,6 +702,31 @@ mod tests {
                 name: "scene_01".into()
             })
         );
+        // Fondu : nom + durée, tolérant sur le type numérique (int accepté).
+        assert_eq!(
+            map_message(
+                "/preset/fade",
+                &[OscType::String("scene_02".into()), OscType::Float(2.5)]
+            ),
+            Ok(Command::PresetFade {
+                name: "scene_02".into(),
+                seconds: 2.5
+            })
+        );
+        assert_eq!(
+            map_message(
+                "/preset/fade",
+                &[OscType::String("scene_02".into()), OscType::Int(3)]
+            ),
+            Ok(Command::PresetFade {
+                name: "scene_02".into(),
+                seconds: 3.0
+            })
+        );
+        assert!(matches!(
+            map_message("/preset/fade", &[OscType::String("seul".into())]),
+            Err(MapError::BadArguments { .. })
+        ));
     }
 
     #[test]
@@ -760,6 +794,17 @@ mod tests {
         })
         .expect("transport");
         assert_eq!(m.args, vec![OscType::String("playing".into())]);
+
+        let m = event_to_osc(&Event::PresetFadeStarted {
+            name: "scene_02".into(),
+            seconds: 2.5,
+        })
+        .expect("fondu");
+        assert_eq!(m.addr, "/preset/fade");
+        assert_eq!(
+            m.args,
+            vec![OscType::String("scene_02".into()), OscType::Float(2.5)]
+        );
 
         // Pas de retour pour l'état complet remplacé.
         assert!(event_to_osc(&Event::StateReplaced {

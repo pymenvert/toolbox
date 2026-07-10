@@ -188,6 +188,31 @@ impl Bus {
                     "aucun dépôt de presets configuré".into(),
                 )),
             },
+            // Le bus valide (durée, preset existant) et annonce ; l'interpolation
+            // est menée par le service fader (voir `crate::fader`), abonné aux
+            // événements — le bus ne dort jamais.
+            Command::PresetFade { name, seconds } => match presets {
+                Some(store) => {
+                    if !seconds.is_finite() || *seconds <= 0.0 || *seconds > 60.0 {
+                        Err(crate::error::CoreError::OutOfRange {
+                            param: "fade.seconds",
+                            value: f64::from(*seconds),
+                            min: 0.0,
+                            max: 60.0,
+                        })
+                    } else {
+                        store.load(name).map(|_| {
+                            vec![Event::PresetFadeStarted {
+                                name: name.clone(),
+                                seconds: *seconds,
+                            }]
+                        })
+                    }
+                }
+                None => Err(crate::error::CoreError::InvalidCommand(
+                    "aucun dépôt de presets configuré".into(),
+                )),
+            },
             Command::MappingSave { name } => match mapping_presets {
                 Some(store) => store
                     .save(name, &state.mapping)
@@ -433,6 +458,45 @@ mod tests {
             events.try_recv().expect("ev2"),
             Event::StateReplaced { .. }
         ));
+    }
+
+    #[tokio::test]
+    async fn preset_fade_is_validated_by_the_bus() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = PresetStore::open(dir.path().join("presets")).expect("open");
+        let mut bus = Bus::new(16, 16).with_presets(store);
+        bus.dispatch(Source::Http, &Command::PresetSave { name: "a".into() });
+
+        // Fondu valide : annoncé, sans toucher l'état (le fader s'en charge).
+        let emitted = bus.dispatch(
+            Source::Http,
+            &Command::PresetFade {
+                name: "a".into(),
+                seconds: 2.0,
+            },
+        );
+        assert_eq!(
+            emitted,
+            vec![Event::PresetFadeStarted {
+                name: "a".into(),
+                seconds: 2.0,
+            }]
+        );
+
+        // Durée invalide ou preset absent : refusé.
+        for (name, seconds) in [("a", 0.0), ("a", -1.0), ("a", f32::NAN), ("fantome", 1.0)] {
+            assert!(
+                bus.dispatch(
+                    Source::Http,
+                    &Command::PresetFade {
+                        name: name.into(),
+                        seconds,
+                    },
+                )
+                .is_empty(),
+                "aurait dû refuser {name}/{seconds}"
+            );
+        }
     }
 
     #[tokio::test]

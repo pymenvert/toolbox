@@ -5,6 +5,12 @@
 
 ## [Non publié]
 
+- **Fondu entre presets** (brief 7.4) : bouton « Fondu » sur chaque preset
+  (durée réglable), commande `preset_fade`, OSC `/preset/fade nom secondes`.
+  Coins, recadrage, couleur, effets et volume glissent en douceur (~30 pas/s,
+  adoucis) ; rotation, miroirs, mire et bypass basculent à la fin ; le média
+  et la lecture en cours ne sont jamais touchés. Un nouveau fondu repart de
+  l'état courant.
 - **Retour d'état OSC** (`[osc] feedback = "hôte:port"`) : chaque changement
   du node (transport, volume, coins, couleur, effets, presets…) est renvoyé
   en OSC à l'adresse configurée, avec la même grammaire que les commandes

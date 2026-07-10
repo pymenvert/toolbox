@@ -12,6 +12,7 @@ pub mod bus;
 pub mod command;
 pub mod config;
 pub mod error;
+pub mod fader;
 pub mod logging;
 pub mod media;
 pub mod output;

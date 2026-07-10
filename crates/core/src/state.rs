@@ -383,6 +383,13 @@ pub enum Event {
     PresetLoaded {
         name: String,
     },
+    /// Un fondu vers le preset `name` démarre (durée `seconds`). Le service
+    /// fader (abonné) mène l'interpolation ; chaque pas produit ses propres
+    /// événements (`CornerMoved`, `ColorChanged`…).
+    PresetFadeStarted {
+        name: String,
+        seconds: f32,
+    },
     /// Départ synchronisé programmé : le player lancera la lecture à `at`
     /// (heure Unix en secondes).
     SyncScheduled {
@@ -644,6 +651,7 @@ impl NodeState {
             }
             Command::PresetSave { .. }
             | Command::PresetLoad { .. }
+            | Command::PresetFade { .. }
             | Command::MappingSave { .. }
             | Command::MappingLoad { .. } => Err(CoreError::InvalidCommand(
                 "les presets sont gérés par le bus (stores sur disque), pas par l'état".into(),
