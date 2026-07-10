@@ -14,7 +14,8 @@ width = 1920
 height = 1080
 
 [modules]
-player = true      # lecture vidéo (backend simulé tant que GStreamer n'est pas branché)
+player = true      # lecture : GStreamer si le binaire l'embarque (feature `gstreamer`
+                   # + runtime installé, voir deploy/README.md), sinon backend simulé
 http = true        # web UI + API REST/WebSocket
 osc = true         # contrôle OSC (Chataigne…)
 midi = false       # contrôle MIDI (bindings ci-dessous)

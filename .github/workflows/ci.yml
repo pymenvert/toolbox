@@ -99,6 +99,39 @@ jobs:
           git commit -qm "logs arm64 $GITHUB_RUN_ID"
           git push -f origin ci-logs-arm64
 
+  # Backend vidéo : compile et teste la feature `gstreamer` avec les libs
+  # système (le job principal vérifie le workspace SANS cette feature).
+  check-gstreamer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Dépendances système (GStreamer dev + plugins)
+        run: |
+          set -o pipefail
+          sudo apt-get update 2>&1 | tail -1
+          sudo apt-get install -y libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+            gstreamer1.0-plugins-base gstreamer1.0-plugins-good 2>&1 | tail -1
+      - name: Clippy + tests + check node (feature gstreamer)
+        run: |
+          set -o pipefail
+          cargo clippy -p toolbox-gst --features gstreamer --all-targets -- -D warnings 2>&1 | tee gst.log
+          cargo test -p toolbox-gst --features gstreamer 2>&1 | tee -a gst.log
+          cargo check -p toolbox-node --features gstreamer 2>&1 | tee -a gst.log
+      - name: Publier les logs en cas d'échec
+        if: failure()
+        run: |
+          git config user.email "ci@toolbox" && git config user.name "CI"
+          git checkout -q --orphan ci-logs-gstreamer
+          git rm -rfq --cached .
+          echo "run $GITHUB_RUN_ID commit $GITHUB_SHA" > run.txt
+          for f in run.txt gst.log; do if [ -f "$f" ]; then git add -f "$f"; fi; done
+          git commit -qm "logs gstreamer $GITHUB_RUN_ID"
+          git push -f origin ci-logs-gstreamer
+
   shellcheck:
     runs-on: ubuntu-latest
     steps:
@@ -148,6 +181,31 @@ jobs:
         with:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.binary }}
+          if-no-files-found: error
+
+  # EXPÉRIMENTAL (continue-on-error) : binaire Windows avec le backend vidéo.
+  # Exige le runtime GStreamer MSVC installé sur la machine de l'utilisateur.
+  build-windows-gstreamer:
+    needs: [check]
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: GStreamer MSVC (dev + runtime)
+        run: choco install -y gstreamer gstreamer-devel --no-progress
+      - name: Build release (feature gstreamer)
+        shell: bash
+        run: |
+          GST="/c/gstreamer/1.0/msvc_x86_64"
+          export PATH="$GST/bin:$PATH"
+          export PKG_CONFIG_PATH="$GST/lib/pkgconfig"
+          cargo build --release -p toolbox-node --features gstreamer
+      - uses: actions/upload-artifact@v4
+        with:
+          name: toolbox-node-windows-x64-gstreamer
+          path: target/release/toolbox-node.exe
           if-no-files-found: error
 
   build-arm64:

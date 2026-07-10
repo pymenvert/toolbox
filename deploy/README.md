@@ -53,7 +53,36 @@ sudo systemctl start|stop|status toolbox-node
 journalctl -u toolbox-node -f      # ou la page Logs de la web UI
 ```
 
-## 6. Ce qui arrive ensuite
+## 6. Vidéo réelle (backend GStreamer)
+
+Le binaire standard joue les médias « en silence » (backend simulé) et la
+fenêtre de sortie n'affiche que les mires. Pour la vraie vidéo, il faut le
+binaire compilé avec la feature `gstreamer` **et** le runtime GStreamer :
+
+- **Windows** : artefact CI `toolbox-node-windows-x64-gstreamer` (job
+  expérimental) ou compilation locale. Installez le runtime officiel MSVC
+  64 bits depuis https://gstreamer.freedesktop.org/download/ (installeur
+  `gstreamer-1.0-msvc-x86_64-*.msi`, mode « Complete »), puis ajoutez
+  `C:\gstreamer\1.0\msvc_x86_64\bin` au PATH (l'installeur propose de le
+  faire). Pour compiler : installez aussi le paquet *development*.
+- **Ubuntu / Raspberry Pi OS** :
+
+  ```bash
+  # exécution
+  sudo apt install gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+    gstreamer1.0-plugins-bad gstreamer1.0-libav
+  # compilation
+  sudo apt install libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+  cargo build --release -p toolbox-node --features gstreamer
+  ```
+
+  Sur Pi, GStreamer choisit tout seul le décodage matériel (V4L2) quand il
+  est disponible.
+
+Sans GStreamer sur la machine, ce binaire se replie automatiquement sur le
+backend simulé (visible dans les logs) : rien ne casse.
+
+## 7. Ce qui arrive ensuite
 
 - Image carte SD prête à flasher (pi-gen) — phase 4.
 - Mise à jour OTA, mot de passe UI, token API — phase 4.
