@@ -283,18 +283,28 @@ impl OutputApp {
             warn!(%err, "surface de sortie non retaillée");
             return;
         }
-        match surface.buffer_mut() {
+        // L'emprunt de la surface doit se terminer avant de compter la
+        // frame (le compteur emprunte `self` à son tour).
+        let presented = match surface.buffer_mut() {
             Ok(mut buffer) => {
                 let snapshot = self.state.borrow().clone();
                 let video = self.video.borrow().clone();
                 render_frame(&snapshot, video.as_ref(), w.get(), h.get(), &mut buffer);
-                if let Err(err) = buffer.present() {
-                    warn!(%err, "frame de sortie non présentée");
-                    return;
+                match buffer.present() {
+                    Ok(()) => true,
+                    Err(err) => {
+                        warn!(%err, "frame de sortie non présentée");
+                        false
+                    }
                 }
-                self.count_presented_frame();
             }
-            Err(err) => warn!(%err, "tampon de sortie inaccessible"),
+            Err(err) => {
+                warn!(%err, "tampon de sortie inaccessible");
+                false
+            }
+        };
+        if presented {
+            self.count_presented_frame();
         }
     }
 
