@@ -346,6 +346,14 @@
           <div class="hint">Enregistre uniquement le mapping (coins, orientation, recadrage) &mdash; pas le m&eacute;dia ni la couleur. Charger n&rsquo;interrompt pas la lecture.</div>
         </div>
         <div class="card">
+          <h3>Sortie</h3>
+          <div class="presetRow">
+            <select id="outMonitor" style="flex:1;min-width:120px"></select>
+          </div>
+          <label class="chk" style="margin-top:8px"><input type="checkbox" id="outFullscreen"> Plein &eacute;cran</label>
+          <div class="hint">L'&eacute;cran o&ugrave; s'affiche la fen&ecirc;tre de sortie, appliqu&eacute; imm&eacute;diatement. F11 dans la fen&ecirc;tre bascule aussi le plein &eacute;cran, &Eacute;chap le quitte.</div>
+        </div>
+        <div class="card">
           <h3>Orientation</h3>
           <div class="chipgrp">
             <button class="rotbtn mini" data-deg="0">0&deg;</button>
@@ -991,6 +999,35 @@ $("#mapPresetDelete").addEventListener("click", async () => {
   loadMapPresets();
 });
 
+/* Sortie : écran cible + plein écran, appliqués à chaud. */
+async function loadOutputs() {
+  let data;
+  try { data = await api("/api/outputs"); } catch (e) { return; }
+  const monitors = data.monitors || [], st = data.settings || { monitor: 0, fullscreen: false };
+  const sel = $("#outMonitor");
+  sel.innerHTML = monitors.length ? "" : '<option value="">(aucun écran détecté)</option>';
+  monitors.forEach(m => {
+    const o = document.createElement("option");
+    o.value = m.index;
+    o.textContent = "Écran " + (m.index + 1) + " · " + m.name + " (" + m.width + "×" + m.height + ")";
+    sel.appendChild(o);
+  });
+  if (monitors.length) sel.value = st.monitor;
+  $("#outFullscreen").checked = !!st.fullscreen;
+}
+async function pushOutput() {
+  const body = { monitor: +$("#outMonitor").value || 0, fullscreen: $("#outFullscreen").checked };
+  try {
+    await api("/api/output", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    toast("Sortie : écran " + (body.monitor + 1) + (body.fullscreen ? " en plein écran" : ""));
+  } catch (e) {}
+}
+$("#outMonitor").addEventListener("change", pushOutput);
+$("#outFullscreen").addEventListener("change", pushOutput);
+
 function renderMapping() {
   if (!state) return;
   const mp = state.mapping;
@@ -1331,6 +1368,7 @@ async function loadSystem() {
   loadMedia();
   loadPresets();
   loadMapPresets();
+  loadOutputs();
   loadSystem();
   setInterval(loadSystem, 5000);
   sizeStage();
