@@ -1,0 +1,182 @@
+[1m[92m    Updating[0m crates.io index
+[1m[92m    Checking[0m toolbox-core v1.0.0 (/home/runner/work/toolbox/toolbox/crates/core)
+[1m[91merror[E0369][0m[1m: binary operation `==` cannot be applied to type `std::result::Result<source::MediaSource, error::CoreError>`[0m
+   [1m[94m--> [0mcrates/core/src/source.rs:104:9
+    [1m[94m|[0m
+[1m[94m104[0m [1m[94m|[0m [1m[91m/[0m         assert_eq!(
+[1m[94m105[0m [1m[94m|[0m [1m[91m|[0m             MediaSource::parse(" clips/a.mp4 "),
+[1m[94m106[0m [1m[94m|[0m [1m[91m|[0m             Ok(MediaSource::File("clips/a.mp4".into()))
+[1m[94m107[0m [1m[94m|[0m [1m[91m|[0m         );
+    [1m[94m|[0m [1m[91m|[0m         [1m[91m^[0m
+    [1m[94m|[0m [1m[91m|[0m         [1m[91m|[0m
+    [1m[94m|[0m [1m[91m|_________std::result::Result<source::MediaSource, error::CoreError>[0m
+    [1m[94m|[0m           [1m[91mstd::result::Result<source::MediaSource, error::CoreError>[0m
+    [1m[94m|[0m
+[1m[92mnote[0m: an implementation of `std::cmp::PartialEq` might be missing for `error::CoreError`
+   [1m[94m--> [0mcrates/core/src/error.rs:7:1
+    [1m[94m|[0m
+[1m[94m  7[0m [1m[94m|[0m pub enum CoreError {
+    [1m[94m|[0m [1m[92m^^^^^^^^^^^^^^^^^^[0m [1m[92mmust implement `std::cmp::PartialEq`[0m
+[1m[96mhelp[0m: consider annotating `error::CoreError` with `#[derive(PartialEq)]`
+   [1m[94m--> [0mcrates/core/src/error.rs:7:1
+    [1m[94m|[0m
+[1m[94m  7[0m [92m+ #[derive(PartialEq)][0m
+[1m[94m  8[0m [1m[94m|[0m pub enum CoreError {
+    [1m[94m|[0m
+
+[1m[91merror[E0369][0m[1m: binary operation `==` cannot be applied to type `std::result::Result<source::MediaSource, error::CoreError>`[0m
+   [1m[94m--> [0mcrates/core/src/source.rs:125:9
+    [1m[94m|[0m
+[1m[94m125[0m [1m[94m|[0m [1m[91m/[0m         assert_eq!(
+[1m[94m126[0m [1m[94m|[0m [1m[91m|[0m             MediaSource::parse("rtsp://10.0.0.5:8554/cam"),
+[1m[94m127[0m [1m[94m|[0m [1m[91m|[0m             Ok(MediaSource::Network("rtsp://10.0.0.5:8554/cam".into()))
+[1m[94m128[0m [1m[94m|[0m [1m[91m|[0m         );
+    [1m[94m|[0m [1m[91m|[0m         [1m[91m^[0m
+    [1m[94m|[0m [1m[91m|[0m         [1m[91m|[0m
+    [1m[94m|[0m [1m[91m|_________std::result::Result<source::MediaSource, error::CoreError>[0m
+    [1m[94m|[0m           [1m[91mstd::result::Result<source::MediaSource, error::CoreError>[0m
+    [1m[94m|[0m
+[1m[92mnote[0m: an implementation of `std::cmp::PartialEq` might be missing for `error::CoreError`
+   [1m[94m--> [0mcrates/core/src/error.rs:7:1
+    [1m[94m|[0m
+[1m[94m  7[0m [1m[94m|[0m pub enum CoreError {
+    [1m[94m|[0m [1m[92m^^^^^^^^^^^^^^^^^^[0m [1m[92mmust implement `std::cmp::PartialEq`[0m
+[1m[96mhelp[0m: consider annotating `error::CoreError` with `#[derive(PartialEq)]`
+   [1m[94m--> [0mcrates/core/src/error.rs:7:1
+    [1m[94m|[0m
+[1m[94m  7[0m [92m+ #[derive(PartialEq)][0m
+[1m[94m  8[0m [1m[94m|[0m pub enum CoreError {
+    [1m[94m|[0m
+
+[1m[91merror[E0369][0m[1m: binary operation `==` cannot be applied to type `std::result::Result<source::MediaSource, error::CoreError>`[0m
+   [1m[94m--> [0mcrates/core/src/source.rs:145:9
+    [1m[94m|[0m
+[1m[94m145[0m [1m[94m|[0m [1m[91m/[0m         assert_eq!(
+[1m[94m146[0m [1m[94m|[0m [1m[91m|[0m             MediaSource::parse("capture://0"),
+[1m[94m147[0m [1m[94m|[0m [1m[91m|[0m             Ok(MediaSource::Capture(0))
+[1m[94m148[0m [1m[94m|[0m [1m[91m|[0m         );
+    [1m[94m|[0m [1m[91m|[0m         [1m[91m^[0m
+    [1m[94m|[0m [1m[91m|[0m         [1m[91m|[0m
+    [1m[94m|[0m [1m[91m|_________std::result::Result<source::MediaSource, error::CoreError>[0m
+    [1m[94m|[0m           [1m[91mstd::result::Result<source::MediaSource, error::CoreError>[0m
+    [1m[94m|[0m
+[1m[92mnote[0m: an implementation of `std::cmp::PartialEq` might be missing for `error::CoreError`
+   [1m[94m--> [0mcrates/core/src/error.rs:7:1
+    [1m[94m|[0m
+[1m[94m  7[0m [1m[94m|[0m pub enum CoreError {
+    [1m[94m|[0m [1m[92m^^^^^^^^^^^^^^^^^^[0m [1m[92mmust implement `std::cmp::PartialEq`[0m
+[1m[96mhelp[0m: consider annotating `error::CoreError` with `#[derive(PartialEq)]`
+   [1m[94m--> [0mcrates/core/src/error.rs:7:1
+    [1m[94m|[0m
+[1m[94m  7[0m [92m+ #[derive(PartialEq)][0m
+[1m[94m  8[0m [1m[94m|[0m pub enum CoreError {
+    [1m[94m|[0m
+
+[1m[91merror[E0369][0m[1m: binary operation `==` cannot be applied to type `std::result::Result<source::MediaSource, error::CoreError>`[0m
+   [1m[94m--> [0mcrates/core/src/source.rs:149:9
+    [1m[94m|[0m
+[1m[94m149[0m [1m[94m|[0m [1m[91m/[0m         assert_eq!(
+[1m[94m150[0m [1m[94m|[0m [1m[91m|[0m             MediaSource::parse("capture://2"),
+[1m[94m151[0m [1m[94m|[0m [1m[91m|[0m             Ok(MediaSource::Capture(2))
+[1m[94m152[0m [1m[94m|[0m [1m[91m|[0m         );
+    [1m[94m|[0m [1m[91m|[0m         [1m[91m^[0m
+    [1m[94m|[0m [1m[91m|[0m         [1m[91m|[0m
+    [1m[94m|[0m [1m[91m|_________std::result::Result<source::MediaSource, error::CoreError>[0m
+    [1m[94m|[0m           [1m[91mstd::result::Result<source::MediaSource, error::CoreError>[0m
+    [1m[94m|[0m
+[1m[92mnote[0m: an implementation of `std::cmp::PartialEq` might be missing for `error::CoreError`
+   [1m[94m--> [0mcrates/core/src/error.rs:7:1
+    [1m[94m|[0m
+[1m[94m  7[0m [1m[94m|[0m pub enum CoreError {
+    [1m[94m|[0m [1m[92m^^^^^^^^^^^^^^^^^^[0m [1m[92mmust implement `std::cmp::PartialEq`[0m
+[1m[96mhelp[0m: consider annotating `error::CoreError` with `#[derive(PartialEq)]`
+   [1m[94m--> [0mcrates/core/src/error.rs:7:1
+    [1m[94m|[0m
+[1m[94m  7[0m [92m+ #[derive(PartialEq)][0m
+[1m[94m  8[0m [1m[94m|[0m pub enum CoreError {
+    [1m[94m|[0m
+
+[1m[91merror[E0369][0m[1m: binary operation `==` cannot be applied to type `std::result::Result<source::MediaSource, error::CoreError>`[0m
+   [1m[94m--> [0mcrates/core/src/source.rs:154:9
+    [1m[94m|[0m
+[1m[94m154[0m [1m[94m|[0m [1m[91m/[0m         assert_eq!(
+[1m[94m155[0m [1m[94m|[0m [1m[91m|[0m             MediaSource::parse("ndi://Régie (sortie 1)"),
+[1m[94m156[0m [1m[94m|[0m [1m[91m|[0m             Ok(MediaSource::Ndi("Régie (sortie 1)".into()))
+[1m[94m157[0m [1m[94m|[0m [1m[91m|[0m         );
+    [1m[94m|[0m [1m[91m|[0m         [1m[91m^[0m
+    [1m[94m|[0m [1m[91m|[0m         [1m[91m|[0m
+    [1m[94m|[0m [1m[91m|_________std::result::Result<source::MediaSource, error::CoreError>[0m
+    [1m[94m|[0m           [1m[91mstd::result::Result<source::MediaSource, error::CoreError>[0m
+    [1m[94m|[0m
+[1m[92mnote[0m: an implementation of `std::cmp::PartialEq` might be missing for `error::CoreError`
+   [1m[94m--> [0mcrates/core/src/error.rs:7:1
+    [1m[94m|[0m
+[1m[94m  7[0m [1m[94m|[0m pub enum CoreError {
+    [1m[94m|[0m [1m[92m^^^^^^^^^^^^^^^^^^[0m [1m[92mmust implement `std::cmp::PartialEq`[0m
+[1m[96mhelp[0m: consider annotating `error::CoreError` with `#[derive(PartialEq)]`
+   [1m[94m--> [0mcrates/core/src/error.rs:7:1
+    [1m[94m|[0m
+[1m[94m  7[0m [92m+ #[derive(PartialEq)][0m
+[1m[94m  8[0m [1m[94m|[0m pub enum CoreError {
+    [1m[94m|[0m
+
+[1m[91merror[E0277][0m[1m: the size for values of type `str` cannot be known at compilation time[0m
+   [1m[94m--> [0mcrates/core/src/state.rs:865:56
+    [1m[94m|[0m
+[1m[94m865[0m [1m[94m|[0m             assert_eq!(s.player.media.as_deref(), Some(*src));
+    [1m[94m|[0m                                                   [1m[94m----[0m [1m[91m^^^^[0m [1m[91mdoesn't have a size known at compile-time[0m
+    [1m[94m|[0m                                                   [1m[94m|[0m
+    [1m[94m|[0m                                                   [1m[94mrequired by a bound introduced by this call[0m
+    [1m[94m|[0m
+    [1m[94m= [0m[1mhelp[0m: the trait `std::marker::Sized` is not implemented for `str`
+[1m[92mnote[0m: required by a bound in `std::prelude::v1::Some`
+   [1m[94m--> [0m/rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/option.rs:605:4
+[1m[96mhelp[0m: references are always `Sized`, even if they point to unsized data; consider not dereferencing the expression
+    [1m[94m|[0m
+[1m[94m865[0m [91m- [0m            assert_eq!(s.player.media.as_deref(), Some([91m*[0msrc));
+[1m[94m865[0m [92m+ [0m            assert_eq!(s.player.media.as_deref(), Some(src));
+    [1m[94m|[0m
+
+[1m[91merror[E0277][0m[1m: the size for values of type `str` cannot be known at compilation time[0m
+   [1m[94m--> [0mcrates/core/src/state.rs:865:51
+    [1m[94m|[0m
+[1m[94m865[0m [1m[94m|[0m             assert_eq!(s.player.media.as_deref(), Some(*src));
+    [1m[94m|[0m                                                   [1m[91m^^^^^^^^^^[0m [1m[91mdoesn't have a size known at compile-time[0m
+    [1m[94m|[0m
+    [1m[94m= [0m[1mhelp[0m: the trait `std::marker::Sized` is not implemented for `str`
+[1m[92mnote[0m: required by an implicit `Sized` bound in `std::option::Option`
+   [1m[94m--> [0m/rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/option.rs:597:0
+
+[1m[91merror[E0308][0m[1m: mismatched types[0m
+   [1m[94m--> [0mcrates/core/src/state.rs:865:51
+    [1m[94m|[0m
+[1m[94m865[0m [1m[94m|[0m             assert_eq!(s.player.media.as_deref(), Some(*src));
+    [1m[94m|[0m                                                   [1m[91m^^^^^^^^^^[0m [1m[91mexpected `Option<&str>`, found `Option<str>`[0m
+    [1m[94m|[0m
+    [1m[94m= [0m[1mnote[0m: expected enum `std::option::Option<[1m[35m&[0m_>`
+               found enum `std::option::Option<_>`
+[1m[96mhelp[0m: try using `.as_ref()` to convert `std::option::Option<str>` to `std::option::Option<&str>`
+    [1m[94m|[0m
+[1m[94m865[0m [1m[94m| [0m            assert_eq!(s.player.media.as_deref(), Some(*src)[92m.as_ref()[0m);
+    [1m[94m|[0m                                                             [92m+++++++++[0m
+
+[1m[91merror[E0277][0m[1m: the size for values of type `str` cannot be known at compilation time[0m
+   [1m[94m--> [0mcrates/core/src/state.rs:865:13
+    [1m[94m|[0m
+[1m[94m865[0m [1m[94m|[0m             assert_eq!(s.player.media.as_deref(), Some(*src));
+    [1m[94m|[0m             [1m[91m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+    [1m[94m|[0m             [1m[91m|[0m
+    [1m[94m|[0m             [1m[91mdoesn't have a size known at compile-time[0m
+    [1m[94m|[0m             [1m[91mrequired by a bound introduced by this call[0m
+    [1m[94m|[0m
+    [1m[94m= [0m[1mhelp[0m: the trait `std::marker::Sized` is not implemented for `str`
+[1m[96mhelp[0m: the trait `std::fmt::Debug` [1m[35mis[0m implemented for `[1m[35mstd::option::Option<T>[0m`
+   [1m[94m--> [0m/rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/option.rs:591:15
+    [1m[94m= [0m[1mnote[0m: required for `std::option::Option<str>` to implement `std::fmt::Debug`
+[1m[92mnote[0m: required by a bound in `core::panicking::assert_failed`
+   [1m[94m--> [0m/rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/panicking.rs:384:0
+
+[1mSome errors have detailed explanations: E0277, E0308, E0369.[0m
+[1mFor more information about an error, try `rustc --explain E0277`.[0m
+[1m[91merror[0m: could not compile `toolbox-core` (lib test) due to 9 previous errors
+[1m[33mwarning[0m: build failed, waiting for other jobs to finish...
