@@ -18,3 +18,5 @@ webui/dist/
 lumieres.json
 # Sequences persistees par le node (page Sequences).
 sequences.json
+# Etat de demarrage enregistre depuis l'UI.
+demarrage.json

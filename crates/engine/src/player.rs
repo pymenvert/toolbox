@@ -1,4 +1,4 @@
-﻿//! Player (P1.2) : machine à états de lecture, découplée du backend réel.
+//! Player (P1.2) : machine à états de lecture, découplée du backend réel.
 //!
 //! Le [`Player`] s'abonne au bus, traduit les [`Event`] en appels sur un
 //! [`PlayerBackend`] et applique la politique de fin de média (boucle,
@@ -85,6 +85,10 @@ pub struct Player<B: PlayerBackend> {
     /// Départ synchronisé programmé (`/sync/startAt`) : échéance locale
     /// calculée depuis l'heure Unix demandée.
     start_deadline: Option<tokio::time::Instant>,
+    /// Prochaine tentative de reprise d'une source live indisponible
+    /// (carte d'acquisition débranchée, flux coupé) — mode passthrough.
+    reprise: Option<tokio::time::Instant>,
+    intervalle_reprise: Duration,
 }
 
 impl<B: PlayerBackend> Player<B> {
@@ -101,9 +105,19 @@ impl<B: PlayerBackend> Player<B> {
             in_playlist: false,
             position_tx,
             start_deadline: None,
+            reprise: None,
+            intervalle_reprise: Duration::from_secs(3),
         };
         player.resync(&bus.snapshot());
         player
+    }
+
+    /// Intervalle entre deux tentatives de reprise d'une source live
+    /// (3 s par défaut ; raccourci par les tests).
+    #[must_use]
+    pub fn avec_intervalle_reprise(mut self, intervalle: Duration) -> Self {
+        self.intervalle_reprise = intervalle;
+        self
     }
 
     /// Récepteur de la position de lecture (pour l'UI).
@@ -170,8 +184,16 @@ impl<B: PlayerBackend> Player<B> {
         match event {
             Event::MediaLoaded { path } => {
                 self.in_playlist = false;
+                self.reprise = None;
                 let abs = self.resolve(path);
                 if let Err(err) = self.backend.load(&abs) {
+                    // Source live absente (carte débranchée, flux coupé) :
+                    // on N'ABANDONNE PAS — reprise automatique (passthrough).
+                    if source_branchable(path) {
+                        warn!(media = %path, %err, "source live indisponible — reprise automatique planifiée");
+                        self.reprise = Some(tokio::time::Instant::now() + self.intervalle_reprise);
+                        return;
+                    }
                     error!(media = %path, %err, "chargement refusé par le backend");
                     let _ = self.bus.try_send(Source::Internal, Command::Stop);
                     return;
@@ -252,8 +274,20 @@ impl<B: PlayerBackend> Player<B> {
             match event {
                 BackendEvent::EndOfStream => self.on_end_of_stream(),
                 BackendEvent::Error(message) => {
-                    error!(%message, "erreur backend");
-                    let _ = self.bus.try_send(Source::Internal, Command::Stop);
+                    let media = self.bus.snapshot().player.media;
+                    match media {
+                        Some(rel) if source_branchable(&rel) => {
+                            // Passthrough : une source live qui tombe se
+                            // reconnecte toute seule quand elle revient.
+                            warn!(%message, media = %rel, "source live tombée — reprise automatique planifiée");
+                            self.reprise =
+                                Some(tokio::time::Instant::now() + self.intervalle_reprise);
+                        }
+                        _ => {
+                            error!(%message, "erreur backend");
+                            let _ = self.bus.try_send(Source::Internal, Command::Stop);
+                        }
+                    }
                 }
             }
         }
@@ -290,6 +324,33 @@ impl<B: PlayerBackend> Player<B> {
         }
     }
 
+    /// Tente de reprendre une source live indisponible (mode passthrough).
+    fn retenter_source(&mut self) {
+        self.reprise = None;
+        let etat = self.bus.snapshot();
+        let Some(rel) = etat.player.media.clone() else {
+            return;
+        };
+        if !source_branchable(&rel) {
+            return;
+        }
+        let abs = self.resolve(&rel);
+        match self.backend.load(&abs) {
+            Ok(()) => {
+                info!(media = %rel, "source revenue — reprise");
+                if etat.player.transport == Transport::Playing {
+                    if let Err(err) = self.backend.play() {
+                        error!(%err, "lecture non reprise sur la source revenue");
+                    }
+                }
+            }
+            Err(_) => {
+                // Toujours absente : on retentera, sans bruit dans les logs.
+                self.reprise = Some(tokio::time::Instant::now() + self.intervalle_reprise);
+            }
+        }
+    }
+
     /// Boucle du service : événements du bus + tick périodique.
     pub async fn run(mut self) {
         let mut events = self.bus.subscribe();
@@ -301,9 +362,10 @@ impl<B: PlayerBackend> Player<B> {
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         info!(media_root = %self.media_root.display(), "player démarré");
         loop {
-            // Copie locale : le garde du select ne peut pas emprunter self
+            // Copies locales : le garde du select ne peut pas emprunter self
             // pendant que les autres branches le mutent.
             let deadline = self.start_deadline;
+            let reprise = self.reprise;
             tokio::select! {
                 received = events.recv() => match received {
                     Ok(event) => self.handle_event(&event),
@@ -324,10 +386,25 @@ impl<B: PlayerBackend> Player<B> {
                     info!("départ synchronisé : lecture");
                     let _ = self.bus.try_send(Source::Internal, Command::Play);
                 }
+                // Reprise d'une source live (passthrough) : à l'échéance,
+                // nouvelle tentative de chargement.
+                () = tokio::time::sleep_until(reprise.unwrap_or_else(tokio::time::Instant::now)),
+                    if reprise.is_some() =>
+                {
+                    self.retenter_source();
+                }
             }
         }
         info!("player arrêté");
     }
+}
+
+/// Une source qui se branche/débranche (capture, NDI, flux réseau) mérite
+/// une reprise automatique ; un fichier absent, non.
+fn source_branchable(rel: &str) -> bool {
+    toolbox_core::MediaSource::parse(rel)
+        .map(|source| source.is_live())
+        .unwrap_or(false)
 }
 
 /// Backend en mémoire : simule une lecture réelle (position qui avance,
@@ -507,6 +584,103 @@ impl PlayerBackend for MemoryBackend {
 mod tests {
     use super::*;
     use toolbox_core::Bus;
+
+    /// Backend qui échoue au chargement N fois avant de fonctionner —
+    /// simule une carte d'acquisition branchée en retard.
+    struct BackendCapricieux {
+        echecs_restants: std::sync::Arc<std::sync::atomic::AtomicU32>,
+        charge: bool,
+        joue: bool,
+    }
+
+    impl PlayerBackend for BackendCapricieux {
+        fn load(&mut self, _path: &Path) -> Result<(), PlayerError> {
+            let restants = &self.echecs_restants;
+            if restants.load(std::sync::atomic::Ordering::SeqCst) > 0 {
+                restants.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                return Err(PlayerError::Backend("périphérique absent".into()));
+            }
+            self.charge = true;
+            Ok(())
+        }
+        fn play(&mut self) -> Result<(), PlayerError> {
+            self.joue = true;
+            Ok(())
+        }
+        fn pause(&mut self) -> Result<(), PlayerError> {
+            self.joue = false;
+            Ok(())
+        }
+        fn stop(&mut self) -> Result<(), PlayerError> {
+            self.joue = false;
+            Ok(())
+        }
+        fn seek(&mut self, _seconds: f64) -> Result<(), PlayerError> {
+            Ok(())
+        }
+        fn set_volume(&mut self, _volume: f32) -> Result<(), PlayerError> {
+            Ok(())
+        }
+        fn position_seconds(&self) -> Option<f64> {
+            (self.charge && self.joue).then_some(0.5)
+        }
+        fn duration_seconds(&self) -> Option<f64> {
+            None
+        }
+        fn take_events(&mut self) -> Vec<BackendEvent> {
+            Vec::new()
+        }
+    }
+
+    /// Passthrough : une source live absente au chargement est reprise
+    /// automatiquement quand elle revient, et la lecture repart seule.
+    #[tokio::test]
+    async fn la_source_live_est_reprise_quand_elle_revient() {
+        let bus = Bus::new(32, 128);
+        let handle = bus.handle();
+        tokio::spawn(bus.run());
+        let echecs = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(2));
+        let backend = BackendCapricieux {
+            echecs_restants: echecs.clone(),
+            charge: false,
+            joue: false,
+        };
+        let player = Player::new(backend, handle.clone(), "media")
+            .avec_intervalle_reprise(Duration::from_millis(60));
+        let position = player.position_watch();
+        tokio::spawn(player.run());
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // La « carte » est absente : deux chargements vont échouer.
+        handle
+            .send(
+                Source::Http,
+                Command::Load {
+                    path: "capture://0".into(),
+                },
+            )
+            .await;
+        handle.send(Source::Http, Command::Play).await;
+
+        // La reprise automatique doit finir par charger ET relancer la
+        // lecture (position publiée = chargé + en lecture).
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+        loop {
+            if position.borrow().position.is_some() {
+                assert_eq!(
+                    echecs.load(std::sync::atomic::Ordering::SeqCst),
+                    0,
+                    "les échecs simulés doivent avoir été consommés"
+                );
+                return;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "la source n'a jamais été reprise"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
 
     /// Monte un bus + player avec backend mémoire (fichiers non vérifiés).
     fn setup() -> (Bus, Player<MemoryBackend>) {

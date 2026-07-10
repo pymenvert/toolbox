@@ -88,6 +88,26 @@ pub struct Startup {
     pub preset: Option<String>,
     /// Lance la lecture après chargement du preset.
     pub autoplay: bool,
+    /// Source chargée au démarrage APRÈS le preset (elle prime) — le mode
+    /// « passthrough » : `capture://0`, `ndi://Nom`, `rtsp://…`. Une source
+    /// live absente est reprise automatiquement quand elle revient.
+    pub source: Option<String>,
+}
+
+impl Startup {
+    /// L'état de démarrage enregistré depuis l'UI (`demarrage.json`, à côté
+    /// de node.toml) prime sur `[startup]` — même logique que sortie.json.
+    pub fn load_override(path: &std::path::Path) -> Option<Self> {
+        let bytes = std::fs::read(path).ok()?;
+        serde_json::from_slice(&bytes).ok()
+    }
+
+    pub fn save(&self, path: &std::path::Path) -> Result<(), CoreError> {
+        let json = serde_json::to_vec_pretty(self)?;
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, &json).map_err(|e| CoreError::io(tmp.display().to_string(), e))?;
+        std::fs::rename(&tmp, path).map_err(|e| CoreError::io(path.display().to_string(), e))
+    }
 }
 
 /// Cible d'un contrôleur continu MIDI (CC) : la valeur 0..127 est mise à

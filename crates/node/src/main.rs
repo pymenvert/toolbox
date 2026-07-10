@@ -430,9 +430,22 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
         toolbox_core::SyncRole::Aucun => {}
     }
 
-    // Mode kiosque (P1.9) : preset de démarrage + lecture automatique.
-    if let Some(preset) = &config.startup.preset {
-        info!(preset = %preset, autoplay = config.startup.autoplay, "démarrage kiosque");
+    // Mode kiosque (P1.9 + passthrough V2.1) : preset de démarrage, source
+    // par défaut (carte d'acquisition, NDI…), lecture automatique.
+    // demarrage.json (bouton « état de démarrage » de l'UI) prime sur
+    // [startup] de node.toml.
+    let demarrage =
+        toolbox_core::config::Startup::load_override(std::path::Path::new("demarrage.json"))
+            .unwrap_or_else(|| config.startup.clone());
+    if demarrage.preset.is_some() || demarrage.source.is_some() {
+        info!(
+            preset = ?demarrage.preset,
+            source = ?demarrage.source,
+            autoplay = demarrage.autoplay,
+            "état de démarrage appliqué"
+        );
+    }
+    if let Some(preset) = &demarrage.preset {
         handle
             .send(
                 Source::Internal,
@@ -441,9 +454,19 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
                 },
             )
             .await;
-        if config.startup.autoplay {
-            handle.send(Source::Internal, Command::Play).await;
-        }
+    }
+    if let Some(source) = &demarrage.source {
+        handle
+            .send(
+                Source::Internal,
+                Command::Load {
+                    path: source.clone(),
+                },
+            )
+            .await;
+    }
+    if demarrage.autoplay {
+        handle.send(Source::Internal, Command::Play).await;
     }
 
     info!(

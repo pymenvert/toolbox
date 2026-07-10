@@ -57,6 +57,12 @@ gpu = true         # rendu par la carte graphique (repli CPU automatique en cas 
 # après une coupure de courant.
 #preset = "show"
 #autoplay = true
+# Passthrough : source chargée et jouée au démarrage (APRÈS le preset, elle
+# prime). Une source live absente est reprise automatiquement toutes les 3 s
+# — carte débranchée puis rebranchée = l'image revient seule.
+#source = "capture://0"
+# NB : le bouton « état de démarrage » de l'UI écrit demarrage.json, qui
+# prime sur toute cette section.
 
 [security]
 # Mot de passe de l'interface web et de l'API (absent = pas de mot de passe,

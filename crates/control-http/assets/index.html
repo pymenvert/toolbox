@@ -524,6 +524,22 @@
       </div>
       <ul class="plist" id="presetList"></ul>
     </div>
+    <div class="card" style="max-width:640px;margin-top:14px">
+      <h3>&Eacute;tat de d&eacute;marrage</h3>
+      <div class="presetRow" style="align-items:center">
+        <input type="text" id="startSource" placeholder="Source passthrough (optionnel) : capture://0 · ndi://Nom · rtsp://…" style="flex:1">
+        <label class="chk" style="white-space:nowrap"><input type="checkbox" id="startAutoplay" checked> lecture auto</label>
+      </div>
+      <div class="rowbtns">
+        <button id="startSave" class="primary">Faire de l'&eacute;tat actuel l'&eacute;tat de d&eacute;marrage</button>
+        <button id="startClear" class="danger mini">Oublier</button>
+        <span id="startEtat" class="muted" style="font-size:12px"></span>
+      </div>
+      <div class="hint">Tout l'&eacute;tat actuel (mapping, couleur, effets, m&eacute;dia) est
+      retrouv&eacute; &agrave; CHAQUE lancement. Avec une source passthrough (carte
+      d'acquisition, NDI…), elle est charg&eacute;e et jou&eacute;e automatiquement — et
+      reprise toute seule apr&egrave;s un d&eacute;branchement.</div>
+    </div>
   </section>
 
   <!-- ================= LOGS ================= -->
@@ -1726,6 +1742,29 @@ $("#presetSave").addEventListener("click", () => {
   $("#presetName").value = "";
 });
 $("#presetName").addEventListener("keydown", e => { if (e.key === "Enter") $("#presetSave").click(); });
+
+/* État de démarrage (passthrough compris). */
+async function loadStartup() {
+  try {
+    const s = await api("/api/startup");
+    $("#startAutoplay").checked = !!s.autoplay;
+    if (s.source) $("#startSource").value = s.source;
+    $("#startEtat").textContent = s.preset ? "Un état de démarrage est enregistré." : "Aucun état enregistré (node.toml s'applique).";
+  } catch (e) {}
+}
+$("#startSave").addEventListener("click", async () => {
+  const source = $("#startSource").value.trim();
+  try {
+    await api("/api/startup", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ autoplay: $("#startAutoplay").checked, source: source || null }) });
+    toast("État de démarrage enregistré");
+    loadStartup();
+  } catch (e) { toast("Source invalide ou erreur d'écriture", "err"); }
+});
+$("#startClear").addEventListener("click", async () => {
+  try { await api("/api/startup", { method: "DELETE" }); toast("État de démarrage oublié"); loadStartup(); } catch (e) {}
+});
+loadStartup();
 
 /* ===================== Séquences (cues) ===================== */
 let cuesEtat = null, cueActionsBuilder = [];

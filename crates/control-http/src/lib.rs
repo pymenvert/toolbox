@@ -291,6 +291,10 @@ pub fn router(app: AppState) -> Router {
         .route("/api/fleet/push", post(fleet_push))
         .route("/api/dmx", get(dmx_get).post(dmx_commande))
         .route("/api/cues", get(cues_get).post(cues_commande))
+        .route(
+            "/api/startup",
+            get(startup_get).post(startup_set).delete(startup_delete),
+        )
         .route("/api/update/check", get(update_check))
         .route("/api/update/download", post(update_download))
         .route("/api/update/apply", post(update_apply))
@@ -1002,6 +1006,63 @@ async fn dmx_commande(
         .await
         .map_err(|_| CoreError::InvalidCommand("console lumières arrêtée".into()))?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+const CHEMIN_DEMARRAGE: &str = "demarrage.json";
+
+/// État de démarrage enregistré (demarrage.json), défauts sinon.
+async fn startup_get() -> Json<toolbox_core::config::Startup> {
+    Json(
+        toolbox_core::config::Startup::load_override(std::path::Path::new(CHEMIN_DEMARRAGE))
+            .unwrap_or_default(),
+    )
+}
+
+#[derive(Deserialize)]
+struct StartupRequest {
+    autoplay: bool,
+    #[serde(default)]
+    source: Option<String>,
+}
+
+/// « Faire de l'état actuel l'état de démarrage » : sauve l'état complet
+/// courant en preset `demarrage` et écrit demarrage.json (qui prime sur
+/// `[startup]` de node.toml) — mapping, couleur, source passthrough,
+/// autoplay : le node retrouve tout ça à chaque lancement, même après un
+/// débranchement (les sources live sont reprises automatiquement).
+async fn startup_set(
+    State(app): State<AppState>,
+    Json(demande): Json<StartupRequest>,
+) -> Result<StatusCode, ApiError> {
+    if let Some(source) = &demande.source {
+        // La grammaire des sources est validée comme partout.
+        toolbox_core::state::validate_media_path(source)?;
+    }
+    app.bus
+        .send(
+            Source::Http,
+            Command::PresetSave {
+                name: "demarrage".into(),
+            },
+        )
+        .await;
+    let startup = toolbox_core::config::Startup {
+        preset: Some("demarrage".into()),
+        autoplay: demande.autoplay,
+        source: demande.source,
+    };
+    startup.save(std::path::Path::new(CHEMIN_DEMARRAGE))?;
+    info!(?startup, "état de démarrage enregistré");
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Supprime l'état de démarrage enregistré (retour à node.toml).
+async fn startup_delete() -> Result<StatusCode, ApiError> {
+    match std::fs::remove_file(CHEMIN_DEMARRAGE) {
+        Ok(()) => Ok(StatusCode::NO_CONTENT),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(StatusCode::NO_CONTENT),
+        Err(e) => Err(CoreError::io(CHEMIN_DEMARRAGE, e).into()),
+    }
 }
 
 /// OTA : compare la version courante à la dernière release GitHub.

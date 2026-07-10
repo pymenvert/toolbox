@@ -3,6 +3,19 @@
 Évolutions notables du node Toolbox. Format inspiré de
 [Keep a Changelog](https://keepachangelog.com/fr/), versionnage SemVer.
 
+## [Non publié]
+
+- **Passthrough + état de démarrage** : bouton « Faire de l'état actuel
+  l'état de démarrage » (onglet Presets) — mapping, couleur, effets,
+  source et lecture retrouvés à CHAQUE lancement (`demarrage.json`, prime
+  sur node.toml). Une source live configurée (`capture://0`, `ndi://…`)
+  est chargée et jouée automatiquement, et **reprise toute seule après un
+  débranchement** (le player réessaie toutes les 3 s, sans jamais
+  abandonner une source branchable). `[startup] source` en config aussi.
+- **Rendu CPU ×8** : parallélisation par lignes — 1080p chargé passe de
+  215 à 25 ms/frame ; l'aperçu web et le repli sans GPU en profitent
+  (banc de mesure reproductible `bench_raster`).
+
 ## [2.0.0] — 2026-07-11
 
 La V2 : synchronisation à la frame, console lumières Art-Net, séquenceur,
