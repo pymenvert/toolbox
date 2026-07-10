@@ -263,6 +263,7 @@
   <a data-page="color"><span class="ic">&#9680;</span><span>Couleur</span></a>
   <a data-page="media"><span class="ic">&#9636;</span><span>M&eacute;dias</span></a>
   <a data-page="presets"><span class="ic">&#9733;</span><span>Presets</span></a>
+  <a data-page="cues"><span class="ic">&#9654;</span><span>S&eacute;quences</span></a>
   <a data-page="lights"><span class="ic">&#9728;</span><span>Lumi&egrave;res</span></a>
   <a data-page="logs"><span class="ic">&#9776;</span><span>Logs</span></a>
   <a data-page="features"><span class="ic">&#9211;</span><span>Fonctions</span></a>
@@ -521,6 +522,57 @@
       <button class="chip" id="logClear">Vider</button>
     </div>
     <div id="logview"></div>
+  </section>
+
+  <!-- ================= SEQUENCES ================= -->
+  <section class="page" id="page-cues">
+    <div class="card" style="max-width:820px">
+      <h3>Cues</h3>
+      <div class="hint" id="cueStatut" style="margin-bottom:8px">&nbsp;</div>
+      <ul class="plist" id="cueList"><li class="empty" style="border:none">Aucune cue.</li></ul>
+      <div class="rowbtns" style="margin-top:8px">
+        <button id="cueStop" class="danger">Stop (annule l'encha&icirc;nement)</button>
+      </div>
+    </div>
+    <div class="card" style="max-width:820px;margin-top:14px">
+      <h3>Nouvelle cue</h3>
+      <div class="presetRow">
+        <input type="text" id="cueNom" placeholder="Nom de la cue" maxlength="32" style="flex:1">
+        <select id="cueDecl" style="width:190px">
+          <option value="manuel">D&eacute;clenchement : GO manuel</option>
+          <option value="heure">Tous les jours &agrave;&hellip;</option>
+          <option value="apres">Apr&egrave;s la cue pr&eacute;c&eacute;dente</option>
+        </select>
+        <input type="time" id="cueHeure" value="20:00" style="display:none;width:110px">
+        <input type="number" id="cueApres" value="5" min="0" step="0.5" title="Secondes apr&egrave;s la pr&eacute;c&eacute;dente" style="display:none;width:80px">
+      </div>
+      <ul class="plist" id="cueActions"></ul>
+      <div class="presetRow">
+        <select id="cueActType" style="width:170px">
+          <option value="load">Charger un m&eacute;dia</option>
+          <option value="play">Lecture</option>
+          <option value="pause">Pause</option>
+          <option value="stop">Stop lecture</option>
+          <option value="preset">Charger un preset</option>
+          <option value="fade">Fondu vers un preset</option>
+          <option value="pattern">Mire de test</option>
+        </select>
+        <select id="cueActMedia" style="flex:1;display:none"></select>
+        <select id="cueActPreset" style="flex:1;display:none"></select>
+        <input type="number" id="cueActFondu" value="2" min="0.1" step="0.5" title="Dur&eacute;e du fondu (s)" style="display:none;width:70px">
+        <select id="cueActPattern" style="flex:1;display:none">
+          <option value="grid">Grille</option><option value="checker">Damier</option>
+          <option value="corners">Coins</option><option value="">&Eacute;teindre la mire</option>
+        </select>
+        <button id="cueActAjoute" class="mini">+ action</button>
+      </div>
+      <div class="presetRow">
+        <button id="cueSave" class="primary">Enregistrer la cue</button>
+      </div>
+      <div class="hint">Les actions s'ex&eacute;cutent dans l'ordre. « Apr&egrave;s la
+      pr&eacute;c&eacute;dente » encha&icirc;ne automatiquement depuis la cue au-dessus
+      dans la liste ; « tous les jours &agrave; » se d&eacute;clenche seul (heure de la machine).</div>
+    </div>
   </section>
 
   <!-- ================= LUMIERES ================= -->
@@ -792,8 +844,8 @@ function onEvent(m) {
 
 /* ===================== Navigation ===================== */
 const pageTitles = { dashboard: "Dashboard", mapping: "Mapping", color: "Couleur",
-  media: "Médias", presets: "Presets", lights: "Lumières", logs: "Logs",
-  features: "Fonctions", system: "Système" };
+  media: "Médias", presets: "Presets", cues: "Séquences", lights: "Lumières",
+  logs: "Logs", features: "Fonctions", system: "Système" };
 $$("nav a").forEach(a => a.addEventListener("click", () => {
   $$("nav a").forEach(x => x.classList.remove("active"));
   a.classList.add("active");
@@ -803,6 +855,7 @@ $$("nav a").forEach(a => a.addEventListener("click", () => {
   if (p === "mapping") sizeStage();
   if (p === "features") loadFeatures();
   if (p === "lights") loadDmx();
+  if (p === "cues") { loadCues(); loadMedia(); loadPresets(); }
 }));
 
 /* Curseurs generiques : throttle + valeur finale + pas de recalage pendant le drag */
@@ -1543,6 +1596,131 @@ $("#presetSave").addEventListener("click", () => {
   $("#presetName").value = "";
 });
 $("#presetName").addEventListener("keydown", e => { if (e.key === "Enter") $("#presetSave").click(); });
+
+/* ===================== Séquences (cues) ===================== */
+let cuesEtat = null, cueActionsBuilder = [];
+async function cueCmd(c) {
+  try {
+    await api("/api/cues", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(c) });
+  } catch (e) { toast("Séquenceur indisponible", "err"); }
+}
+async function loadCues() {
+  try { cuesEtat = await api("/api/cues"); } catch (e) { return; }
+  renderCues();
+}
+function libelleDecl(d) {
+  if (d.type === "heure") return "🕗 tous les jours à " + String(d.hh).padStart(2, "0") + ":" + String(d.mm).padStart(2, "0");
+  if (d.type === "apres") return "⤷ " + d.secondes + " s après la précédente";
+  return "GO manuel";
+}
+function libelleAction(a) {
+  switch (a.cmd) {
+    case "load": return "Charger " + a.path;
+    case "play": return "Lecture";
+    case "pause": return "Pause";
+    case "stop": return "Stop";
+    case "preset_load": return "Preset " + a.name;
+    case "preset_fade": return "Fondu → " + a.name + " (" + a.seconds + " s)";
+    case "set_test_pattern": return a.pattern ? "Mire " + a.pattern : "Mire éteinte";
+    default: return a.cmd;
+  }
+}
+function renderCues() {
+  if (!cuesEtat) return;
+  const statut = $("#cueStatut");
+  statut.textContent = (cuesEtat.derniere ? "Dernière jouée : « " + cuesEtat.derniere + " »" : "Aucune cue jouée pour l'instant.")
+    + (cuesEtat.en_attente ? "  ·  ▶ « " + cuesEtat.en_attente[0] + " » s'enchaîne dans " + Math.round(cuesEtat.en_attente[1] / 100) / 10 + " s" : "");
+  const ul = $("#cueList");
+  ul.innerHTML = "";
+  if (!cuesEtat.cues.length) {
+    ul.innerHTML = '<li class="empty" style="border:none">Aucune cue — crée la première ci-dessous.</li>';
+    return;
+  }
+  cuesEtat.cues.forEach((c, i) => {
+    const li = document.createElement("li");
+    li.style.flexWrap = "wrap";
+    const nm = document.createElement("span"); nm.className = "nm";
+    nm.textContent = (i + 1) + ". " + c.nom + "  —  " + libelleDecl(c.declencheur);
+    if (cuesEtat.derniere === c.nom) nm.style.color = "var(--accent)";
+    const go = document.createElement("button"); go.className = "mini primary"; go.textContent = "GO";
+    go.addEventListener("click", async () => { await cueCmd({ cmd: "go", nom: c.nom }); loadCues(); });
+    const monte = document.createElement("button"); monte.className = "mini"; monte.textContent = "↑";
+    monte.addEventListener("click", async () => { await cueCmd({ cmd: "cue_deplace", nom: c.nom, vers: Math.max(0, i - 1) }); loadCues(); });
+    const descend = document.createElement("button"); descend.className = "mini"; descend.textContent = "↓";
+    descend.addEventListener("click", async () => { await cueCmd({ cmd: "cue_deplace", nom: c.nom, vers: i + 1 }); loadCues(); });
+    const del = document.createElement("button"); del.className = "mini danger"; del.textContent = "✕";
+    del.addEventListener("click", async () => { await cueCmd({ cmd: "cue_supprime", nom: c.nom }); loadCues(); });
+    const detail = document.createElement("div");
+    detail.style.cssText = "flex-basis:100%;font-size:12px;color:var(--muted);padding-top:2px";
+    detail.textContent = c.actions.map(libelleAction).join("  →  ");
+    li.appendChild(nm); li.appendChild(go); li.appendChild(monte); li.appendChild(descend); li.appendChild(del); li.appendChild(detail);
+    ul.appendChild(li);
+  });
+}
+function renderCueActionsBuilder() {
+  const ul = $("#cueActions");
+  ul.innerHTML = "";
+  cueActionsBuilder.forEach((a, i) => {
+    const li = document.createElement("li");
+    const nm = document.createElement("span"); nm.className = "nm";
+    nm.textContent = (i + 1) + ". " + libelleAction(a);
+    const del = document.createElement("button"); del.className = "mini danger"; del.textContent = "✕";
+    del.addEventListener("click", () => { cueActionsBuilder.splice(i, 1); renderCueActionsBuilder(); });
+    li.appendChild(nm); li.appendChild(del);
+    ul.appendChild(li);
+  });
+}
+function majChampsAction() {
+  const type = $("#cueActType").value;
+  $("#cueActMedia").style.display = type === "load" ? "block" : "none";
+  $("#cueActPreset").style.display = (type === "preset" || type === "fade") ? "block" : "none";
+  $("#cueActFondu").style.display = type === "fade" ? "block" : "none";
+  $("#cueActPattern").style.display = type === "pattern" ? "block" : "none";
+  if (type === "load") {
+    const sel = $("#cueActMedia"); sel.innerHTML = "";
+    mediaList.forEach(m => { const o = document.createElement("option"); o.value = o.textContent = m.name; sel.appendChild(o); });
+  }
+  if (type === "preset" || type === "fade") {
+    const sel = $("#cueActPreset"); sel.innerHTML = "";
+    presets.forEach(n => { const o = document.createElement("option"); o.value = o.textContent = n; sel.appendChild(o); });
+  }
+}
+$("#cueActType").addEventListener("change", majChampsAction);
+$("#cueDecl").addEventListener("change", () => {
+  $("#cueHeure").style.display = $("#cueDecl").value === "heure" ? "block" : "none";
+  $("#cueApres").style.display = $("#cueDecl").value === "apres" ? "block" : "none";
+});
+$("#cueActAjoute").addEventListener("click", () => {
+  const type = $("#cueActType").value;
+  let action = null;
+  if (type === "load") { const p = $("#cueActMedia").value; if (!p) { toast("Aucun média", "err"); return; } action = { cmd: "load", path: p }; }
+  if (type === "play") action = { cmd: "play" };
+  if (type === "pause") action = { cmd: "pause" };
+  if (type === "stop") action = { cmd: "stop" };
+  if (type === "preset") { const n = $("#cueActPreset").value; if (!n) { toast("Aucun preset", "err"); return; } action = { cmd: "preset_load", name: n }; }
+  if (type === "fade") { const n = $("#cueActPreset").value; if (!n) { toast("Aucun preset", "err"); return; } action = { cmd: "preset_fade", name: n, seconds: +$("#cueActFondu").value || 2 }; }
+  if (type === "pattern") { const p = $("#cueActPattern").value; action = { cmd: "set_test_pattern", pattern: p || null }; }
+  if (action) { cueActionsBuilder.push(action); renderCueActionsBuilder(); }
+});
+$("#cueSave").addEventListener("click", async () => {
+  const nom = $("#cueNom").value.trim();
+  if (!nom) { toast("Donne un nom à la cue", "err"); return; }
+  if (!cueActionsBuilder.length) { toast("Ajoute au moins une action", "err"); return; }
+  let declencheur = { type: "manuel" };
+  if ($("#cueDecl").value === "heure") {
+    const [hh, mm] = $("#cueHeure").value.split(":").map(Number);
+    declencheur = { type: "heure", hh: hh || 0, mm: mm || 0 };
+  } else if ($("#cueDecl").value === "apres") {
+    declencheur = { type: "apres", secondes: Math.max(0, +$("#cueApres").value || 0) };
+  }
+  await cueCmd({ cmd: "cue_enregistre", nom: nom, declencheur: declencheur, actions: cueActionsBuilder });
+  cueActionsBuilder = []; renderCueActionsBuilder(); $("#cueNom").value = "";
+  loadCues();
+});
+$("#cueStop").addEventListener("click", async () => { await cueCmd({ cmd: "stop" }); loadCues(); });
+majChampsAction();
+setInterval(() => { if ($("#page-cues").classList.contains("visible")) loadCues(); }, 2000);
 
 /* ===================== Lumières (Art-Net) ===================== */
 let dmx = null, dmxDragging = false;

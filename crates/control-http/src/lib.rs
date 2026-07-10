@@ -132,6 +132,8 @@ pub struct AppState {
     /// Console lumières Art-Net (page Lumières). `None` = binaire assemblé
     /// sans le service (tests partiels).
     lumieres: Option<toolbox_artnet::LumieresHandle>,
+    /// Séquenceur (page Séquences). `None` = non monté (tests partiels).
+    sequenceur: Option<toolbox_core::sequenceur::SequenceurHandle>,
 }
 
 impl AppState {
@@ -171,6 +173,7 @@ impl AppState {
             features: features_rx,
             features_tx: std::sync::Arc::new(features_tx),
             lumieres: None,
+            sequenceur: None,
         }
     }
 
@@ -178,6 +181,13 @@ impl AppState {
     #[must_use]
     pub fn with_lumieres(mut self, handle: toolbox_artnet::LumieresHandle) -> Self {
         self.lumieres = Some(handle);
+        self
+    }
+
+    /// Branche le séquenceur (page Séquences).
+    #[must_use]
+    pub fn with_sequenceur(mut self, handle: toolbox_core::sequenceur::SequenceurHandle) -> Self {
+        self.sequenceur = Some(handle);
         self
     }
 
@@ -268,6 +278,7 @@ pub fn router(app: AppState) -> Router {
         .route("/api/fleet/media", get(fleet_media))
         .route("/api/fleet/push", post(fleet_push))
         .route("/api/dmx", get(dmx_get).post(dmx_commande))
+        .route("/api/cues", get(cues_get).post(cues_commande))
         .route("/ws", get(ws_events_upgrade))
         .route("/ws/logs", get(ws_logs_upgrade))
         .layer(axum::middleware::from_fn_with_state(
@@ -954,6 +965,34 @@ async fn dmx_commande(
         .send(commande)
         .await
         .map_err(|_| CoreError::InvalidCommand("console lumières arrêtée".into()))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Séquenceur : l'état (cues, enchaînement en attente, dernière jouée).
+async fn cues_get(
+    State(app): State<AppState>,
+) -> Result<Json<toolbox_core::sequenceur::EtatSequenceur>, ApiError> {
+    let handle = app
+        .sequenceur
+        .as_ref()
+        .ok_or_else(|| CoreError::InvalidCommand("séquenceur non monté".into()))?;
+    Ok(Json(handle.etat.borrow().clone()))
+}
+
+/// Séquenceur : une commande (cue, GO, stop…).
+async fn cues_commande(
+    State(app): State<AppState>,
+    Json(commande): Json<toolbox_core::sequenceur::CommandeSequenceur>,
+) -> Result<StatusCode, ApiError> {
+    let handle = app
+        .sequenceur
+        .as_ref()
+        .ok_or_else(|| CoreError::InvalidCommand("séquenceur non monté".into()))?;
+    handle
+        .commandes
+        .send(commande)
+        .await
+        .map_err(|_| CoreError::InvalidCommand("séquenceur arrêté".into()))?;
     Ok(StatusCode::NO_CONTENT)
 }
 

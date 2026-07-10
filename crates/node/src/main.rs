@@ -272,6 +272,31 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
         }
     };
 
+    // Séquenceur : cues (GO, enchaînements, heure fixe) — page Séquences.
+    let sequenceur_handle = {
+        let (cmd_tx, cmd_rx) = tokio::sync::mpsc::channel(64);
+        let (etat_tx, etat_rx) =
+            watch::channel(toolbox_core::sequenceur::EtatSequenceur::default());
+        services.push((
+            "sequenceur",
+            spawn_service(
+                "sequenceur",
+                shutdown_rx.clone(),
+                toolbox_core::sequenceur::service(
+                    std::path::PathBuf::from("sequences.json"),
+                    handle.clone(),
+                    cmd_rx,
+                    etat_tx,
+                    shutdown_rx.clone(),
+                ),
+            ),
+        ));
+        toolbox_core::sequenceur::SequenceurHandle {
+            commandes: cmd_tx,
+            etat: etat_rx,
+        }
+    };
+
     // HTTP : REST + WebSocket + web UI + monitoring.
     if config.modules.http {
         let app = toolbox_control_http::AppState::new(
@@ -294,7 +319,8 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
         )
         .with_password(config.security.password.clone())
         .with_features(features_tx.clone(), features_rx.clone())
-        .with_lumieres(lumieres_handle.clone());
+        .with_lumieres(lumieres_handle.clone())
+        .with_sequenceur(sequenceur_handle.clone());
         if config.security.password.is_some() {
             info!("interface web protégée par mot de passe ([security])");
         }

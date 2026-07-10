@@ -5,6 +5,14 @@
 
 ## [Non publié]
 
+- **Page Séquences — séquenceur de cues** : chaque cue = un nom + une
+  liste d'actions (charger un média, lecture, fondu vers un preset,
+  mire… — tout le vocabulaire du node). Déclenchement : GO manuel,
+  enchaînement « N secondes après la précédente », ou **tous les jours à
+  HH:MM** (heure de la machine, garde une-fois-par-jour). Réordonnable,
+  Stop annule l'enchaînement en attente, persistance `sequences.json`.
+  API `GET/POST /api/cues`. Vérifié en réel : GO, enchaînement à 1,5 s et
+  déclenchement horaire constatés sur l'état du node.
 - **Page Lumières — console DMX Art-Net** : des faders nommés créés à la
   volée (univers + canal, couleur d'étiquette), un master, des **scènes**
   (instantanés rappelables) et des **chasers** (enchaînements de scènes

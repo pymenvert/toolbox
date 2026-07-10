@@ -18,6 +18,7 @@ pub mod logging;
 pub mod media;
 pub mod output;
 pub mod preset;
+pub mod sequenceur;
 pub mod source;
 pub mod state;
 
