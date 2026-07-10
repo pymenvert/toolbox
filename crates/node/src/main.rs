@@ -13,7 +13,9 @@ use tracing::{error, info, warn};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
-use toolbox_core::{Bus, Command, LogBuffer, MediaLibrary, NodeConfig, PresetStore, Source};
+use toolbox_core::{
+    Bus, Command, LogBuffer, MappingStore, MediaLibrary, NodeConfig, PresetStore, Source,
+};
 use toolbox_engine::{MemoryBackend, PlaybackPosition, Player};
 
 fn main() -> ExitCode {
@@ -92,15 +94,19 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
         .or_else(|| std::env::var("HOSTNAME").ok())
         .unwrap_or_else(|| "toolbox-node".to_string());
 
-    // Stockage : presets + médiathèque (dossiers créés si besoin).
+    // Stockage : presets (état complet + mapping seul) et médiathèque
+    // (dossiers créés si besoin).
     let presets = PresetStore::open(&config.paths.presets)?;
+    let mapping_presets = MappingStore::open(config.paths.presets.join("mapping"))?;
     let media = MediaLibrary::open(
         &config.paths.media,
         config.limits.max_upload_mb.saturating_mul(1024 * 1024),
     )?;
 
     // Le bus, cœur du node.
-    let bus = Bus::new(256, 1024).with_presets(presets.clone());
+    let bus = Bus::new(256, 1024)
+        .with_presets(presets.clone())
+        .with_mapping_presets(mapping_presets.clone());
     let handle = bus.handle();
     let bus_task = tokio::spawn(bus.run());
 
@@ -136,6 +142,7 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
         let app = toolbox_control_http::AppState::new(
             handle.clone(),
             presets.clone(),
+            mapping_presets.clone(),
             media.clone(),
             logs.clone(),
             position_rx.clone(),

@@ -69,6 +69,13 @@ Sous Windows, aucune dépendance système (midir utilise WinMM).
 - Corrections post-v1 : dev-dependencies de test manquantes dans control-http
   (`http-body-util`, `tower`), tolérance f32 du test de crop,
   `allow-panic-in-tests`, `Cargo.lock` commité.
+- Ajouts demandés par Pym : toggle `mapping.enabled` (bypass du rendu,
+  réglages conservés), presets de mapping seul (`presets/mapping/`, commandes
+  `mapping_save`/`mapping_load`, API `/api/mapping-presets`, OSC `/mapping/*`,
+  UI dans l'onglet Mapping — charger n'interrompt pas la lecture),
+  `deploy/install-autostart-windows.bat` (lancement à l'ouverture de session).
+- Le choix de la sortie physique (écran/projecteur) viendra avec le backend
+  vidéo réel : à concevoir avec la sélection de sortie dès le départ.
 - Backend vidéo réel (GStreamer) pas encore commencé — attend le bench sur Pi.
 
 ## Prochaines étapes

@@ -8,3 +8,5 @@ node.toml
 /logs/
 webui/node_modules/
 webui/dist/
+# Outillage local des sessions Claude Code (launch.json…).
+.claude/

@@ -30,7 +30,7 @@ osc = 9000         # UDP
 [paths]
 # Relatifs au dossier de travail → la version portable tient dans un dossier.
 media = "media"
-presets = "presets"
+presets = "presets"       # les presets de mapping seul vont dans presets/mapping/
 shaders = "shaders"
 logs = "logs"
 

@@ -21,7 +21,17 @@ Un dossier suffit : le binaire + `run-portable.sh` (Linux/Pi) ou
 ./install.sh --prefix /opt/toolbox --binary ./toolbox-node
 ```
 
-## 4. Mode kiosque (P1.9)
+## 4. Démarrage automatique Windows
+
+Copiez `install-autostart-windows.bat` à côté de `toolbox-node.exe` puis
+double-cliquez : Toolbox se lancera (fenêtre réduite) à chaque ouverture de
+session. Pour retirer : relancez le script avec `--remove`, ou supprimez
+`toolbox-node-autostart.bat` du dossier Démarrage.
+
+Combiné au mode kiosque ci-dessous, le show — mapping compris — reprend seul
+au démarrage de l'ordinateur.
+
+## 5. Mode kiosque (P1.9)
 
 1. Réglez votre scène dans la web UI puis sauvegardez un preset (ex. `show`).
 2. Dans `node.toml` :
@@ -43,7 +53,7 @@ sudo systemctl start|stop|status toolbox-node
 journalctl -u toolbox-node -f      # ou la page Logs de la web UI
 ```
 
-## 5. Ce qui arrive ensuite
+## 6. Ce qui arrive ensuite
 
 - Image carte SD prête à flasher (pi-gen) — phase 4.
 - Mise à jour OTA, mot de passe UI, token API — phase 4.
