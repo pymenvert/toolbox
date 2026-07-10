@@ -195,19 +195,28 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: GStreamer MSVC (dev + runtime)
+      - name: GStreamer MSVC (dev + runtime) + pkg-config
         shell: bash
         run: |
           set -o pipefail
-          choco install -y gstreamer gstreamer-devel --no-progress 2>&1 | tail -5 | tee gstwin.log
+          # pkgconfiglite : les paquets GStreamer MSVC n'embarquent pas
+          # pkg-config.exe, requis par les crates *-sys.
+          choco install -y gstreamer gstreamer-devel pkgconfiglite --no-progress 2>&1 | tail -5 | tee gstwin.log
       - name: Build release (feature gstreamer)
         shell: bash
         run: |
           set -o pipefail
-          GST="/c/gstreamer/1.0/msvc_x86_64"
-          ls "$GST/bin" 2>&1 | head -3 | tee -a gstwin.log || true
+          # L'emplacement du MSI varie selon les versions : on le cherche.
+          GST=$(ls -d /c/gstreamer/1.0/msvc_x86_64 "/c/Program Files/gstreamer/1.0/msvc_x86_64" 2>/dev/null | head -1)
+          if [ -z "$GST" ]; then
+            GST=$(find /c -maxdepth 4 -type d -name "msvc_x86_64" -path "*gstreamer*" 2>/dev/null | head -1)
+          fi
+          echo "dossier GStreamer : ${GST:-INTROUVABLE}" | tee -a gstwin.log
+          [ -n "$GST" ]
           export PATH="$GST/bin:$PATH"
           export PKG_CONFIG_PATH="$GST/lib/pkgconfig"
+          pkg-config --version 2>&1 | tee -a gstwin.log
+          pkg-config --modversion gstreamer-1.0 2>&1 | tee -a gstwin.log
           cargo build --release -p toolbox-node --features gstreamer 2>&1 | tee -a gstwin.log
       - uses: actions/upload-artifact@v4
         with:
