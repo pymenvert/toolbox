@@ -119,7 +119,9 @@ mod tests {
     use super::*;
     use toolbox_core::{Command, NodeState};
 
-    const EPS: f64 = 1e-9;
+    // L'état stocke les valeurs en f32 : les attentes écrites en f64 divergent
+    // de ~1e-8 après conversion (cf. tolérance homographie).
+    const EPS: f64 = 1e-6;
 
     fn close(p: (f64, f64), q: (f64, f64)) -> bool {
         (p.0 - q.0).abs() < EPS && (p.1 - q.1).abs() < EPS
