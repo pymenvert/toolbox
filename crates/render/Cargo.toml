@@ -1,0 +1,19 @@
+[package]
+name = "toolbox-render"
+description = "Fenêtre de sortie du node : mires warpées en direct (calibrage projecteur), en attendant le backend vidéo"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+toolbox-core = { path = "../core" }
+toolbox-engine = { path = "../engine" }
+# Fenêtre native + tampon CPU : aucun GPU ni bibliothèque système requis à la
+# compilation. Le backend GStreamer apportera sa propre chaîne GL plus tard.
+softbuffer = "0.4"
+winit = "0.30"
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+[lints]
+workspace = true
