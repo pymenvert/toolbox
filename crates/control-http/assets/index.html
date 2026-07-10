@@ -656,6 +656,13 @@
       pour savoir quel projecteur appartient &agrave; quel node.</div>
     </div>
     <div class="card" style="margin-top:14px;max-width:720px">
+      <h3>Sant&eacute; des fonctions</h3>
+      <div id="santeFonctions" class="hint">Chargement&hellip;</div>
+      <div class="hint" style="margin-top:6px">Pastille verte = fonction active
+      (onglet Fonctions pour basculer). Les tuiles ci-dessus couvrent la machine ;
+      erreurs et d&eacute;rive de synchro y figurent aussi.</div>
+    </div>
+    <div class="card" style="margin-top:14px;max-width:720px">
       <h3>Diagnostic</h3>
       <div class="rowbtns">
         <a id="sysDiag" class="btnlink" href="/api/diagnostic.zip" download>Exporter le diagnostic (ZIP)</a>
@@ -2067,7 +2074,31 @@ async function loadSystem() {
   if (sys.tailscale != null) html += tile("Tailscale", sys.tailscale, "", "");
   html += tile("Plateforme", (sys.os || "?") + " / " + (sys.arch || "?"), "", "");
   if (healthInfo) html += tile("Node", healthInfo.name || "Toolbox", "", (healthInfo.version ? "v" + healthInfo.version : "") + " · " + (healthInfo.status || ""));
+  // Santé d'un coup d'œil : erreurs récentes et dérive de synchro.
+  html += tile("Erreurs récentes", String(sys.erreurs_recentes ?? 0), "",
+    (sys.erreurs_recentes ?? 0) > 0 ? "voir l'onglet Logs" : "aucune dans le journal",
+    (sys.erreurs_recentes ?? 0) > 0);
+  if (sys.sync_derive_ms != null)
+    html += tile("Dérive de synchro", Math.abs(sys.sync_derive_ms).toFixed(1), "ms",
+      Math.abs(sys.sync_derive_ms) < 40 ? "verrouillé (< 1 frame)" : "au-delà d'une frame",
+      Math.abs(sys.sync_derive_ms) >= 40);
   g.innerHTML = html;
+  renderSante(sys);
+}
+
+/* Carte Santé : une pastille par fonction (état des interrupteurs). */
+function renderSante(sys) {
+  const zone = $("#santeFonctions");
+  if (!zone || !sys.fonctions) return;
+  const noms = { player: "Lecteur", output: "Fenêtre de sortie", osc: "OSC",
+    oscquery: "OSCQuery", osc_feedback: "Retour OSC", midi: "MIDI",
+    fleet: "Parc mDNS", fader: "Fondus", preview: "Aperçu", artnet: "Lumières" };
+  zone.innerHTML = Object.entries(noms).map(([clef, nom]) => {
+    const actif = !!sys.fonctions[clef];
+    return '<span style="display:inline-flex;align-items:center;gap:6px;margin:3px 12px 3px 0;font-size:13px;color:var(--ink-2)">'
+      + '<i style="width:9px;height:9px;border-radius:50%;background:' + (actif ? "var(--ok, #34c759)" : "var(--muted)") + '"></i>'
+      + nom + '</span>';
+  }).join("");
 }
 
 /* ===================== Initialisation ===================== */

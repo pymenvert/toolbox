@@ -157,6 +157,7 @@ pub async fn suiveur(
     settings: SyncSettings,
     bus: BusHandle,
     position: watch::Receiver<PlaybackPosition>,
+    derive_tx: watch::Sender<Option<f64>>,
     mut shutdown: watch::Receiver<bool>,
 ) {
     let Some(maitre) = settings.maitre.clone() else {
@@ -207,6 +208,12 @@ pub async fn suiveur(
                     &mut derniere_vitesse,
                 )
                 .await;
+                // Dérive publiée pour la page Santé (médiane courante, ms).
+                if derives.len() >= 3 {
+                    let mut triees: Vec<f64> = derives.iter().copied().collect();
+                    triees.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                    let _ = derive_tx.send(Some(triees[triees.len() / 2] * 1000.0));
+                }
             }
         }
     }
@@ -381,10 +388,12 @@ mod tests {
             maitre_pos.clone(),
             stop_rx.clone(),
         ));
+        let (derive_tx, _derive_rx) = watch::channel(None);
         tokio::spawn(suiveur(
             reglages_suiveur,
             suiveur_bus.clone(),
             suiveur_pos.clone(),
+            derive_tx,
             stop_rx.clone(),
         ));
 

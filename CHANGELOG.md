@@ -5,6 +5,10 @@
 
 ## [Non publié]
 
+- **Santé du système d'un coup d'œil** (page Système) : pastille par
+  fonction (état des interrupteurs), tuile « Erreurs récentes » (compteur
+  ERROR du journal, en rouge s'il y en a) et tuile « Dérive de synchro »
+  pour les nodes suiveurs (verte sous 40 ms = verrouillé sous la frame).
 - **Page Séquences — séquenceur de cues** : chaque cue = un nom + une
   liste d'actions (charger un média, lecture, fondu vers un preset,
   mire… — tout le vocabulaire du node). Déclenchement : GO manuel,

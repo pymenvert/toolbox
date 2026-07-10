@@ -134,6 +134,9 @@ pub struct AppState {
     lumieres: Option<toolbox_artnet::LumieresHandle>,
     /// Séquenceur (page Séquences). `None` = non monté (tests partiels).
     sequenceur: Option<toolbox_core::sequenceur::SequenceurHandle>,
+    /// Dérive de synchro (ms, médiane) publiée par le rôle suiveur —
+    /// affichée dans la carte Santé. `None` = pas suiveur / pas de mesure.
+    sync_derive: watch::Receiver<Option<f64>>,
 }
 
 impl AppState {
@@ -174,7 +177,15 @@ impl AppState {
             features_tx: std::sync::Arc::new(features_tx),
             lumieres: None,
             sequenceur: None,
+            sync_derive: watch::channel(None).1,
         }
+    }
+
+    /// Branche la dérive de synchro du suiveur (carte Santé).
+    #[must_use]
+    pub fn with_sync_derive(mut self, rx: watch::Receiver<Option<f64>>) -> Self {
+        self.sync_derive = rx;
+        self
     }
 
     /// Branche la console lumières Art-Net (page Lumières).
@@ -530,8 +541,29 @@ async fn logs_snapshot(State(app): State<AppState>) -> Json<Vec<toolbox_core::Lo
     Json(app.logs.snapshot())
 }
 
-async fn system_stats(State(app): State<AppState>) -> Json<monitor::SystemStats> {
-    Json(monitor::collect(app.started_at))
+async fn system_stats(State(app): State<AppState>) -> Json<serde_json::Value> {
+    let stats = monitor::collect(app.started_at);
+    let mut json = serde_json::to_value(&stats).unwrap_or_else(|_| serde_json::json!({}));
+    if let Some(objet) = json.as_object_mut() {
+        // Santé : erreurs récentes (ring buffer), dérive de synchro,
+        // fonctions actives — tout ce qu'il faut pour un état d'un coup d'œil.
+        let erreurs = app
+            .logs
+            .snapshot()
+            .iter()
+            .filter(|e| e.level == "ERROR")
+            .count();
+        objet.insert("erreurs_recentes".into(), serde_json::json!(erreurs));
+        objet.insert(
+            "sync_derive_ms".into(),
+            serde_json::json!(*app.sync_derive.borrow()),
+        );
+        objet.insert(
+            "fonctions".into(),
+            serde_json::to_value(*app.features.borrow()).unwrap_or_default(),
+        );
+    }
+    Json(json)
 }
 
 /// Redémarre la MACHINE (pas seulement le node) — pour les installations

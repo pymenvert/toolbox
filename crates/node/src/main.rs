@@ -190,6 +190,10 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
     // le contrôleur, l'UI garde le même récepteur à travers les bascules.
     let (position_tx, position_rx) = watch::channel(PlaybackPosition::default());
 
+    // Dérive de synchro publiée par le suiveur (page Santé). None = pas de
+    // rôle suiveur ou pas encore de mesures.
+    let (sync_derive_tx, sync_derive_rx) = watch::channel::<Option<f64>>(None);
+
     // Interrupteurs de fonctions (onglet « Fonctions ») : fonctions.json
     // prime, sinon défauts de la config ([modules]/[output]). Persistés à
     // chaque bascule, comme sortie.json.
@@ -320,7 +324,8 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
         .with_password(config.security.password.clone())
         .with_features(features_tx.clone(), features_rx.clone())
         .with_lumieres(lumieres_handle.clone())
-        .with_sequenceur(sequenceur_handle.clone());
+        .with_sequenceur(sequenceur_handle.clone())
+        .with_sync_derive(sync_derive_rx.clone());
         if config.security.password.is_some() {
             info!("interface web protégée par mot de passe ([security])");
         }
@@ -413,6 +418,7 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
                         config.sync.clone(),
                         handle.clone(),
                         position_rx.clone(),
+                        sync_derive_tx,
                         shutdown_rx.clone(),
                     ),
                 ),
