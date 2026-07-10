@@ -196,19 +196,35 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: GStreamer MSVC (dev + runtime)
-        run: choco install -y gstreamer gstreamer-devel --no-progress
+        shell: bash
+        run: |
+          set -o pipefail
+          choco install -y gstreamer gstreamer-devel --no-progress 2>&1 | tail -5 | tee gstwin.log
       - name: Build release (feature gstreamer)
         shell: bash
         run: |
+          set -o pipefail
           GST="/c/gstreamer/1.0/msvc_x86_64"
+          ls "$GST/bin" 2>&1 | head -3 | tee -a gstwin.log || true
           export PATH="$GST/bin:$PATH"
           export PKG_CONFIG_PATH="$GST/lib/pkgconfig"
-          cargo build --release -p toolbox-node --features gstreamer
+          cargo build --release -p toolbox-node --features gstreamer 2>&1 | tee -a gstwin.log
       - uses: actions/upload-artifact@v4
         with:
           name: toolbox-node-windows-x64-gstreamer
           path: target/release/toolbox-node.exe
           if-no-files-found: error
+      - name: Publier les logs en cas d'échec
+        if: failure()
+        shell: bash
+        run: |
+          git config user.email "ci@toolbox" && git config user.name "CI"
+          git checkout -q --orphan ci-logs-gstwin
+          git rm -rfq --cached .
+          echo "run $GITHUB_RUN_ID commit $GITHUB_SHA" > run.txt
+          for f in run.txt gstwin.log; do if [ -f "$f" ]; then git add -f "$f"; fi; done
+          git commit -qm "logs gstwin $GITHUB_RUN_ID"
+          git push -f origin ci-logs-gstwin
 
   build-arm64:
     needs: [check]
