@@ -49,16 +49,24 @@ pub struct RenderParams {
 
 impl RenderParams {
     /// Calcule les paramètres de rendu depuis l'état complet du node.
+    ///
+    /// Mapping désactivé (`mapping.enabled == false`) : warp et UV passent en
+    /// identité (image brute plein cadre), sans même évaluer les coins — un
+    /// mapping dégradé stocké ne doit pas empêcher le bypass. La correction
+    /// couleur, elle, reste active.
     pub fn from_state(state: &NodeState) -> Result<Self, HomographyError> {
-        let warp = from_mapping(&state.mapping)?;
-        let warp_inv = warp.inverse().ok_or(HomographyError::Degenerate)?;
-
-        let flip = flip_matrix(state.mapping.flip_h, state.mapping.flip_v);
-        let rotation_inv = rotation_inverse_matrix(state.mapping.rotation);
-        let crop = crop_matrix(&state.mapping);
-        // Ordre d'application sur un vecteur colonne : flip d'abord,
-        // puis rotation inverse, puis recadrage.
-        let uv_transform = crop.mul(&rotation_inv).mul(&flip);
+        let (warp, warp_inv, uv_transform) = if state.mapping.enabled {
+            let warp = from_mapping(&state.mapping)?;
+            let warp_inv = warp.inverse().ok_or(HomographyError::Degenerate)?;
+            let flip = flip_matrix(state.mapping.flip_h, state.mapping.flip_v);
+            let rotation_inv = rotation_inverse_matrix(state.mapping.rotation);
+            let crop = crop_matrix(&state.mapping);
+            // Ordre d'application sur un vecteur colonne : flip d'abord,
+            // puis rotation inverse, puis recadrage.
+            (warp, warp_inv, crop.mul(&rotation_inv).mul(&flip))
+        } else {
+            (Mat3::IDENTITY, Mat3::IDENTITY, Mat3::IDENTITY)
+        };
 
         Ok(Self {
             warp,
@@ -245,6 +253,54 @@ mod tests {
         assert!((params.color.gamma - 2.2).abs() < f32::EPSILON);
         assert!((params.color.gain[2] - 0.5).abs() < f32::EPSILON);
         assert!((params.color.hue_degrees - 45.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn disabled_mapping_bypasses_warp_but_keeps_color() {
+        // Réglages agressifs partout : coins, rotation, flip, crop, couleur.
+        let state = state_with(&[
+            Command::CornerSet {
+                index: 0,
+                x: 0.3,
+                y: 0.2,
+            },
+            Command::SetRotation { degrees: 90 },
+            Command::SetFlip {
+                horizontal: true,
+                vertical: false,
+            },
+            Command::SetCrop {
+                left: 0.1,
+                top: 0.0,
+                right: 0.0,
+                bottom: 0.0,
+            },
+            Command::ColorSet {
+                param: toolbox_core::ColorParam::Gamma,
+                value: 2.0,
+            },
+            Command::SetMappingEnabled { enabled: false },
+        ]);
+        let params = RenderParams::from_state(&state).expect("params");
+        // Tout le bloc mapping est ignoré : identité partout…
+        for (i, (got, want)) in params
+            .uv_transform_gl
+            .iter()
+            .zip(Mat3::IDENTITY.to_gl().iter())
+            .enumerate()
+        {
+            assert!((got - want).abs() < 1e-6, "uv[{i}]");
+        }
+        for (i, (got, want)) in params
+            .warp_inv_gl
+            .iter()
+            .zip(Mat3::IDENTITY.to_gl().iter())
+            .enumerate()
+        {
+            assert!((got - want).abs() < 1e-6, "warp_inv[{i}]");
+        }
+        // …mais la couleur reste appliquée.
+        assert!((params.color.gamma - 2.0).abs() < f32::EPSILON);
     }
 
     #[test]
