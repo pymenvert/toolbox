@@ -1,0 +1,20 @@
+[1m[92m    Updating[0m crates.io index
+[1m[92m    Checking[0m toolbox-core v0.1.0 (/home/runner/work/toolbox/toolbox/crates/core)
+[1m[92m    Checking[0m toolbox-engine v0.1.0 (/home/runner/work/toolbox/toolbox/crates/engine)
+[1m[92m    Checking[0m toolbox-control-osc v0.1.0 (/home/runner/work/toolbox/toolbox/crates/control-osc)
+[1m[92m    Checking[0m toolbox-control-http v0.1.0 (/home/runner/work/toolbox/toolbox/crates/control-http)
+[1m[92m    Checking[0m toolbox-gst v0.1.0 (/home/runner/work/toolbox/toolbox/crates/gst)
+[1m[92m    Checking[0m toolbox-node v0.1.0 (/home/runner/work/toolbox/toolbox/crates/node)
+[1m[91merror[E0282][0m[1m: type annotations needed[0m
+   [1m[94m--> [0mcrates/node/src/main.rs:121:47
+    [1m[94m|[0m
+[1m[94m121[0m [1m[94m|[0m     let (video_tx, video_rx) = watch::channel(None);
+    [1m[94m|[0m                                               [1m[91m^^^^[0m [1m[91mcannot infer type of the type parameter `T` declared on the enum `Option`[0m
+    [1m[94m|[0m
+[1m[96mhelp[0m: consider specifying a concrete type for the type parameter `T`
+    [1m[94m|[0m
+[1m[94m121[0m [1m[94m| [0m    let (video_tx, video_rx) = watch::channel(None[92m::</* Type */>[0m);
+    [1m[94m|[0m                                                   [92m++++++++++++++[0m
+
+[1mFor more information about this error, try `rustc --explain E0282`.[0m
+[1m[91merror[0m: could not compile `toolbox-node` (bin "toolbox-node") due to 1 previous error
