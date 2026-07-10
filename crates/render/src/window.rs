@@ -38,8 +38,9 @@ pub struct WindowConfig {
 }
 
 /// Le peintre de la fenêtre : GPU (wgpu) ou CPU (softbuffer, repli).
+/// GPU boxé : la variante est bien plus grosse que la surface CPU.
 enum Painter {
-    Gpu(GpuPainter),
+    Gpu(Box<GpuPainter>),
     Cpu(softbuffer::Surface<Arc<Window>, Arc<Window>>),
 }
 
@@ -362,7 +363,7 @@ impl ApplicationHandler<Wake> for OutputApp {
         // s'ouvre dans tous les cas.
         let painter = if self.config.gpu {
             match GpuPainter::new(window.clone()) {
-                Ok(gpu) => Some(Painter::Gpu(gpu)),
+                Ok(gpu) => Some(Painter::Gpu(Box::new(gpu))),
                 Err(err) => {
                     warn!(%err, "rendu GPU indisponible — repli sur le rendu CPU");
                     None

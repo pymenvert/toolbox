@@ -27,6 +27,13 @@
 - **Démarrage automatique Windows** :
   `deploy/install-autostart-windows.bat` (retrait via `--remove`).
 
+- **Rendu GPU** (wgpu/Vulkan, repli CPU automatique) : le warp, les mires et
+  la correction couleur calculés par la carte graphique, vidéo lissée et
+  synchronisée à l'écran. `[output] gpu = false` force le CPU.
+- **Boucle sans coupure** (mode « un ») via GStreamer `about-to-finish`.
+- **Compteur img/s** à côté de la barre de lecture (frames réellement
+  présentées par la fenêtre de sortie).
+
 ### Robustesse
 - Les WebSockets observent l'arrêt du node (extinction immédiate même UI
   ouverte) ; ping serveur 20 s pour détecter les clients disparus.

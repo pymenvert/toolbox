@@ -31,13 +31,16 @@ Propriétaire : Pym.
   (rotation/flip/crop/couleur → matrices testées), `Player` générique sur le
   trait `PlayerBackend` + `MemoryBackend` simulé. Le backend GStreamer réel
   viendra plus tard (après bench sur Pi) : ne pas l'ajouter.
-- `crates/render` : fenêtre de sortie native (winit + softbuffer, feature
-  `render` du node, activée par défaut, exclue du cross ARM64). Rendu CPU —
-  la chaîne par pixel de `raster.rs` est la référence testée de la future
-  passe GLSL. Source par priorité : mire de test > frame vidéo (si transport
-  actif) > noir. Écran cible et plein écran pilotables à chaud via des
-  canaux watch (API `/api/outputs` + `/api/output`, carte « Sortie » de
-  l'onglet Mapping) ; F11/Échap dans la fenêtre.
+- `crates/render` : fenêtre de sortie native (winit, feature `render` du
+  node, activée par défaut, exclue du cross ARM64). Rendu GPU par défaut
+  (`gpu.rs` + `warp.wgsl`, wgpu 30 SANS backend DX12 — allocateur d3d12
+  cassé ; Vulkan/GL) avec repli automatique sur le peintre CPU softbuffer
+  (`raster.rs`, la référence testée — le shader WGSL doit lui rester
+  IDENTIQUE, il est validé par naga en CI). Source par priorité : mire de
+  test > frame vidéo (si transport actif) > noir. Écran cible, plein écran
+  (et `[output] gpu`) pilotables ; API `/api/outputs` + `/api/output`,
+  carte « Sortie » de l'onglet Mapping ; F11/Échap dans la fenêtre ;
+  compteur de frames présentées publié pour le badge img/s de l'UI.
 - `crates/gst` : backend vidéo GStreamer (`GstBackend`, playbin3 + appsink
   RGBA → canal `watch<Option<VideoFrame>>` vers la fenêtre). Derrière la
   feature `gstreamer` du node (HORS défaut : exige les libs système à la
