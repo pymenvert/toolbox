@@ -102,8 +102,8 @@ mod tests {
     #[test]
     fn files_parse_and_stay_relative() {
         assert_eq!(
-            MediaSource::parse(" clips/a.mp4 "),
-            Ok(MediaSource::File("clips/a.mp4".into()))
+            MediaSource::parse(" clips/a.mp4 ").expect("fichier"),
+            MediaSource::File("clips/a.mp4".into())
         );
         for bad in [
             "",
@@ -123,8 +123,8 @@ mod tests {
     #[test]
     fn network_schemes_are_whitelisted() {
         assert_eq!(
-            MediaSource::parse("rtsp://10.0.0.5:8554/cam"),
-            Ok(MediaSource::Network("rtsp://10.0.0.5:8554/cam".into()))
+            MediaSource::parse("rtsp://10.0.0.5:8554/cam").expect("rtsp"),
+            MediaSource::Network("rtsp://10.0.0.5:8554/cam".into())
         );
         assert!(matches!(
             MediaSource::parse("srt://host:9710?mode=caller"),
@@ -143,17 +143,17 @@ mod tests {
     #[test]
     fn capture_and_ndi_parse() {
         assert_eq!(
-            MediaSource::parse("capture://0"),
-            Ok(MediaSource::Capture(0))
+            MediaSource::parse("capture://0").expect("capture"),
+            MediaSource::Capture(0)
         );
         assert_eq!(
-            MediaSource::parse("capture://2"),
-            Ok(MediaSource::Capture(2))
+            MediaSource::parse("capture://2").expect("capture"),
+            MediaSource::Capture(2)
         );
         assert!(MediaSource::parse("capture://webcam").is_err());
         assert_eq!(
-            MediaSource::parse("ndi://Régie (sortie 1)"),
-            Ok(MediaSource::Ndi("Régie (sortie 1)".into()))
+            MediaSource::parse("ndi://Régie (sortie 1)").expect("ndi"),
+            MediaSource::Ndi("Régie (sortie 1)".into())
         );
         assert!(MediaSource::parse("ndi://").is_err());
         assert!(MediaSource::parse("ndi://nom\"pipeline").is_err());

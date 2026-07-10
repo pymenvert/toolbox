@@ -311,6 +311,11 @@ pub enum Event {
     PresetLoaded {
         name: String,
     },
+    /// Départ synchronisé programmé : le player lancera la lecture à `at`
+    /// (heure Unix en secondes).
+    SyncScheduled {
+        at: f64,
+    },
     /// L'état complet a été remplacé (chargement de preset, import…).
     /// Les abonnés doivent tout resynchroniser depuis `state`.
     StateReplaced {
@@ -523,6 +528,39 @@ impl NodeState {
             Command::SetTestPattern { pattern } => {
                 self.test_pattern = *pattern;
                 Ok(vec![Event::TestPatternChanged { pattern: *pattern }])
+            }
+            Command::SyncArm => {
+                if self.player.media.is_none() {
+                    return Err(CoreError::InvalidCommand(
+                        "sync/arm sans média chargé".into(),
+                    ));
+                }
+                // Armé = prêt à partir : position 0, en pause, préchargé.
+                self.player.transport = Transport::Paused;
+                Ok(vec![
+                    Event::Seeked { seconds: 0.0 },
+                    Event::TransportChanged {
+                        transport: Transport::Paused,
+                    },
+                ])
+            }
+            Command::SyncStartAt { at } => {
+                if self.player.media.is_none() {
+                    return Err(CoreError::InvalidCommand(
+                        "sync/startAt sans média chargé".into(),
+                    ));
+                }
+                if !at.is_finite() || *at < 0.0 {
+                    return Err(CoreError::OutOfRange {
+                        param: "sync.at",
+                        value: *at,
+                        min: 0.0,
+                        max: f64::MAX,
+                    });
+                }
+                // Le player (abonné) programme le départ ; l'état ne bouge
+                // pas encore — le TransportChanged viendra du Play planifié.
+                Ok(vec![Event::SyncScheduled { at: *at }])
             }
             Command::PresetSave { .. }
             | Command::PresetLoad { .. }
@@ -855,6 +893,33 @@ mod tests {
     }
 
     #[test]
+    fn sync_commands_validate_and_schedule() {
+        let mut s = NodeState::default();
+        assert!(s.apply(&Command::SyncArm).is_err(), "arm sans média");
+        assert!(s.apply(&Command::SyncStartAt { at: 1.0 }).is_err());
+
+        load(&mut s, "a.mp4");
+        let evs = s.apply(&Command::SyncArm).expect("arm");
+        assert_eq!(s.player.transport, Transport::Paused);
+        assert_eq!(
+            evs,
+            vec![
+                Event::Seeked { seconds: 0.0 },
+                Event::TransportChanged {
+                    transport: Transport::Paused
+                },
+            ]
+        );
+
+        let evs = s.apply(&Command::SyncStartAt { at: 123.5 }).expect("start");
+        assert_eq!(evs, vec![Event::SyncScheduled { at: 123.5 }]);
+        // L'état ne bouge qu'au départ effectif (Play planifié par le player).
+        assert_eq!(s.player.transport, Transport::Paused);
+        assert!(s.apply(&Command::SyncStartAt { at: f64::NAN }).is_err());
+        assert!(s.apply(&Command::SyncStartAt { at: -5.0 }).is_err());
+    }
+
+    #[test]
     fn network_capture_and_ndi_sources_are_accepted() {
         let mut s = NodeState::default();
         for src in ["rtsp://10.0.0.5:8554/cam", "capture://0", "ndi://Régie"] {
@@ -862,7 +927,7 @@ mod tests {
                 path: (*src).into(),
             })
             .expect("source");
-            assert_eq!(s.player.media.as_deref(), Some(*src));
+            assert_eq!(s.player.media.as_deref(), Some(src));
         }
         // file:// contournerait la validation des chemins : refusé.
         assert!(s

@@ -1,4 +1,4 @@
-//! Player (P1.2) : machine à états de lecture, découplée du backend réel.
+﻿//! Player (P1.2) : machine à états de lecture, découplée du backend réel.
 //!
 //! Le [`Player`] s'abonne au bus, traduit les [`Event`] en appels sur un
 //! [`PlayerBackend`] et applique la politique de fin de média (boucle,
@@ -76,6 +76,9 @@ pub struct Player<B: PlayerBackend> {
     playlist_len: usize,
     in_playlist: bool,
     position_tx: watch::Sender<PlaybackPosition>,
+    /// Départ synchronisé programmé (`/sync/startAt`) : échéance locale
+    /// calculée depuis l'heure Unix demandée.
+    start_deadline: Option<tokio::time::Instant>,
 }
 
 impl<B: PlayerBackend> Player<B> {
@@ -91,6 +94,7 @@ impl<B: PlayerBackend> Player<B> {
             playlist_len: 0,
             in_playlist: false,
             position_tx,
+            start_deadline: None,
         };
         player.resync(&bus.snapshot());
         player
@@ -180,6 +184,10 @@ impl<B: PlayerBackend> Player<B> {
             }
             Event::TransportChanged { transport } => {
                 self.transport = *transport;
+                if *transport == Transport::Stopped {
+                    // Un stop annule un départ synchronisé en attente.
+                    self.start_deadline = None;
+                }
                 let result = match transport {
                     Transport::Playing => self.backend.play(),
                     Transport::Paused => self.backend.pause(),
@@ -188,6 +196,18 @@ impl<B: PlayerBackend> Player<B> {
                 if let Err(err) = result {
                     error!(%err, ?transport, "changement de transport refusé");
                 }
+            }
+            Event::SyncScheduled { at } => {
+                // Heure Unix → échéance sur l'horloge tokio locale. Passée ⇒
+                // départ immédiat ; bornée à 24 h par sécurité.
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs_f64())
+                    .unwrap_or(0.0);
+                let delay = (at - now).clamp(0.0, 86_400.0);
+                self.start_deadline =
+                    Some(tokio::time::Instant::now() + Duration::from_secs_f64(delay));
+                info!(dans_secondes = delay, "départ synchronisé programmé");
             }
             Event::Seeked { seconds } => {
                 if let Err(err) = self.backend.seek(*seconds) {
@@ -259,10 +279,17 @@ impl<B: PlayerBackend> Player<B> {
     /// Boucle du service : événements du bus + tick périodique.
     pub async fn run(mut self) {
         let mut events = self.bus.subscribe();
+        // Comble le trou entre la création du player et cet abonnement :
+        // tout événement émis entre-temps est déjà reflété dans l'état.
+        let snapshot = self.bus.snapshot();
+        self.resync(&snapshot);
         let mut tick = tokio::time::interval(Duration::from_millis(200));
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         info!(media_root = %self.media_root.display(), "player démarré");
         loop {
+            // Copie locale : le garde du select ne peut pas emprunter self
+            // pendant que les autres branches le mutent.
+            let deadline = self.start_deadline;
             tokio::select! {
                 received = events.recv() => match received {
                     Ok(event) => self.handle_event(&event),
@@ -274,6 +301,15 @@ impl<B: PlayerBackend> Player<B> {
                     Err(broadcast::error::RecvError::Closed) => break,
                 },
                 _ = tick.tick() => self.pump(),
+                // Départ synchronisé : à l'échéance, Play via le bus (tous
+                // les abonnés voient le même TransportChanged).
+                () = tokio::time::sleep_until(deadline.unwrap_or_else(tokio::time::Instant::now)),
+                    if deadline.is_some() =>
+                {
+                    self.start_deadline = None;
+                    info!("départ synchronisé : lecture");
+                    let _ = self.bus.try_send(Source::Internal, Command::Play);
+                }
             }
         }
         info!("player arrêté");
@@ -506,6 +542,55 @@ mod tests {
         assert!(player.backend.position_seconds().expect("pos") < 1.0);
     }
 
+    /// Synchro niveau 1 : arm fige en pause à 0, startAt lance la lecture
+    /// à l'échéance — les tolérances sont larges (runners CI lents).
+    #[tokio::test]
+    async fn sync_arm_then_start_at_launches_on_time() {
+        let bus = Bus::new(32, 32);
+        let handle = bus.handle();
+        let backend = MemoryBackend::new(10.0, false);
+        let player = Player::new(backend, handle.clone(), "/tmp/media");
+        tokio::spawn(bus.run());
+        tokio::spawn(player.run());
+        // Laisse les deux tâches démarrer : l'abonnement du player doit
+        // précéder les commandes (les send mpsc ne cèdent pas la main).
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        assert!(
+            handle
+                .send(
+                    Source::Http,
+                    Command::Load {
+                        path: "a.mp4".into()
+                    }
+                )
+                .await
+        );
+        assert!(handle.send(Source::Http, Command::SyncArm).await);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("horloge")
+            .as_secs_f64();
+        assert!(
+            handle
+                .send(Source::Http, Command::SyncStartAt { at: now + 0.6 })
+                .await
+        );
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(
+            handle.snapshot().player.transport,
+            Transport::Paused,
+            "armé : toujours en pause avant l'échéance"
+        );
+        tokio::time::sleep(Duration::from_millis(900)).await;
+        assert_eq!(
+            handle.snapshot().player.transport,
+            Transport::Playing,
+            "parti à l'échéance"
+        );
+    }
+
     #[test]
     fn gapless_hint_follows_loop_mode() {
         let (mut bus, mut player) = setup();
@@ -644,12 +729,10 @@ mod tests {
         let mut player = Player::new(backend, handle, "/nulle/part");
         // …mais une capture ou un flux réseau n'est pas un fichier.
         for src in ["capture://0", "rtsp://10.0.0.5/cam", "ndi://Régie"] {
-            player.handle_event(&Event::MediaLoaded {
-                path: (*src).into(),
-            });
+            player.handle_event(&Event::MediaLoaded { path: src.into() });
             assert_eq!(
                 player.backend.loaded_path(),
-                Some(Path::new(*src)),
+                Some(Path::new(src)),
                 "source {src} transmise telle quelle au backend"
             );
         }

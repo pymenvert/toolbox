@@ -194,6 +194,13 @@ pub fn map_message(addr: &str, args: &[OscType]) -> Result<Command, MapError> {
             .map(|name| Command::MappingLoad { name })
             .ok_or_else(|| bad("attendu : nom (string)")),
         "/pattern" => parse_pattern(args).ok_or_else(|| bad("attendu : grid|checker|corners|off")),
+        "/sync/arm" => Ok(Command::SyncArm),
+        // camelCase du brief + variante snake_case, tolérés tous les deux.
+        "/sync/startAt" | "/sync/start_at" => double_arg(args, 0)
+            .map(|at| Command::SyncStartAt { at })
+            .ok_or_else(|| {
+                bad("attendu : heure Unix en secondes (double de préférence — un float perd la précision)")
+            }),
         "/preset/save" => string_arg(args, 0)
             .map(|name| Command::PresetSave { name })
             .ok_or_else(|| bad("attendu : nom (string)")),
@@ -309,6 +316,18 @@ fn bool_arg(args: &[OscType], index: usize) -> Option<bool> {
             1 => Some(true),
             _ => None,
         },
+    }
+}
+
+/// Flottant double précision : indispensable pour les timestamps Unix
+/// (un float 32 bits n'a plus la seconde près en 2026).
+fn double_arg(args: &[OscType], index: usize) -> Option<f64> {
+    match args.get(index)? {
+        OscType::Double(d) => Some(*d),
+        OscType::Float(f) => Some(f64::from(*f)),
+        OscType::Int(i) => Some(f64::from(*i)),
+        OscType::Long(l) => Some(*l as f64),
+        _ => None,
     }
 }
 
@@ -524,6 +543,26 @@ mod tests {
         // Argument manquant : erreur propre, pas de panique.
         assert!(matches!(
             map_message("/mapping/save", &[]),
+            Err(MapError::BadArguments { .. })
+        ));
+    }
+
+    #[test]
+    fn sync_addresses_map_with_double_precision() {
+        assert_eq!(map_message("/sync/arm", &[]), Ok(Command::SyncArm));
+        // Le timestamp doit garder sa précision : double conservé tel quel.
+        let at = 1_783_082_130.125_f64;
+        assert_eq!(
+            map_message("/sync/startAt", &[OscType::Double(at)]),
+            Ok(Command::SyncStartAt { at })
+        );
+        // Variante snake_case et types tolérés.
+        assert!(matches!(
+            map_message("/sync/start_at", &[OscType::Long(1_783_082_130)]),
+            Ok(Command::SyncStartAt { .. })
+        ));
+        assert!(matches!(
+            map_message("/sync/startAt", &[]),
             Err(MapError::BadArguments { .. })
         ));
     }

@@ -70,6 +70,8 @@ pub enum TestPattern {
 /// | `set_test_pattern` | `/pattern <name|off>`        |
 /// | `preset_save`      | `/preset/save <name>`        |
 /// | `preset_load`      | `/preset/load <name>`        |
+/// | `sync_arm`         | `/sync/arm`                  |
+/// | `sync_start_at`    | `/sync/startAt <unix f64>`   |
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case")]
 pub enum Command {
@@ -150,6 +152,14 @@ pub enum Command {
     },
     PresetLoad {
         name: String,
+    },
+    /// Arme la synchro multi-node : média prêt, position 0, en pause.
+    /// (`/sync/arm` — envoyé à tous les nodes avant un départ commun.)
+    SyncArm,
+    /// Départ synchronisé : lecture à l'heure Unix `at` (secondes, horloge
+    /// système — les nodes doivent partager NTP). Passée → départ immédiat.
+    SyncStartAt {
+        at: f64,
     },
 }
 
@@ -316,6 +326,14 @@ mod tests {
                 })
                 .expect("ser"),
                 r#"{"cmd":"mapping_load","name":"salon"}"#,
+            ),
+            (
+                serde_json::to_string(&Command::SyncArm).expect("ser"),
+                r#"{"cmd":"sync_arm"}"#,
+            ),
+            (
+                serde_json::to_string(&Command::SyncStartAt { at: 1234.5 }).expect("ser"),
+                r#"{"cmd":"sync_start_at","at":1234.5}"#,
             ),
         ];
         for (got, want) in cases {

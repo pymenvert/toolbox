@@ -2874,6 +2874,7 @@ dependencies = [
  "gstreamer-app",
  "gstreamer-video",
  "tokio",
+ "toolbox-core",
  "toolbox-engine",
  "tracing",
 ]
