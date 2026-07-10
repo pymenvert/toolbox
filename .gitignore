@@ -14,3 +14,5 @@ webui/node_modules/
 webui/dist/
 # Outillage local des sessions Claude Code (launch.json…).
 .claude/
+# Console lumieres persistee par le node (page Lumieres).
+lumieres.json
