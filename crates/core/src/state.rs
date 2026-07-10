@@ -462,6 +462,18 @@ pub enum Event {
         name: String,
         seconds: f32,
     },
+    /// Cue demandée (OSC/MIDI/cue) : le séquenceur (abonné) la joue.
+    CueDemandee {
+        name: String,
+    },
+    /// Scène lumières demandée : la console (abonnée) la rappelle.
+    DmxSceneDemandee {
+        name: String,
+    },
+    /// Chaser lumières demandé (`None` = stop) : la console applique.
+    DmxChaserDemande {
+        name: Option<String>,
+    },
     /// Départ synchronisé programmé : le player lancera la lecture à `at`
     /// (heure Unix en secondes).
     SyncScheduled {
@@ -750,6 +762,11 @@ impl NodeState {
                 self.test_pattern = *pattern;
                 Ok(vec![Event::TestPatternChanged { pattern: *pattern }])
             }
+            // Relais purs : l'état ne change pas, les services abonnés
+            // (séquenceur, console lumières) réagissent à l'événement.
+            Command::CueGo { name } => Ok(vec![Event::CueDemandee { name: name.clone() }]),
+            Command::DmxScene { name } => Ok(vec![Event::DmxSceneDemandee { name: name.clone() }]),
+            Command::DmxChaser { name } => Ok(vec![Event::DmxChaserDemande { name: name.clone() }]),
             Command::SyncArm => {
                 if self.player.media.is_none() {
                     return Err(CoreError::InvalidCommand(

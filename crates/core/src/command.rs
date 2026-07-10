@@ -204,6 +204,20 @@ pub enum Command {
         name: String,
         seconds: f32,
     },
+    /// Déclenche la cue `name` du séquenceur (OSC `/cue/go`, bindings MIDI).
+    /// L'état ne change pas ici : le séquenceur (abonné) joue la cue.
+    CueGo {
+        name: String,
+    },
+    /// Rappelle la scène lumières `name` (OSC `/dmx/scene`, MIDI, cues).
+    /// La console lumières (abonnée) applique.
+    DmxScene {
+        name: String,
+    },
+    /// Lance le chaser lumières `name` — ou l'arrête (`None`).
+    DmxChaser {
+        name: Option<String>,
+    },
     /// Arme la synchro multi-node : média prêt, position 0, en pause.
     /// (`/sync/arm` — envoyé à tous les nodes avant un départ commun.)
     SyncArm,

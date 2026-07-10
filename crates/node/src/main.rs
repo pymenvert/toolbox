@@ -266,6 +266,7 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
                 shutdown_rx.clone(),
                 toolbox_artnet::service(
                     std::path::PathBuf::from("lumieres.json"),
+                    handle.clone(),
                     cmd_rx,
                     etat_tx,
                     actif_rx,

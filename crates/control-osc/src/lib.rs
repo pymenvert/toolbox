@@ -254,6 +254,10 @@ pub fn event_to_osc(event: &toolbox_core::Event) -> Option<OscMessage> {
             "/mapping/fade",
             vec![OscType::String(name.clone()), OscType::Float(*seconds)],
         ),
+        Event::CueDemandee { name } => message("/cue/go", vec![OscType::String(name.clone())]),
+        Event::DmxSceneDemandee { name } => {
+            message("/dmx/scene", vec![OscType::String(name.clone())])
+        }
         Event::BlendingChanged { blending } => message(
             "/blending",
             vec![
@@ -412,6 +416,16 @@ pub fn map_message(addr: &str, args: &[OscType]) -> Result<Command, MapError> {
         "/preset/load" => string_arg(args, 0)
             .map(|name| Command::PresetLoad { name })
             .ok_or_else(|| bad("attendu : nom (string)")),
+        "/cue/go" => string_arg(args, 0)
+            .map(|name| Command::CueGo { name })
+            .ok_or_else(|| bad("attendu : nom de cue (string)")),
+        "/dmx/scene" => string_arg(args, 0)
+            .map(|name| Command::DmxScene { name })
+            .ok_or_else(|| bad("attendu : nom de scène (string)")),
+        // Sans argument : stop du chaser en cours.
+        "/dmx/chaser" => Ok(Command::DmxChaser {
+            name: string_arg(args, 0),
+        }),
         "/preset/fade" => match (string_arg(args, 0), float_arg(args, 1)) {
             (Some(name), Some(seconds)) => Ok(Command::PresetFade { name, seconds }),
             _ => Err(bad("attendu : nom (string) puis durée en secondes (float)")),

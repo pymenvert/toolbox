@@ -5,6 +5,12 @@
 
 ## [Non publié]
 
+- **Slots intelligents** : les cues gagnent les **jours de la semaine**
+  (« ven sam à 20:00 »), les actions **lumières** (rappel de scène DMX,
+  chaser start/stop) et le déclenchement **OSC** (`/cue/go nom`) et
+  **MIDI** (binding `{cmd = "cue_go", name = "…"}`). Les scènes et
+  chasers lumières sont aussi pilotables directement en OSC/MIDI
+  (`/dmx/scene`, `/dmx/chaser`) — tout le vocabulaire passe par le bus.
 - **Passthrough + état de démarrage** : bouton « Faire de l'état actuel
   l'état de démarrage » (onglet Presets) — mapping, couleur, effets,
   source et lecture retrouvés à CHAQUE lancement (`demarrage.json`, prime

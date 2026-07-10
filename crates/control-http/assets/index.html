@@ -579,6 +579,9 @@
         <input type="time" id="cueHeure" value="20:00" style="display:none;width:110px">
         <input type="number" id="cueApres" value="5" min="0" step="0.5" title="Secondes apr&egrave;s la pr&eacute;c&eacute;dente" style="display:none;width:80px">
       </div>
+      <div class="presetRow" id="cueJours" style="display:none;gap:4px">
+        <span class="muted" style="font-size:.85em">Jours :</span>
+      </div>
       <ul class="plist" id="cueActions"></ul>
       <div class="presetRow">
         <select id="cueActType" style="width:170px">
@@ -589,6 +592,8 @@
           <option value="preset">Charger un preset</option>
           <option value="fade">Fondu vers un preset</option>
           <option value="pattern">Mire de test</option>
+          <option value="dmxscene">Sc&egrave;ne lumi&egrave;res</option>
+          <option value="dmxchaser">Chaser lumi&egrave;res</option>
         </select>
         <select id="cueActMedia" style="flex:1;display:none"></select>
         <select id="cueActPreset" style="flex:1;display:none"></select>
@@ -597,6 +602,7 @@
           <option value="grid">Grille</option><option value="checker">Damier</option>
           <option value="corners">Coins</option><option value="">&Eacute;teindre la mire</option>
         </select>
+        <select id="cueActDmx" style="flex:1;display:none"></select>
         <button id="cueActAjoute" class="mini">+ action</button>
       </div>
       <div class="presetRow">
@@ -1778,10 +1784,15 @@ async function loadCues() {
   try { cuesEtat = await api("/api/cues"); } catch (e) { return; }
   renderCues();
 }
+const nomsJours = ["lun", "mar", "mer", "jeu", "ven", "sam", "dim"];
 function libelleDecl(d) {
-  if (d.type === "heure") return "🕗 tous les jours à " + String(d.hh).padStart(2, "0") + ":" + String(d.mm).padStart(2, "0");
+  if (d.type === "heure") {
+    const quand = String(d.hh).padStart(2, "0") + ":" + String(d.mm).padStart(2, "0");
+    const jours = (d.jours && d.jours.length) ? d.jours.map(j => nomsJours[j]).join(" ") : "tous les jours";
+    return "🕗 " + jours + " à " + quand;
+  }
   if (d.type === "apres") return "⤷ " + d.secondes + " s après la précédente";
-  return "GO manuel";
+  return "GO manuel · OSC /cue/go · MIDI cue_go";
 }
 function libelleAction(a) {
   switch (a.cmd) {
@@ -1792,9 +1803,24 @@ function libelleAction(a) {
     case "preset_load": return "Preset " + a.name;
     case "preset_fade": return "Fondu → " + a.name + " (" + a.seconds + " s)";
     case "set_test_pattern": return a.pattern ? "Mire " + a.pattern : "Mire éteinte";
+    case "dmx_scene": return "💡 Scène " + a.name;
+    case "dmx_chaser": return a.name ? "💡 Chaser " + a.name : "💡 Stop chaser";
     default: return a.cmd;
   }
 }
+/* Cases à cocher des jours de semaine (créées une fois). */
+(function initJours() {
+  const zone = $("#cueJours");
+  nomsJours.forEach((nom, j) => {
+    const lab = document.createElement("label");
+    lab.className = "chk";
+    lab.style.cssText = "font-size:12px;gap:3px";
+    const cb = document.createElement("input");
+    cb.type = "checkbox"; cb.dataset.jour = j;
+    lab.appendChild(cb); lab.appendChild(document.createTextNode(nom));
+    zone.appendChild(lab);
+  });
+})();
 function renderCues() {
   if (!cuesEtat) return;
   const statut = $("#cueStatut");
@@ -1840,12 +1866,13 @@ function renderCueActionsBuilder() {
     ul.appendChild(li);
   });
 }
-function majChampsAction() {
+async function majChampsAction() {
   const type = $("#cueActType").value;
   $("#cueActMedia").style.display = type === "load" ? "block" : "none";
   $("#cueActPreset").style.display = (type === "preset" || type === "fade") ? "block" : "none";
   $("#cueActFondu").style.display = type === "fade" ? "block" : "none";
   $("#cueActPattern").style.display = type === "pattern" ? "block" : "none";
+  $("#cueActDmx").style.display = (type === "dmxscene" || type === "dmxchaser") ? "block" : "none";
   if (type === "load") {
     const sel = $("#cueActMedia"); sel.innerHTML = "";
     mediaList.forEach(m => { const o = document.createElement("option"); o.value = o.textContent = m.name; sel.appendChild(o); });
@@ -1854,11 +1881,26 @@ function majChampsAction() {
     const sel = $("#cueActPreset"); sel.innerHTML = "";
     presets.forEach(n => { const o = document.createElement("option"); o.value = o.textContent = n; sel.appendChild(o); });
   }
+  if (type === "dmxscene" || type === "dmxchaser") {
+    const sel = $("#cueActDmx"); sel.innerHTML = "";
+    try {
+      const etatDmx = await api("/api/dmx");
+      const noms = type === "dmxscene" ? Object.keys(etatDmx.scenes || {})
+        : (etatDmx.chasers || []).map(c => c.nom);
+      noms.forEach(n => { const o = document.createElement("option"); o.value = o.textContent = n; sel.appendChild(o); });
+      if (type === "dmxchaser") {
+        const o = document.createElement("option"); o.value = ""; o.textContent = "— stop du chaser —";
+        sel.appendChild(o);
+      }
+      if (!sel.options.length) { const o = document.createElement("option"); o.value = ""; o.textContent = "(rien dans la page Lumières)"; sel.appendChild(o); }
+    } catch (e) {}
+  }
 }
 $("#cueActType").addEventListener("change", majChampsAction);
 $("#cueDecl").addEventListener("change", () => {
   $("#cueHeure").style.display = $("#cueDecl").value === "heure" ? "block" : "none";
   $("#cueApres").style.display = $("#cueDecl").value === "apres" ? "block" : "none";
+  $("#cueJours").style.display = $("#cueDecl").value === "heure" ? "flex" : "none";
 });
 $("#cueActAjoute").addEventListener("click", () => {
   const type = $("#cueActType").value;
@@ -1870,6 +1912,8 @@ $("#cueActAjoute").addEventListener("click", () => {
   if (type === "preset") { const n = $("#cueActPreset").value; if (!n) { toast("Aucun preset", "err"); return; } action = { cmd: "preset_load", name: n }; }
   if (type === "fade") { const n = $("#cueActPreset").value; if (!n) { toast("Aucun preset", "err"); return; } action = { cmd: "preset_fade", name: n, seconds: +$("#cueActFondu").value || 2 }; }
   if (type === "pattern") { const p = $("#cueActPattern").value; action = { cmd: "set_test_pattern", pattern: p || null }; }
+  if (type === "dmxscene") { const n = $("#cueActDmx").value; if (!n) { toast("Aucune scène lumières", "err"); return; } action = { cmd: "dmx_scene", name: n }; }
+  if (type === "dmxchaser") { const n = $("#cueActDmx").value; action = { cmd: "dmx_chaser", name: n || null }; }
   if (action) { cueActionsBuilder.push(action); renderCueActionsBuilder(); }
 });
 $("#cueSave").addEventListener("click", async () => {
@@ -1879,7 +1923,8 @@ $("#cueSave").addEventListener("click", async () => {
   let declencheur = { type: "manuel" };
   if ($("#cueDecl").value === "heure") {
     const [hh, mm] = $("#cueHeure").value.split(":").map(Number);
-    declencheur = { type: "heure", hh: hh || 0, mm: mm || 0 };
+    const jours = [...$$("#cueJours input[data-jour]")].filter(c => c.checked).map(c => +c.dataset.jour);
+    declencheur = { type: "heure", hh: hh || 0, mm: mm || 0, jours: jours };
   } else if ($("#cueDecl").value === "apres") {
     declencheur = { type: "apres", secondes: Math.max(0, +$("#cueApres").value || 0) };
   }

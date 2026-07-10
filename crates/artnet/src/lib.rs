@@ -392,6 +392,7 @@ pub fn trames_de_sortie(etat: &EtatLumieres, t_chaser_ms: u64) -> BTreeMap<u16, 
 /// socket ; l'édition reste possible pendant ce temps.
 pub async fn service(
     chemin: std::path::PathBuf,
+    bus: toolbox_core::BusHandle,
     mut commandes: mpsc::Receiver<CommandeLumieres>,
     etat_tx: watch::Sender<EtatLumieres>,
     mut actif: watch::Receiver<bool>,
@@ -399,6 +400,9 @@ pub async fn service(
 ) {
     let mut etat = EtatLumieres::load(&chemin).unwrap_or_default();
     etat_tx.send_replace(etat.clone());
+    // Scènes et chasers déclenchables par le bus : cues du séquenceur,
+    // OSC /dmx/scene, bindings MIDI — même vocabulaire partout.
+    let mut evenements = bus.subscribe();
     let mut socket: Option<tokio::net::UdpSocket> = None;
     let mut tick = tokio::time::interval(std::time::Duration::from_millis(33));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -425,6 +429,26 @@ pub async fn service(
                     }
                 }
                 etat_tx.send_replace(etat.clone());
+            }
+            recu = evenements.recv() => {
+                let commande = match recu {
+                    Ok(toolbox_core::Event::DmxSceneDemandee { name }) => {
+                        Some(CommandeLumieres::SceneRappelle { nom: name })
+                    }
+                    Ok(toolbox_core::Event::DmxChaserDemande { name: Some(name) }) => {
+                        chaser_depart = tokio::time::Instant::now();
+                        Some(CommandeLumieres::ChaserDemarre { nom: name })
+                    }
+                    Ok(toolbox_core::Event::DmxChaserDemande { name: None }) => {
+                        Some(CommandeLumieres::ChaserArrete)
+                    }
+                    Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => None,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                };
+                if let Some(commande) = commande {
+                    appliquer(&mut etat, commande);
+                    etat_tx.send_replace(etat.clone());
+                }
             }
             _ = tick.tick(), if *actif.borrow() && !etat.faders.is_empty() => {
                 if socket.is_none() {
@@ -644,12 +668,16 @@ mod tests {
         let cible = recepteur.local_addr().expect("addr").to_string();
         let dir = tempfile::tempdir().expect("tempdir");
 
+        let bus = toolbox_core::Bus::new(8, 32);
+        let handle = bus.handle();
+        tokio::spawn(bus.run());
         let (cmd_tx, cmd_rx) = mpsc::channel(32);
         let (etat_tx, _etat_rx) = watch::channel(EtatLumieres::default());
         let (actif_tx, actif_rx) = watch::channel(true);
         let (_stop_tx, stop_rx) = watch::channel(false);
         tokio::spawn(service(
             dir.path().join("lumieres.json"),
+            handle,
             cmd_rx,
             etat_tx,
             actif_rx,

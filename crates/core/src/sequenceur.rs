@@ -21,12 +21,23 @@ use crate::{BusHandle, Command, Source};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Declencheur {
-    /// À la main (bouton GO, OSC, API).
+    /// À la main (bouton GO, OSC `/cue/go`, MIDI via `cue_go`).
     Manuel,
-    /// Tous les jours à HH:MM (heure locale de la machine).
-    Heure { hh: u8, mm: u8 },
+    /// À HH:MM (heure locale), les jours listés — `jours` vide = tous les
+    /// jours (0 = lundi … 6 = dimanche).
+    Heure {
+        hh: u8,
+        mm: u8,
+        #[serde(default)]
+        jours: Vec<u8>,
+    },
     /// N secondes après la fin de la cue précédente dans la liste.
     Apres { secondes: f64 },
+}
+
+/// Le déclencheur horaire vise-t-il ce jour de semaine (0 = lundi) ?
+pub fn jour_vise(jours: &[u8], jour_semaine: u8) -> bool {
+    jours.is_empty() || jours.contains(&jour_semaine)
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -236,6 +247,8 @@ pub async fn service(
         std::collections::HashSet::new();
     let mut horaire = tokio::time::interval(std::time::Duration::from_secs(10));
     horaire.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    // Les cues sont aussi déclenchables par le bus (OSC /cue/go, MIDI).
+    let mut evenements = bus.subscribe();
     info!("séquenceur prêt");
     loop {
         // Échéance de l'enchaînement (ou très loin s'il n'y en a pas).
@@ -257,13 +270,18 @@ pub async fn service(
             _ = horaire.tick() => {
                 let (hh, mm) = heure_locale_hh_mm();
                 let jour = jour_local();
+                // Jour de semaine local, 0 = lundi (l'époque Unix était un jeudi).
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                let jour_semaine = ((jour.rem_euclid(7) + 3) % 7) as u8;
                 lancees_du_jour.retain(|(_, j)| *j == jour);
                 let a_lancer: Vec<usize> = etat
                     .cues
                     .iter()
                     .enumerate()
                     .filter(|(_, cue)| {
-                        matches!(cue.declencheur, Declencheur::Heure { hh: h, mm: m } if h == hh && m == mm)
+                        matches!(&cue.declencheur,
+                            Declencheur::Heure { hh: h, mm: m, jours }
+                                if *h == hh && *m == mm && jour_vise(jours, jour_semaine))
                             && !lancees_du_jour.contains(&(cue.nom.clone(), jour))
                     })
                     .map(|(i, _)| i)
@@ -276,6 +294,25 @@ pub async fn service(
                     chaine = prochaine_chaine(&etat, index);
                 }
                 publier(&etat_tx, &etat, chaine.as_ref());
+            }
+            recu = evenements.recv() => {
+                match recu {
+                    Ok(crate::Event::CueDemandee { name }) => {
+                        if let Some(index) = etat.cues.iter().position(|c| c.nom == name) {
+                            // Le déclenchement externe remplace l'enchaînement.
+                            let cue = etat.cues[index].clone();
+                            jouer(&bus, &cue).await;
+                            etat.derniere = Some(cue.nom.clone());
+                            chaine = prochaine_chaine(&etat, index);
+                            publier(&etat_tx, &etat, chaine.as_ref());
+                        } else {
+                            warn!(%name, "cue demandée inconnue");
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
             }
             commande = commandes.recv() => {
                 let Some(commande) = commande else { break };
@@ -345,6 +382,18 @@ fn publier(
 mod tests {
     use super::*;
     use crate::Bus;
+
+    #[test]
+    fn les_jours_de_semaine_filtrent_le_declencheur() {
+        // Vide = tous les jours.
+        assert!(jour_vise(&[], 0));
+        assert!(jour_vise(&[], 6));
+        // Sinon, seulement les jours listés (0 = lundi).
+        assert!(jour_vise(&[4, 5], 4));
+        assert!(!jour_vise(&[4, 5], 0));
+        // OSC/MIDI : une cue est déclenchable par le bus (commande cue_go),
+        // vérifié par le test de bout en bout ci-dessous via CueDemandee.
+    }
 
     #[test]
     fn edition_des_cues() {
@@ -452,7 +501,11 @@ mod tests {
             &mut etat,
             &CommandeSequenceur::CueEnregistre {
                 nom: "show".into(),
-                declencheur: Declencheur::Heure { hh: 20, mm: 0 },
+                declencheur: Declencheur::Heure {
+                    hh: 20,
+                    mm: 0,
+                    jours: vec![4, 5], // vendredi et samedi
+                },
                 actions: vec![
                     Command::Load {
                         path: "intro.mp4".into(),
