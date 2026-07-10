@@ -68,6 +68,7 @@ pub enum TestPattern {
 /// | `set_mapping_enabled` | `/mapping/enabled <0|1>`  |
 /// | `mapping_save`     | `/mapping/save <name>`       |
 /// | `mapping_load`     | `/mapping/load <name>`       |
+/// | `mapping_fade`     | `/mapping/fade <name> <s>`   |
 /// | `set_test_pattern` | `/pattern <name|off>`        |
 /// | `preset_save`      | `/preset/save <name>`        |
 /// | `preset_load`      | `/preset/load <name>`        |
@@ -149,6 +150,13 @@ pub enum Command {
     /// La lecture en cours n'est pas interrompue.
     MappingLoad {
         name: String,
+    },
+    /// Fondu vers le preset de mapping `name` en `seconds` secondes : coins
+    /// et recadrage glissent, rotation/miroirs/bypass basculent à la fin.
+    /// Couleur, effets, volume et lecture ne bougent pas.
+    MappingFade {
+        name: String,
+        seconds: f32,
     },
     /// Affiche une mire de test (`None` = retour au média).
     SetTestPattern {
@@ -365,6 +373,14 @@ mod tests {
                 })
                 .expect("ser"),
                 r#"{"cmd":"preset_fade","name":"scene_02","seconds":2.5}"#,
+            ),
+            (
+                serde_json::to_string(&Command::MappingFade {
+                    name: "salon".into(),
+                    seconds: 1.5,
+                })
+                .expect("ser"),
+                r#"{"cmd":"mapping_fade","name":"salon","seconds":1.5}"#,
             ),
         ];
         for (got, want) in cases {

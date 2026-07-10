@@ -18,7 +18,7 @@ use tracing::{info, warn};
 
 use crate::bus::{BusHandle, Source};
 use crate::command::{ColorParam, Command};
-use crate::preset::PresetStore;
+use crate::preset::{MappingStore, PresetStore};
 use crate::state::{EffectParam, Event, NodeState};
 
 /// Cadence d'interpolation (~30 pas par seconde).
@@ -162,10 +162,15 @@ struct Fade {
     duration: Duration,
 }
 
-/// Boucle du service : attend les [`Event::PresetFadeStarted`] et mène
-/// chaque fondu à ~30 pas/s. Un nouveau fondu remplace l'ancien en repartant
-/// de l'état courant.
-pub async fn run(bus: BusHandle, store: PresetStore, mut shutdown: watch::Receiver<bool>) {
+/// Boucle du service : attend les [`Event::PresetFadeStarted`] et
+/// [`Event::MappingFadeStarted`], et mène chaque fondu à ~30 pas/s. Un
+/// nouveau fondu remplace l'ancien en repartant de l'état courant.
+pub async fn run(
+    bus: BusHandle,
+    store: PresetStore,
+    mappings: MappingStore,
+    mut shutdown: watch::Receiver<bool>,
+) {
     let mut events = bus.subscribe();
     let mut ticker = tokio::time::interval(TICK);
     ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -189,6 +194,24 @@ pub async fn run(bus: BusHandle, store: PresetStore, mut shutdown: watch::Receiv
                     // Le bus a déjà validé le preset ; un échec ici est une
                     // course rare (fichier supprimé entre-temps).
                     Err(err) => warn!(%name, %err, "fondu abandonné : preset illisible"),
+                },
+                // Fondu du mapping seul : la cible est l'état courant avec
+                // le mapping remplacé — seul le calage glisse.
+                Ok(Event::MappingFadeStarted { name, seconds }) => match mappings.load(&name) {
+                    Ok(mapping) => {
+                        info!(%name, seconds, "fondu de mapping démarré");
+                        let from = bus.snapshot();
+                        let mut to = from.clone();
+                        to.mapping = mapping;
+                        current = Some(Fade {
+                            from,
+                            to,
+                            started: Instant::now(),
+                            duration: Duration::from_secs_f32(seconds),
+                        });
+                        ticker.reset();
+                    }
+                    Err(err) => warn!(%name, %err, "fondu abandonné : mapping illisible"),
                 },
                 Ok(_) => {}
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(missed)) => {
@@ -287,11 +310,15 @@ mod tests {
     async fn fade_reaches_the_target_preset() {
         let dir = tempfile::tempdir().expect("tempdir");
         let store = PresetStore::open(dir.path().join("presets")).expect("open");
-        let bus = Bus::new(256, 1024).with_presets(store.clone());
+        let mappings =
+            MappingStore::open(dir.path().join("presets").join("mapping")).expect("open");
+        let bus = Bus::new(256, 1024)
+            .with_presets(store.clone())
+            .with_mapping_presets(mappings.clone());
         let handle = bus.handle();
         tokio::spawn(bus.run());
         let (_shutdown_tx, shutdown_rx) = watch::channel(false);
-        tokio::spawn(run(handle.clone(), store, shutdown_rx));
+        tokio::spawn(run(handle.clone(), store, mappings, shutdown_rx));
         // Laisser le fader s'abonner avant d'envoyer le fondu (course
         // broadcast déjà rencontrée sur le player).
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -358,6 +385,86 @@ mod tests {
             assert!(
                 Instant::now() < deadline,
                 "fondu jamais terminé : {state:?}"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    /// Le fondu de mapping ne fait glisser QUE le mapping : la couleur et le
+    /// volume restent en place.
+    #[tokio::test]
+    async fn mapping_fade_moves_only_the_mapping() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = PresetStore::open(dir.path().join("presets")).expect("open");
+        let mappings =
+            MappingStore::open(dir.path().join("presets").join("mapping")).expect("open");
+        let bus = Bus::new(256, 1024)
+            .with_presets(store.clone())
+            .with_mapping_presets(mappings.clone());
+        let handle = bus.handle();
+        tokio::spawn(bus.run());
+        let (_shutdown_tx, shutdown_rx) = watch::channel(false);
+        tokio::spawn(run(handle.clone(), store, mappings, shutdown_rx));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // Mapping cible : coin 2 déplacé, sauvegardé seul.
+        handle
+            .send(
+                Source::Http,
+                Command::CornerSet {
+                    index: 2,
+                    x: 0.7,
+                    y: 0.8,
+                },
+            )
+            .await;
+        handle
+            .send(
+                Source::Http,
+                Command::MappingSave {
+                    name: "salon".into(),
+                },
+            )
+            .await;
+        // État de départ : mapping neutre, couleur et volume personnalisés.
+        handle.send(Source::Http, Command::MappingReset).await;
+        handle
+            .send(Source::Http, Command::SetVolume { volume: 0.6 })
+            .await;
+        handle
+            .send(
+                Source::Http,
+                Command::ColorSet {
+                    param: ColorParam::Brightness,
+                    value: 1.4,
+                },
+            )
+            .await;
+
+        handle
+            .send(
+                Source::Http,
+                Command::MappingFade {
+                    name: "salon".into(),
+                    seconds: 0.15,
+                },
+            )
+            .await;
+
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            let state = handle.snapshot();
+            if (state.mapping.corners[2].x - 0.7).abs() < 1e-5
+                && (state.mapping.corners[2].y - 0.8).abs() < 1e-5
+            {
+                // Couleur et volume n'ont pas bougé.
+                assert!((state.player.volume - 0.6).abs() < 1e-6);
+                assert!((state.color.brightness - 1.4).abs() < 1e-6);
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "fondu de mapping jamais terminé : {state:?}"
             );
             tokio::time::sleep(Duration::from_millis(20)).await;
         }

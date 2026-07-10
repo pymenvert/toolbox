@@ -213,6 +213,29 @@ impl Bus {
                     "aucun dépôt de presets configuré".into(),
                 )),
             },
+            // Même principe que PresetFade, sur le dépôt de mappings.
+            Command::MappingFade { name, seconds } => match mapping_presets {
+                Some(store) => {
+                    if !seconds.is_finite() || *seconds <= 0.0 || *seconds > 60.0 {
+                        Err(crate::error::CoreError::OutOfRange {
+                            param: "fade.seconds",
+                            value: f64::from(*seconds),
+                            min: 0.0,
+                            max: 60.0,
+                        })
+                    } else {
+                        store.load(name).map(|_| {
+                            vec![Event::MappingFadeStarted {
+                                name: name.clone(),
+                                seconds: *seconds,
+                            }]
+                        })
+                    }
+                }
+                None => Err(crate::error::CoreError::InvalidCommand(
+                    "aucun dépôt de presets de mapping configuré".into(),
+                )),
+            },
             Command::MappingSave { name } => match mapping_presets {
                 Some(store) => store
                     .save(name, &state.mapping)

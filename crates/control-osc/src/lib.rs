@@ -12,6 +12,7 @@
 //! `/playlist/prev` `/corner/<0-3> x y` `/rotation 0|90|180|270`
 //! `/flip h v` `/crop l t r b` `/color/<param> f` `/mapping/reset`
 //! `/mapping/enabled 0|1` `/mapping/save nom` `/mapping/load nom`
+//! `/mapping/fade nom secondes`
 //! `/pattern grid|checker|corners|off` `/preset/save nom` `/preset/load nom`
 //! `/preset/fade nom secondes`
 //!
@@ -248,6 +249,10 @@ pub fn event_to_osc(event: &toolbox_core::Event) -> Option<OscMessage> {
             "/preset/fade",
             vec![OscType::String(name.clone()), OscType::Float(*seconds)],
         ),
+        Event::MappingFadeStarted { name, seconds } => message(
+            "/mapping/fade",
+            vec![OscType::String(name.clone()), OscType::Float(*seconds)],
+        ),
         Event::MappingLoaded { name, .. } => {
             message("/mapping/loaded", vec![OscType::String(name.clone())])
         }
@@ -357,6 +362,10 @@ pub fn map_message(addr: &str, args: &[OscType]) -> Result<Command, MapError> {
         "/mapping/load" => string_arg(args, 0)
             .map(|name| Command::MappingLoad { name })
             .ok_or_else(|| bad("attendu : nom (string)")),
+        "/mapping/fade" => match (string_arg(args, 0), float_arg(args, 1)) {
+            (Some(name), Some(seconds)) => Ok(Command::MappingFade { name, seconds }),
+            _ => Err(bad("attendu : nom (string) puis durée en secondes (float)")),
+        },
         "/pattern" => parse_pattern(args).ok_or_else(|| bad("attendu : grid|checker|corners|off")),
         "/sync/arm" => Ok(Command::SyncArm),
         // camelCase du brief + variante snake_case, tolérés tous les deux.
@@ -750,6 +759,16 @@ mod tests {
             map_message("/mapping/load", &[OscType::String("salon".into())]),
             Ok(Command::MappingLoad {
                 name: "salon".into()
+            })
+        );
+        assert_eq!(
+            map_message(
+                "/mapping/fade",
+                &[OscType::String("salon".into()), OscType::Float(1.5)]
+            ),
+            Ok(Command::MappingFade {
+                name: "salon".into(),
+                seconds: 1.5
             })
         );
         // Argument manquant : erreur propre, pas de panique.

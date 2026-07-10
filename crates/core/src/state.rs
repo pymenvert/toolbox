@@ -390,6 +390,12 @@ pub enum Event {
         name: String,
         seconds: f32,
     },
+    /// Un fondu vers le preset de mapping `name` démarre (durée `seconds`).
+    /// Seul le mapping glisse ; couleur, effets et lecture ne bougent pas.
+    MappingFadeStarted {
+        name: String,
+        seconds: f32,
+    },
     /// Départ synchronisé programmé : le player lancera la lecture à `at`
     /// (heure Unix en secondes).
     SyncScheduled {
@@ -653,7 +659,8 @@ impl NodeState {
             | Command::PresetLoad { .. }
             | Command::PresetFade { .. }
             | Command::MappingSave { .. }
-            | Command::MappingLoad { .. } => Err(CoreError::InvalidCommand(
+            | Command::MappingLoad { .. }
+            | Command::MappingFade { .. } => Err(CoreError::InvalidCommand(
                 "les presets sont gérés par le bus (stores sur disque), pas par l'état".into(),
             )),
         }

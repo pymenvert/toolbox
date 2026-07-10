@@ -5,6 +5,10 @@
 
 ## [Non publié]
 
+- **Fondu du mapping seul** : bouton « Fondu » dans la carte Mappings
+  enregistrés (onglet Mapping), commande `mapping_fade`, OSC
+  `/mapping/fade nom secondes` — coins et recadrage glissent vers le
+  calage cible en 2 s, sans toucher couleur, effets, volume ni lecture.
 - **Annonce OSCQuery en mDNS** (`_oscjson._tcp`) : Chataigne découvre le
   node dans son module OSCQuery sans qu'on tape la moindre IP (l'annonce
   suit le module OSC ; vérifiée avec un scanner mDNS local).

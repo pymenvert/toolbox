@@ -158,7 +158,12 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
         spawn_service(
             "fader",
             shutdown_rx.clone(),
-            toolbox_core::fader::run(handle.clone(), presets.clone(), shutdown_rx.clone()),
+            toolbox_core::fader::run(
+                handle.clone(),
+                presets.clone(),
+                mapping_presets.clone(),
+                shutdown_rx.clone(),
+            ),
         ),
     ));
 

@@ -353,9 +353,10 @@
           <div class="presetRow" style="margin-top:8px">
             <select id="mapPresetSelect" style="flex:1;min-width:120px"></select>
             <button id="mapPresetLoad">Charger</button>
+            <button id="mapPresetFade" title="Glisser en douceur vers ce mapping">Fondu</button>
             <button id="mapPresetDelete" class="danger mini" title="Supprimer">&#10005;</button>
           </div>
-          <div class="hint">Enregistre uniquement le mapping (coins, orientation, recadrage) &mdash; pas le m&eacute;dia ni la couleur. Charger n&rsquo;interrompt pas la lecture.</div>
+          <div class="hint">Enregistre uniquement le mapping (coins, orientation, recadrage) &mdash; pas le m&eacute;dia ni la couleur. Charger n&rsquo;interrompt pas la lecture ; &laquo;&nbsp;Fondu&nbsp;&raquo; y glisse en 2&nbsp;s.</div>
         </div>
         <div class="card">
           <h3>Sortie</h3>
@@ -690,6 +691,7 @@ function onEvent(m) {
     case "preset_saved": toast("Preset « " + m.name + " » sauvegardé"); loadPresets(); break;
     case "preset_loaded": toast("Preset « " + m.name + " » chargé"); loadPresets(); break;
     case "preset_fade_started": toast("Fondu vers « " + m.name + " » (" + m.seconds + " s)"); break;
+    case "mapping_fade_started": toast("Fondu du mapping vers « " + m.name + " » (" + m.seconds + " s)"); break;
   }
 }
 
@@ -1068,6 +1070,11 @@ $("#mapPresetLoad").addEventListener("click", () => {
   const name = $("#mapPresetSelect").value;
   if (!name) { toast("Aucun mapping enregistré", "err"); return; }
   sendCmd({ cmd: "mapping_load", name: name });
+});
+$("#mapPresetFade").addEventListener("click", () => {
+  const name = $("#mapPresetSelect").value;
+  if (!name) { toast("Aucun mapping enregistré", "err"); return; }
+  sendCmd({ cmd: "mapping_fade", name: name, seconds: 2 });
 });
 $("#mapPresetDelete").addEventListener("click", async () => {
   const name = $("#mapPresetSelect").value;
