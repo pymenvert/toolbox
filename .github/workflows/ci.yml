@@ -229,6 +229,9 @@ jobs:
           cp "$GST"/bin/*.dll dist/
           cp -r "$GST"/lib/gstreamer-1.0 dist/lib/
           rm -f dist/lib/gstreamer-1.0/*.pdb 2>/dev/null || true
+          # gstpython exige un runtime Python qu'on n'embarque pas : retiré
+          # (sinon warning « module introuvable » à chaque démarrage).
+          rm -f dist/lib/gstreamer-1.0/gstpython.dll
           du -sh dist 2>&1 | tee -a gstwin.log
       - uses: actions/upload-artifact@v4
         with:
