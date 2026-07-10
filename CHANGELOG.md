@@ -5,6 +5,10 @@
 
 ## [Non publié]
 
+- **Téléphone : la barre d'onglets réapparaît**. Sur écran étroit, elle
+  était écrasée à la hauteur de sa barre de défilement (onglets rognés,
+  intapables) — revue mobile complète en 375 px au passage : aucune autre
+  page ne déborde, les logs et le mapping défilent dans leurs conteneurs.
 - **Aperçu partagé** : les requêtes `/api/preview.png` concurrentes
   partagent un seul rendu CPU (cache 250 ms) — plusieurs dashboards
   ouverts ne surchargent plus un Pi (mesuré : 724 ms à froid → 2 ms en

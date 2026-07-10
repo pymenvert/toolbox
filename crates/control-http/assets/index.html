@@ -228,7 +228,9 @@
   @media (max-width: 900px) {
     body { flex-direction: column; }
     nav {
-      width: 100%; min-width: 0; flex-direction: row; align-items: center;
+      /* flex none : sans lui, overflow-y hidden met min-height à 0 et le
+         corps en colonne écrase la barre d'onglets (bug vu en 375 px). */
+      width: 100%; min-width: 0; flex: none; flex-direction: row; align-items: center;
       padding: 8px; overflow-x: auto; overflow-y: hidden;
       border-right: none; border-bottom: 1px solid var(--hairline);
     }
