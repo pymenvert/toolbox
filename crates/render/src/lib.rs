@@ -12,6 +12,7 @@
 //! Sans mire sélectionnée, la sortie est noire (un VP de spectacle n'affiche
 //! rien par défaut) : choisir une mire dans l'onglet Mapping de l'UI web.
 
+pub mod gpu;
 pub mod raster;
 pub mod window;
 

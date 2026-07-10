@@ -42,6 +42,7 @@ logs = "logs"
 enabled = true
 monitor = 0        # index de l'écran cible ; la liste détectée est dans les logs
 fullscreen = false # true = plein écran sans bordure sur l'écran cible
+gpu = true         # rendu par la carte graphique (repli CPU automatique en cas d'échec)
 
 [startup]
 # Mode kiosque (P1.9) : au démarrage, charger un preset et lancer la lecture.

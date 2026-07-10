@@ -8,12 +8,23 @@ license.workspace = true
 [dependencies]
 toolbox-core = { path = "../core" }
 toolbox-engine = { path = "../engine" }
-# Fenêtre native + tampon CPU : aucun GPU ni bibliothèque système requis à la
-# compilation. Le backend GStreamer apportera sa propre chaîne GL plus tard.
+# Fenêtre native. Rendu GPU (wgpu) par défaut, tampon CPU (softbuffer) en
+# secours — aucune bibliothèque système requise à la compilation.
 softbuffer = "0.4"
 winit = "0.30"
+# Sans DX12 : son allocateur (gpu-allocator/d3d12) est cassé avec les
+# versions actuelles du crate windows. Vulkan couvre Windows moderne,
+# Raspberry Pi (V3DV) et Linux ; GL en second ; le peintre CPU reste le
+# repli ultime.
+wgpu = { version = "30", default-features = false, features = ["vulkan", "gles", "wgsl"] }
+pollster = "0.4"
+bytemuck = { version = "1", features = ["derive"] }
 tokio = { workspace = true }
 tracing = { workspace = true }
+
+[dev-dependencies]
+# Validation du shader WGSL en CI, sans GPU (même version que wgpu).
+naga = { version = "30", features = ["wgsl-in"] }
 
 [lints]
 workspace = true

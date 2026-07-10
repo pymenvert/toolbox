@@ -24,6 +24,7 @@ use winit::window::{Fullscreen, Window, WindowId};
 use toolbox_core::{MonitorInfo, NodeState, OutputSettings};
 use toolbox_engine::VideoFrame;
 
+use crate::gpu::GpuPainter;
 use crate::raster::render_frame;
 
 /// Réglages fixes de la fenêtre (les réglages à chaud passent par
@@ -32,6 +33,14 @@ use crate::raster::render_frame;
 pub struct WindowConfig {
     /// Titre de la fenêtre (nom du node).
     pub title: String,
+    /// Rendu par la carte graphique (repli CPU automatique en cas d'échec).
+    pub gpu: bool,
+}
+
+/// Le peintre de la fenêtre : GPU (wgpu) ou CPU (softbuffer, repli).
+enum Painter {
+    Gpu(GpuPainter),
+    Cpu(softbuffer::Surface<Arc<Window>, Arc<Window>>),
 }
 
 /// Les canaux qui relient la fenêtre au reste du node.
@@ -129,7 +138,7 @@ fn run_event_loop(config: WindowConfig, channels: OutputChannels) {
         frames_since: 0,
         fps_window_start: std::time::Instant::now(),
         window: None,
-        surface: None,
+        painter: None,
     };
     if let Err(err) = event_loop.run_app(&mut app) {
         error!(%err, "event loop de la fenêtre de sortie terminé en erreur");
@@ -204,7 +213,7 @@ struct OutputApp {
     frames_since: u32,
     fps_window_start: std::time::Instant,
     window: Option<Arc<Window>>,
-    surface: Option<softbuffer::Surface<Arc<Window>, Arc<Window>>>,
+    painter: Option<Painter>,
 }
 
 impl OutputApp {
@@ -272,35 +281,40 @@ impl OutputApp {
     }
 
     fn redraw(&mut self) {
-        let (Some(window), Some(surface)) = (&self.window, &mut self.surface) else {
+        let (Some(window), Some(painter)) = (&self.window, &mut self.painter) else {
             return;
         };
         let size = window.inner_size();
         let (Some(w), Some(h)) = (NonZeroU32::new(size.width), NonZeroU32::new(size.height)) else {
             return; // fenêtre réduite : rien à peindre
         };
-        if let Err(err) = surface.resize(w, h) {
-            warn!(%err, "surface de sortie non retaillée");
-            return;
-        }
-        // L'emprunt de la surface doit se terminer avant de compter la
-        // frame (le compteur emprunte `self` à son tour).
-        let presented = match surface.buffer_mut() {
-            Ok(mut buffer) => {
-                let snapshot = self.state.borrow().clone();
-                let video = self.video.borrow().clone();
-                render_frame(&snapshot, video.as_ref(), w.get(), h.get(), &mut buffer);
-                match buffer.present() {
-                    Ok(()) => true,
+        let snapshot = self.state.borrow().clone();
+        let video = self.video.borrow().clone();
+        // L'emprunt du peintre doit se terminer avant de compter la frame
+        // (le compteur emprunte `self` à son tour).
+        let presented = match painter {
+            Painter::Gpu(gpu) => gpu.render(&snapshot, video.as_ref(), w.get(), h.get()),
+            Painter::Cpu(surface) => {
+                if let Err(err) = surface.resize(w, h) {
+                    warn!(%err, "surface de sortie non retaillée");
+                    return;
+                }
+                match surface.buffer_mut() {
+                    Ok(mut buffer) => {
+                        render_frame(&snapshot, video.as_ref(), w.get(), h.get(), &mut buffer);
+                        match buffer.present() {
+                            Ok(()) => true,
+                            Err(err) => {
+                                warn!(%err, "frame de sortie non présentée");
+                                false
+                            }
+                        }
+                    }
                     Err(err) => {
-                        warn!(%err, "frame de sortie non présentée");
+                        warn!(%err, "tampon de sortie inaccessible");
                         false
                     }
                 }
-            }
-            Err(err) => {
-                warn!(%err, "tampon de sortie inaccessible");
-                false
             }
         };
         if presented {
@@ -344,25 +358,44 @@ impl ApplicationHandler<Wake> for OutputApp {
                 return;
             }
         };
-        let context = match softbuffer::Context::new(window.clone()) {
-            Ok(context) => context,
-            Err(err) => {
-                error!(%err, "contexte d'affichage indisponible");
-                event_loop.exit();
-                return;
+        // Peintre GPU d'abord (si activé), CPU en secours — la fenêtre
+        // s'ouvre dans tous les cas.
+        let painter = if self.config.gpu {
+            match GpuPainter::new(window.clone()) {
+                Ok(gpu) => Some(Painter::Gpu(gpu)),
+                Err(err) => {
+                    warn!(%err, "rendu GPU indisponible — repli sur le rendu CPU");
+                    None
+                }
+            }
+        } else {
+            info!("rendu GPU désactivé par la config ([output] gpu = false)");
+            None
+        };
+        let painter = match painter {
+            Some(painter) => painter,
+            None => {
+                let context = match softbuffer::Context::new(window.clone()) {
+                    Ok(context) => context,
+                    Err(err) => {
+                        error!(%err, "contexte d'affichage indisponible");
+                        event_loop.exit();
+                        return;
+                    }
+                };
+                match softbuffer::Surface::new(&context, window.clone()) {
+                    Ok(surface) => Painter::Cpu(surface),
+                    Err(err) => {
+                        error!(%err, "surface d'affichage indisponible");
+                        event_loop.exit();
+                        return;
+                    }
+                }
             }
         };
-        match softbuffer::Surface::new(&context, window.clone()) {
-            Ok(surface) => {
-                info!("fenêtre de sortie ouverte (F11 : plein écran)");
-                self.surface = Some(surface);
-                self.window = Some(window);
-            }
-            Err(err) => {
-                error!(%err, "surface d'affichage indisponible");
-                event_loop.exit();
-            }
-        }
+        info!("fenêtre de sortie ouverte (F11 : plein écran)");
+        self.painter = Some(painter);
+        self.window = Some(window);
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: Wake) {

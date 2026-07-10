@@ -228,6 +228,7 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
         Some(toolbox_render::spawn(
             toolbox_render::WindowConfig {
                 title: format!("Toolbox — sortie ({node_name})"),
+                gpu: config.output.gpu,
             },
             toolbox_render::OutputChannels {
                 state: handle.state_watch(),

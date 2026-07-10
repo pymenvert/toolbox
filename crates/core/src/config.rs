@@ -152,6 +152,10 @@ pub struct Output {
     /// Plein écran sans bordure sur l'écran cible. F11 bascule à chaud,
     /// Échap quitte le plein écran.
     pub fullscreen: bool,
+    /// Rendu par la carte graphique (Vulkan/GL). En cas d'échec (pilote
+    /// absent, VM…), repli automatique sur le rendu CPU — `false` force le
+    /// CPU d'emblée.
+    pub gpu: bool,
 }
 
 impl Default for Output {
@@ -160,6 +164,7 @@ impl Default for Output {
             enabled: true,
             monitor: 0,
             fullscreen: false,
+            gpu: true,
         }
     }
 }
@@ -325,12 +330,14 @@ mod tests {
         assert!(cfg.output.enabled);
         assert_eq!(cfg.output.monitor, 0);
         assert!(!cfg.output.fullscreen);
+        assert!(cfg.output.gpu, "GPU par défaut");
 
         let cfg: NodeConfig =
-            toml::from_str("[output]\nmonitor = 1\nfullscreen = true").expect("parse");
+            toml::from_str("[output]\nmonitor = 1\nfullscreen = true\ngpu = false").expect("parse");
         assert!(cfg.output.enabled);
         assert_eq!(cfg.output.monitor, 1);
         assert!(cfg.output.fullscreen);
+        assert!(!cfg.output.gpu);
     }
 
     #[test]
