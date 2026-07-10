@@ -74,6 +74,9 @@ pub struct AppState {
     media: MediaLibrary,
     logs: LogBuffer,
     position: watch::Receiver<PlaybackPosition>,
+    /// Signal d'arrêt : les WebSockets ouverts se ferment dessus, sinon le
+    /// graceful shutdown d'axum attendrait indéfiniment une UI affichée.
+    shutdown: watch::Receiver<bool>,
     started_at: Instant,
     node_name: String,
     version: String,
@@ -88,6 +91,7 @@ impl AppState {
         media: MediaLibrary,
         logs: LogBuffer,
         position: watch::Receiver<PlaybackPosition>,
+        shutdown: watch::Receiver<bool>,
         node_name: String,
         version: String,
     ) -> Self {
@@ -98,6 +102,7 @@ impl AppState {
             media,
             logs,
             position,
+            shutdown,
             started_at: Instant::now(),
             node_name,
             version,
@@ -163,7 +168,7 @@ pub fn router(app: AppState) -> Router {
 pub async fn serve(
     config: HttpConfig,
     app: AppState,
-    mut shutdown: watch::Receiver<bool>,
+    shutdown: watch::Receiver<bool>,
 ) -> Result<(), HttpError> {
     let addr = format!("{}:{}", config.bind, config.port);
     let listener = tokio::net::TcpListener::bind(&addr)
@@ -173,6 +178,16 @@ pub async fn serve(
             source,
         })?;
     info!(%addr, "HTTP démarré — web UI : http://<ip-du-node>:{}/", config.port);
+    serve_on(listener, app, shutdown).await
+}
+
+/// Sert sur un listener déjà lié (séparé de [`serve`] pour tester l'arrêt
+/// propre sur un port éphémère).
+pub async fn serve_on(
+    listener: tokio::net::TcpListener,
+    app: AppState,
+    mut shutdown: watch::Receiver<bool>,
+) -> Result<(), HttpError> {
     axum::serve(listener, router(app))
         .with_graceful_shutdown(async move {
             let _ = shutdown.changed().await;
@@ -359,6 +374,10 @@ async fn ws_events_upgrade(ws: WebSocketUpgrade, State(app): State<AppState>) ->
     ws.on_upgrade(move |socket| ws_events(socket, app))
 }
 
+/// Période du ping serveur : détecte les clients disparus sans FIN (tablette
+/// sortie du WiFi…) au lieu de garder la tâche vivante jusqu'au timeout TCP.
+const WS_PING_PERIOD: std::time::Duration = std::time::Duration::from_secs(20);
+
 /// Canal principal de l'UI : état initial complet, puis chaque événement du
 /// bus, plus la position de lecture. Accepte aussi des commandes entrantes
 /// (JSON identique à `POST /api/command`).
@@ -366,6 +385,10 @@ async fn ws_events(mut socket: WebSocket, app: AppState) {
     let mut events = app.bus.subscribe();
     let mut position = app.position.clone();
     let mut position_alive = true;
+    let mut shutdown = app.shutdown.clone();
+    let mut ping = tokio::time::interval(WS_PING_PERIOD);
+    ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    ping.reset(); // pas de ping immédiat à la connexion
 
     // État initial : l'UI se peint entièrement dès la connexion.
     let snapshot = Event::StateReplaced {
@@ -434,6 +457,14 @@ async fn ws_events(mut socket: WebSocket, app: AppState) {
                 Some(Ok(_)) => {} // ping/pong gérés par axum
                 Some(Err(_)) => break,
             },
+            _ = ping.tick() => {
+                if socket.send(Message::Ping(Vec::new().into())).await.is_err() {
+                    break;
+                }
+            },
+            // Arrêt du node : on ferme, sinon le graceful shutdown attendrait
+            // la fermeture spontanée de chaque UI ouverte.
+            _ = shutdown.changed() => break,
         }
     }
 }
@@ -445,6 +476,10 @@ async fn ws_logs_upgrade(ws: WebSocketUpgrade, State(app): State<AppState>) -> R
 /// Page de logs : l'historique du ring buffer, puis le direct.
 async fn ws_logs(mut socket: WebSocket, app: AppState) {
     let mut live = app.logs.subscribe();
+    let mut shutdown = app.shutdown.clone();
+    let mut ping = tokio::time::interval(WS_PING_PERIOD);
+    ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    ping.reset();
     for entry in app.logs.snapshot() {
         if send_json(&mut socket, &entry).await.is_err() {
             return;
@@ -468,6 +503,12 @@ async fn ws_logs(mut socket: WebSocket, app: AppState) {
                 Some(Ok(_)) => {}
                 Some(Err(_)) => break,
             },
+            _ = ping.tick() => {
+                if socket.send(Message::Ping(Vec::new().into())).await.is_err() {
+                    break;
+                }
+            },
+            _ = shutdown.changed() => break,
         }
     }
 }
@@ -525,6 +566,11 @@ mod tests {
             let _keep = _position_tx;
             tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
         });
+        let (_shutdown_tx, shutdown_rx) = watch::channel(false);
+        tokio::spawn(async move {
+            let _keep = _shutdown_tx;
+            tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+        });
         let app = AppState::new(
             handle,
             presets,
@@ -532,6 +578,7 @@ mod tests {
             media,
             logs,
             position_rx,
+            shutdown_rx,
             "test-node".into(),
             "0.0.0-test".into(),
         );
@@ -700,6 +747,7 @@ mod tests {
         let handle = bus.handle();
         tokio::spawn(bus.run());
         let (_ptx, prx) = watch::channel(PlaybackPosition::default());
+        let (_stx, srx) = watch::channel(false);
         let app = AppState::new(
             handle,
             presets,
@@ -707,6 +755,7 @@ mod tests {
             media.clone(),
             logs,
             prx,
+            srx,
             "t".into(),
             "0".into(),
         );
@@ -862,5 +911,55 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let json = body_json(response).await;
         assert!(json["os"].is_string());
+    }
+
+    /// L'arrêt du node ferme les WebSockets ouverts : sans cela, le graceful
+    /// shutdown d'axum attendrait indéfiniment qu'une UI affichée se ferme
+    /// d'elle-même (5 s d'« arrêt forcé » à chaque extinction).
+    #[tokio::test]
+    async fn shutdown_closes_open_websockets_quickly() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let presets = PresetStore::open(dir.path().join("presets")).expect("presets");
+        let mapping_presets =
+            MappingStore::open(dir.path().join("presets").join("mapping")).expect("mappings");
+        let media = MediaLibrary::open(dir.path().join("media"), 1024).expect("media");
+        let logs = LogBuffer::new(16);
+        let bus = Bus::new(16, 16);
+        let handle = bus.handle();
+        tokio::spawn(bus.run());
+        let (_ptx, prx) = watch::channel(PlaybackPosition::default());
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let app = AppState::new(
+            handle,
+            presets,
+            mapping_presets,
+            media,
+            logs,
+            prx,
+            shutdown_rx.clone(),
+            "t".into(),
+            "0".into(),
+        );
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let server = tokio::spawn(serve_on(listener, app, shutdown_rx));
+
+        // Client réel connecté au /ws : il reçoit l'état initial puis reste
+        // ouvert sans jamais fermer de lui-même.
+        let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}/ws"))
+            .await
+            .expect("connect");
+        let first = ws.next().await.expect("frame").expect("état initial");
+        assert!(first.is_text());
+
+        shutdown_tx.send(true).expect("signal d'arrêt");
+        let done = tokio::time::timeout(std::time::Duration::from_secs(2), server).await;
+        assert!(
+            done.is_ok(),
+            "le serveur doit s'arrêter sans attendre la fermeture du client"
+        );
     }
 }

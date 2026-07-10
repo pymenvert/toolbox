@@ -146,6 +146,7 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
             media.clone(),
             logs.clone(),
             position_rx.clone(),
+            shutdown_rx.clone(),
             node_name.clone(),
             env!("CARGO_PKG_VERSION").to_string(),
         );

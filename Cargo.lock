@@ -1031,6 +1031,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
+ "tokio-tungstenite",
  "toolbox-core",
  "toolbox-engine",
  "tower",
