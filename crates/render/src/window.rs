@@ -44,6 +44,9 @@ pub struct OutputChannels {
     pub settings: watch::Receiver<OutputSettings>,
     /// Liste des écrans détectés, publiée pour l'API `/api/outputs`.
     pub monitors: watch::Sender<Vec<MonitorInfo>>,
+    /// Frames réellement présentées par seconde, publiées pour l'UI
+    /// (indicateur de fluidité du rendu, rafraîchi ~1 fois/s).
+    pub fps: watch::Sender<f32>,
     /// Signal d'arrêt du node.
     pub shutdown: watch::Receiver<bool>,
 }
@@ -81,6 +84,7 @@ fn run_event_loop(config: WindowConfig, channels: OutputChannels) {
         video,
         settings,
         monitors,
+        fps,
         shutdown,
     } = channels;
 
@@ -121,6 +125,9 @@ fn run_event_loop(config: WindowConfig, channels: OutputChannels) {
         video,
         settings,
         monitors,
+        fps,
+        frames_since: 0,
+        fps_window_start: std::time::Instant::now(),
         window: None,
         surface: None,
     };
@@ -192,6 +199,10 @@ struct OutputApp {
     video: watch::Receiver<Option<VideoFrame>>,
     settings: watch::Receiver<OutputSettings>,
     monitors: watch::Sender<Vec<MonitorInfo>>,
+    fps: watch::Sender<f32>,
+    /// Frames présentées depuis le début de la fenêtre de mesure courante.
+    frames_since: u32,
+    fps_window_start: std::time::Instant,
     window: Option<Arc<Window>>,
     surface: Option<softbuffer::Surface<Arc<Window>, Arc<Window>>>,
 }
@@ -279,9 +290,22 @@ impl OutputApp {
                 render_frame(&snapshot, video.as_ref(), w.get(), h.get(), &mut buffer);
                 if let Err(err) = buffer.present() {
                     warn!(%err, "frame de sortie non présentée");
+                    return;
                 }
+                self.count_presented_frame();
             }
             Err(err) => warn!(%err, "tampon de sortie inaccessible"),
+        }
+    }
+
+    /// Mesure du débit de frames présentées, publiée ~1 fois par seconde.
+    fn count_presented_frame(&mut self) {
+        self.frames_since += 1;
+        let elapsed = self.fps_window_start.elapsed().as_secs_f32();
+        if elapsed >= 1.0 {
+            self.fps.send_replace(self.frames_since as f32 / elapsed);
+            self.frames_since = 0;
+            self.fps_window_start = std::time::Instant::now();
         }
     }
 }

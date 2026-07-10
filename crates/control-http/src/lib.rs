@@ -72,6 +72,8 @@ pub struct HttpConfig {
 pub struct OutputControl {
     pub monitors: watch::Receiver<Vec<MonitorInfo>>,
     pub settings: std::sync::Arc<watch::Sender<OutputSettings>>,
+    /// Frames par seconde réellement présentées par la fenêtre de sortie.
+    pub fps: watch::Receiver<f32>,
 }
 
 impl OutputControl {
@@ -80,9 +82,11 @@ impl OutputControl {
     pub fn disconnected() -> Self {
         let (_, monitors) = watch::channel(Vec::new());
         let (settings, _) = watch::channel(OutputSettings::default());
+        let (_, fps) = watch::channel(0.0);
         Self {
             monitors,
             settings: std::sync::Arc::new(settings),
+            fps,
         }
     }
 }
@@ -398,6 +402,7 @@ async fn outputs_get(State(app): State<AppState>) -> Json<serde_json::Value> {
     Json(serde_json::json!({
         "monitors": *app.output.monitors.borrow(),
         "settings": *app.output.settings.borrow(),
+        "fps": *app.output.fps.borrow(),
     }))
 }
 
@@ -482,6 +487,8 @@ async fn ws_events(mut socket: WebSocket, app: AppState) {
                         "event": "position",
                         "position": p.position,
                         "duration": p.duration,
+                        // Fluidité de la fenêtre de sortie (0 = pas de rendu).
+                        "fps": *app.output.fps.borrow(),
                     });
                     if socket.send(Message::Text(message.to_string().into())).await.is_err() {
                         break;
@@ -1004,9 +1011,11 @@ mod tests {
             },
         ]);
         let (settings_tx, mut settings_rx) = watch::channel(OutputSettings::default());
+        let (_fps_tx, fps_rx) = watch::channel(30.0);
         let output = OutputControl {
             monitors: monitors_rx,
             settings: std::sync::Arc::new(settings_tx),
+            fps: fps_rx,
         };
         let app = AppState::new(
             handle,

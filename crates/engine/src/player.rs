@@ -51,6 +51,11 @@ pub trait PlayerBackend: Send {
     /// Durée du média, si connue.
     fn duration_seconds(&self) -> Option<f64>;
     fn take_events(&mut self) -> Vec<BackendEvent>;
+    /// Indique que le média courant doit reboucler SANS COUPURE quand il se
+    /// termine (mode boucle « un »). Un backend qui sait le faire (GStreamer
+    /// via `about-to-finish`) n'émet alors plus de fin de média ; les autres
+    /// ignorent l'indication et le player reboucle par seek (petit hoquet).
+    fn set_gapless_loop(&mut self, _enabled: bool) {}
 }
 
 /// Position de lecture publiée pour l'UI (WebSocket/REST).
@@ -108,6 +113,8 @@ impl<B: PlayerBackend> Player<B> {
         self.loop_mode = state.player.loop_mode;
         self.playlist_len = state.player.playlist.len();
         self.in_playlist = state.player.playlist_index.is_some();
+        self.backend
+            .set_gapless_loop(self.loop_mode == LoopMode::One);
 
         if let Err(err) = self.backend.set_volume(state.player.volume) {
             warn!(%err, "volume non appliqué");
@@ -189,6 +196,7 @@ impl<B: PlayerBackend> Player<B> {
             }
             Event::LoopChanged { mode } => {
                 self.loop_mode = *mode;
+                self.backend.set_gapless_loop(*mode == LoopMode::One);
             }
             Event::StateReplaced { state } => {
                 self.resync(state);
@@ -283,6 +291,9 @@ pub struct MemoryBackend {
     /// false dans les tests purs)
     check_files: bool,
     eos_emitted: bool,
+    /// Indication gapless reçue (enregistrée pour les tests ; le backend
+    /// mémoire boucle via la politique EOS du player).
+    gapless: bool,
 }
 
 impl MemoryBackend {
@@ -297,6 +308,7 @@ impl MemoryBackend {
             pending: Vec::new(),
             check_files,
             eos_emitted: false,
+            gapless: false,
         }
     }
 
@@ -324,6 +336,11 @@ impl MemoryBackend {
 
     pub fn loaded_path(&self) -> Option<&Path> {
         self.media.as_deref()
+    }
+
+    /// L'indication gapless reçue en dernier (tests).
+    pub fn gapless_loop(&self) -> bool {
+        self.gapless
     }
 }
 
@@ -404,6 +421,10 @@ impl PlayerBackend for MemoryBackend {
         }
         std::mem::take(&mut self.pending)
     }
+
+    fn set_gapless_loop(&mut self, enabled: bool) {
+        self.gapless = enabled;
+    }
 }
 
 #[cfg(test)]
@@ -472,6 +493,42 @@ mod tests {
         // …et la lecture doit être repartie de zéro, sans passer par le bus.
         assert!(player.backend.is_playing());
         assert!(player.backend.position_seconds().expect("pos") < 1.0);
+    }
+
+    #[test]
+    fn gapless_hint_follows_loop_mode() {
+        let (mut bus, mut player) = setup();
+        assert!(!player.backend.gapless_loop());
+        drive(
+            &mut bus,
+            &mut player,
+            Source::Http,
+            &Command::SetLoop {
+                mode: LoopMode::One,
+            },
+        );
+        assert!(player.backend.gapless_loop(), "boucle un = gapless demandé");
+        drive(
+            &mut bus,
+            &mut player,
+            Source::Http,
+            &Command::SetLoop {
+                mode: LoopMode::All,
+            },
+        );
+        assert!(
+            !player.backend.gapless_loop(),
+            "boucle playlist : le player garde la main (enchaînement)"
+        );
+        // Le resync (chargement de preset) réapplique l'indication.
+        let mut state = NodeState::default();
+        state
+            .apply(&Command::SetLoop {
+                mode: LoopMode::One,
+            })
+            .expect("loop");
+        player.resync(&state);
+        assert!(player.backend.gapless_loop());
     }
 
     #[test]

@@ -125,6 +125,7 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
     });
     let output_settings_tx = std::sync::Arc::new(output_settings_tx);
     let (monitors_tx, monitors_rx) = watch::channel(Vec::new());
+    let (fps_tx, fps_rx) = watch::channel(0.0f32);
 
     // Player. Backend GStreamer si compilé et disponible (vidéo réelle dans
     // la fenêtre de sortie), sinon backend mémoire : position, durée
@@ -180,6 +181,7 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
             toolbox_control_http::OutputControl {
                 monitors: monitors_rx.clone(),
                 settings: output_settings_tx.clone(),
+                fps: fps_rx.clone(),
             },
             node_name.clone(),
             env!("CARGO_PKG_VERSION").to_string(),
@@ -232,6 +234,7 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
                 video: video_rx,
                 settings: output_settings_rx,
                 monitors: monitors_tx,
+                fps: fps_tx,
                 shutdown: shutdown_rx.clone(),
             },
         ))
@@ -245,6 +248,7 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
         drop(video_rx);
         drop(output_settings_rx);
         drop(monitors_tx);
+        drop(fps_tx);
         if config.output.enabled {
             warn!("fenêtre de sortie demandée mais ce binaire est compilé sans (feature `render`)");
         }

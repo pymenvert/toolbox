@@ -11,6 +11,8 @@
 //! player (200 ms) — même contrat que le backend mémoire.
 
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use gstreamer as gst;
 use gstreamer::prelude::*;
@@ -28,6 +30,9 @@ pub struct GstBackend {
     /// URI chargée (None tant qu'aucun `load` n'a réussi) — le transport,
     /// lui, appartient au player (miroir de l'état du bus).
     uri: Option<String>,
+    /// Boucle sans coupure demandée (lue par le signal `about-to-finish`,
+    /// qui tourne sur un thread GStreamer).
+    gapless: Arc<AtomicBool>,
 }
 
 /// Mode portable : si les plugins GStreamer sont livrés à côté de l'exe
@@ -103,12 +108,31 @@ impl GstBackend {
         );
         playbin.set_property("video-sink", appsink.upcast_ref::<gst::Element>());
 
+        // Boucle sans coupure : juste avant la fin du média, redonner la
+        // même uri à playbin enchaîne la relecture SANS émettre de fin de
+        // média — zéro hoquet au rebouclage (mode boucle « un »).
+        let gapless = Arc::new(AtomicBool::new(false));
+        let gapless_signal = gapless.clone();
+        playbin.connect("about-to-finish", false, move |values| {
+            if !gapless_signal.load(Ordering::Relaxed) {
+                return None;
+            }
+            let Some(playbin) = values.first().and_then(|v| v.get::<gst::Element>().ok()) else {
+                return None;
+            };
+            if let Some(uri) = playbin.property::<Option<String>>("current-uri") {
+                playbin.set_property("uri", uri);
+            }
+            None
+        });
+
         let version = gst::version_string();
         info!(%version, "backend GStreamer initialisé");
         Ok(Self {
             playbin,
             frames,
             uri: None,
+            gapless,
         })
     }
 
@@ -197,6 +221,10 @@ impl PlayerBackend for GstBackend {
 
     fn duration_seconds(&self) -> Option<f64> {
         self.query_seconds(false)
+    }
+
+    fn set_gapless_loop(&mut self, enabled: bool) {
+        self.gapless.store(enabled, Ordering::Relaxed);
     }
 
     fn take_events(&mut self) -> Vec<BackendEvent> {

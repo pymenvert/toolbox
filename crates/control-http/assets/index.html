@@ -276,6 +276,7 @@
             <span id="posLab">--:--</span>
             <div class="bar" id="seekbar"><i id="seekfill"></i></div>
             <span id="durLab">--:--</span>
+            <span id="fpsBadge" class="badge" title="Frames par seconde r&eacute;ellement affich&eacute;es par la fen&ecirc;tre de sortie" style="display:none">&ndash; img/s</span>
           </div>
         </div>
         <div class="slider" style="margin-top:10px">
@@ -414,6 +415,7 @@
   <!-- ================= MEDIAS ================= -->
   <section class="page" id="page-media">
     <div class="drop" id="drop">&#11014;&nbsp; D&eacute;pose des fichiers ici ou clique pour parcourir</div>
+    <div class="hint" style="margin:-6px 0 14px">Gros fichiers (&gt; 2 Go par d&eacute;faut, r&eacute;glable via <code>[limits] max_upload_mb</code>) : copie-les directement dans le dossier <code>media/</code> &agrave; c&ocirc;t&eacute; du logiciel, ils appara&icirc;tront ici.</div>
     <input type="file" id="fileInput" multiple style="display:none">
     <div class="upWrap" id="upWrap">
       <div class="upTop"><span id="upName"></span><span id="upPct">0%</span></div>
@@ -535,6 +537,16 @@ async function api(path, opts) {
 /* ===================== Etat + WebSocket ===================== */
 let state = null;          // etat serveur complet (source de verite)
 let position = null, duration = null;
+
+/* Fluidité de la fenêtre de sortie : visible seulement en lecture (à
+   l'arrêt ou en pause, la fenêtre ne redessine pas — la mesure serait vide). */
+function renderFps(fps) {
+  const b = $("#fpsBadge");
+  const playing = state && state.player.transport === "playing";
+  if (!playing || fps === undefined) { b.style.display = "none"; return; }
+  b.style.display = "";
+  b.textContent = Math.round(fps) + " img/s";
+}
 let ws = null, wsOpen = false, wsDelay = 500, wsTimer = null;
 
 function sendCmd(cmd) {
@@ -582,7 +594,7 @@ function onEvent(m) {
   if (!m || typeof m !== "object") return;
   const e = m.event;
   if (e === "state_replaced") { applyState(m.state); return; }
-  if (e === "position") { position = m.position; duration = m.duration; renderSeek(); return; }
+  if (e === "position") { position = m.position; duration = m.duration; renderSeek(); renderFps(m.fps); return; }
   if (!state) return;
   switch (e) {
     case "transport_changed": state.player.transport = m.transport; renderTransport(); break;
