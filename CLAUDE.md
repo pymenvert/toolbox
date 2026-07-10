@@ -31,6 +31,12 @@ Propriétaire : Pym.
   (rotation/flip/crop/couleur → matrices testées), `Player` générique sur le
   trait `PlayerBackend` + `MemoryBackend` simulé. Le backend GStreamer réel
   viendra plus tard (après bench sur Pi) : ne pas l'ajouter.
+- `crates/render` : fenêtre de sortie native (winit + softbuffer, feature
+  `render` du node, activée par défaut, exclue du cross ARM64). Rendu CPU des
+  mires warpées + couleur — la chaîne par pixel de `raster.rs` est la
+  référence testée de la future passe GLSL. Config `[output]` (écran cible,
+  plein écran, F11/Échap). Sans mire : sortie noire. GStreamer remplacera la
+  mire par la vidéo dans cette même fenêtre.
 - `crates/control-http` : axum 0.8 (REST + WebSocket `/ws` et `/ws/logs` + UI
   embarquée + monitoring `/proc`).
 - `crates/control-osc` : rosc/UDP.
@@ -74,8 +80,9 @@ Sous Windows, aucune dépendance système (midir utilise WinMM).
   `mapping_save`/`mapping_load`, API `/api/mapping-presets`, OSC `/mapping/*`,
   UI dans l'onglet Mapping — charger n'interrompt pas la lecture),
   `deploy/install-autostart-windows.bat` (lancement à l'ouverture de session).
-- Le choix de la sortie physique (écran/projecteur) viendra avec le backend
-  vidéo réel : à concevoir avec la sélection de sortie dès le départ.
+- Fenêtre de sortie livrée (crates/render) : mires warpées en direct, choix
+  de l'écran via `[output] monitor` (liste tracée au démarrage). La sélection
+  d'écran depuis l'UI web reste à faire ; la vidéo réelle attend GStreamer.
 - Backend vidéo réel (GStreamer) pas encore commencé — attend le bench sur Pi.
 
 ## Prochaines étapes

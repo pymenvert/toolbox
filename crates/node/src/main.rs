@@ -185,6 +185,28 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
         ));
     }
 
+    // Fenêtre de sortie : mires warpées en direct (calibrage projecteur).
+    // Thread dédié ; si l'environnement graphique manque, le node continue.
+    #[cfg(feature = "render")]
+    let render_thread = if config.output.enabled {
+        Some(toolbox_render::spawn(
+            toolbox_render::WindowConfig {
+                monitor: config.output.monitor,
+                fullscreen: config.output.fullscreen,
+                title: format!("Toolbox — sortie ({node_name})"),
+            },
+            handle.state_watch(),
+            shutdown_rx.clone(),
+        ))
+    } else {
+        info!("fenêtre de sortie désactivée par la config ([output] enabled = false)");
+        None
+    };
+    #[cfg(not(feature = "render"))]
+    if config.output.enabled {
+        warn!("fenêtre de sortie demandée mais ce binaire est compilé sans (feature `render`)");
+    }
+
     // MIDI (optionnel à la compilation : dépend d'ALSA sous Linux).
     #[cfg(feature = "midi")]
     let _midi = if config.modules.midi {
@@ -251,6 +273,19 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
         .is_err()
     {
         warn!("le bus ne s'est pas arrêté en 5 s");
+    }
+    #[cfg(feature = "render")]
+    if let Some(thread) = render_thread {
+        // L'event loop sort sur le signal d'arrêt (relais Wake::Quit).
+        let join = tokio::task::spawn_blocking(move || {
+            let _ = thread.join();
+        });
+        if tokio::time::timeout(Duration::from_secs(5), join)
+            .await
+            .is_err()
+        {
+            warn!("la fenêtre de sortie ne s'est pas fermée en 5 s");
+        }
     }
     info!("arrêt complet");
     Ok(())

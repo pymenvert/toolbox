@@ -10,14 +10,18 @@ name = "toolbox-node"
 path = "src/main.rs"
 
 [features]
-default = ["midi"]
+default = ["midi", "render"]
 # Le MIDI dépend d'ALSA sous Linux : désactivable pour les vérifications
 # croisées sans bibliothèques système (`--no-default-features`).
 midi = ["dep:toolbox-control-midi"]
+# Fenêtre de sortie (mires warpées). Désactivée en cross ARM64 : le Pi aura
+# sa propre chaîne vidéo (GStreamer/DRM) après le bench matériel.
+render = ["dep:toolbox-render"]
 
 [dependencies]
 toolbox-core = { path = "../core" }
 toolbox-engine = { path = "../engine" }
+toolbox-render = { path = "../render", optional = true }
 toolbox-control-http = { path = "../control-http" }
 toolbox-control-osc = { path = "../control-osc" }
 toolbox-control-midi = { path = "../control-midi", optional = true }

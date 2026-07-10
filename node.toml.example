@@ -34,6 +34,14 @@ presets = "presets"       # les presets de mapping seul vont dans presets/mappin
 shaders = "shaders"
 logs = "logs"
 
+[output]
+# Fenêtre de sortie : affiche les mires de test (onglet Mapping) déformées en
+# direct par le mapping — le calibrage projecteur avant même le moteur vidéo.
+# Sans mire sélectionnée, la sortie est noire. F11 : plein écran, Échap : le quitte.
+enabled = true
+monitor = 0        # index de l'écran cible ; la liste détectée est dans les logs
+fullscreen = false # true = plein écran sans bordure sur l'écran cible
+
 [startup]
 # Mode kiosque (P1.9) : au démarrage, charger un preset et lancer la lecture.
 # Avec le service systemd (Restart=always), le node reprend son show seul

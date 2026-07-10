@@ -72,7 +72,8 @@ jobs:
 
   # Vérifie que ça compile pour les Pi (ARM64) sans exécuter.
   # --no-default-features : le MIDI (ALSA) demande les libs système ARM,
-  # il est vérifié en natif par les autres jobs.
+  # il est vérifié en natif par les autres jobs. Idem toolbox-render
+  # (fenêtre desktop) : le Pi aura sa chaîne vidéo GStreamer/DRM dédiée.
   check-arm64:
     runs-on: ubuntu-latest
     steps:
@@ -84,7 +85,8 @@ jobs:
       - name: Check aarch64
         run: |
           set -o pipefail
-          cargo check --workspace --exclude toolbox-control-midi --no-default-features \
+          cargo check --workspace --exclude toolbox-control-midi --exclude toolbox-render \
+            --no-default-features \
             --target aarch64-unknown-linux-gnu 2>&1 | tee arm64.log
       - name: Publier les logs en cas d'échec
         if: failure()
