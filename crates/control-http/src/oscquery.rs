@@ -250,6 +250,7 @@ pub fn namespace(state: &NodeState) -> Value {
                     Some(json!([i32::from(state.mapping.enabled)])), None),
                 "save": leaf("/mapping/save", "s", "Enregistre le mapping seul", None, None),
                 "load": leaf("/mapping/load", "s", "Charge un mapping (sans couper la lecture)", None, None),
+                "fade": leaf("/mapping/fade", "sf", "Fondu vers un mapping (nom, secondes)", None, None),
             })),
             "pattern": leaf("/pattern", "s", "Mire de test",
                 Some(json!([pattern])),
@@ -257,6 +258,7 @@ pub fn namespace(state: &NodeState) -> Value {
             "preset": container("/preset", json!({
                 "save": leaf("/preset/save", "s", "Sauvegarde l'état complet", None, None),
                 "load": leaf("/preset/load", "s", "Charge un preset", None, None),
+                "fade": leaf("/preset/fade", "sf", "Fondu vers un preset (nom, secondes)", None, None),
             })),
             "sync": container("/sync", json!({
                 "arm": leaf("/sync/arm", "", "Arme : média prêt, pause à 0", None, None),
@@ -313,6 +315,12 @@ mod tests {
         );
         // Synchro exposée.
         assert_eq!(tree["CONTENTS"]["sync"]["CONTENTS"]["startAt"]["TYPE"], "d");
+        // Fondus exposés (nom + durée).
+        assert_eq!(tree["CONTENTS"]["preset"]["CONTENTS"]["fade"]["TYPE"], "sf");
+        assert_eq!(
+            tree["CONTENTS"]["mapping"]["CONTENTS"]["fade"]["FULL_PATH"],
+            "/mapping/fade"
+        );
     }
 
     #[tokio::test]
