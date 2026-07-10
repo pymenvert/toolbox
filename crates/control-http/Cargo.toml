@@ -18,6 +18,9 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"
+# Tests des routes axum sans socket : Router::oneshot + collecte du corps.
+http-body-util = "0.1"
+tower = { version = "0.5", features = ["util"] }
 
 [lints]
 workspace = true
