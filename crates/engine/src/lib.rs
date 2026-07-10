@@ -21,7 +21,7 @@ pub use homography::{HomographyError, Mat3};
 pub use player::{
     BackendEvent, MemoryBackend, PlaybackPosition, Player, PlayerBackend, PlayerError,
 };
-pub use raster::render_frame;
+pub use raster::{appliquer_blackout, niveau_rampe, render_frame};
 pub use render::{ColorUniforms, RenderParams};
 pub use video::VideoFrame;
 

@@ -281,5 +281,8 @@ fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     rgb = apply_pixel_effects(rgb, t);
     // 5. Fondu de bords : atténuation finale en espace de sortie.
     rgb = rgb * facteur_blending(p);
+    // 6. Blackout de régie : voile noir final — MÊME formule que
+    //    appliquer_blackout de raster.rs (canaux × (1 - niveau)).
+    rgb = rgb * (1.0 - clamp(u.blending_b.z, 0.0, 1.0));
     return vec4<f32>(rgb, 1.0);
 }

@@ -34,7 +34,7 @@ struct Uniforms {
     fx_b: [f32; 4],
     /// fondu de bords : gauche, droite, haut, bas
     blending_a: [f32; 4],
-    /// fondu de bords : gamma, nombre de masques
+    /// fondu de bords : gamma, nombre de masques, niveau de blackout
     blending_b: [f32; 4],
     /// masques : 8 quadrilatères × 4 coins = 2 vec4 (x0,y0,x1,y1) chacun
     masques: [[f32; 4]; 16],
@@ -207,6 +207,7 @@ impl GpuPainter {
         time: f32,
         width: u32,
         height: u32,
+        blackout: f32,
     ) -> bool {
         let (width, height) = (width.max(1), height.max(1));
         if self.config.width != width || self.config.height != height {
@@ -218,7 +219,7 @@ impl GpuPainter {
         if let Some(frame) = video {
             self.upload_video(frame);
         }
-        let u = self.uniforms_for(state, video.is_some(), time, width, height);
+        let u = self.uniforms_for(state, video.is_some(), time, width, height, blackout);
         self.queue
             .write_buffer(&self.uniforms, 0, bytemuck::bytes_of(&u));
 
@@ -318,6 +319,7 @@ impl GpuPainter {
         time: f32,
         width: u32,
         height: u32,
+        blackout: f32,
     ) -> Uniforms {
         let mode = match (state.test_pattern, has_video) {
             (Some(TestPattern::Grid), _) => 1.0,
@@ -384,7 +386,7 @@ impl GpuPainter {
             blending_b: [
                 state.blending.gamma,
                 state.masques.len().min(8) as f32,
-                0.0,
+                blackout.clamp(0.0, 1.0),
                 0.0,
             ],
             masques: masques_vec4(&state.masques),

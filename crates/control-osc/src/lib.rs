@@ -258,6 +258,15 @@ pub fn event_to_osc(event: &toolbox_core::Event) -> Option<OscMessage> {
         Event::DmxSceneDemandee { name } => {
             message("/dmx/scene", vec![OscType::String(name.clone())])
         }
+        Event::BlackoutChanged { actif, fondu_ms } => message(
+            "/blackout",
+            vec![
+                OscType::Bool(*actif),
+                #[allow(clippy::cast_possible_wrap)] // borné à 10 000
+                OscType::Long(*fondu_ms as i64),
+            ],
+        ),
+        Event::FreezeChanged { actif } => message("/freeze", vec![OscType::Bool(*actif)]),
         Event::BlendingChanged { blending } => message(
             "/blending",
             vec![
@@ -334,6 +343,17 @@ pub fn map_message(addr: &str, args: &[OscType]) -> Result<Command, MapError> {
         "/rate" => float_arg(args, 0)
             .map(|rate| Command::SetRate { rate })
             .ok_or_else(|| bad("attendu : vitesse (float 0.25..4)")),
+        // Boutons de régie : /blackout 1 [fondu_ms], /freeze 1.
+        "/blackout" => bool_arg(args, 0)
+            .map(|actif| Command::BlackoutSet {
+                actif,
+                #[allow(clippy::cast_sign_loss)] // borné à 0 par le max
+                fondu_ms: int_arg(args, 1).map(|ms| ms.max(0) as u64),
+            })
+            .ok_or_else(|| bad("attendu : 0|1 (+ fondu ms optionnel)")),
+        "/freeze" => bool_arg(args, 0)
+            .map(|actif| Command::FreezeSet { actif })
+            .ok_or_else(|| bad("attendu : 0|1")),
         "/loop" => parse_loop_mode(args).ok_or_else(|| bad("attendu : off|one|all ou 0|1|2")),
         "/playlist/set" => {
             let items: Option<Vec<String>> = (0..args.len()).map(|i| string_arg(args, i)).collect();
@@ -593,6 +613,29 @@ mod tests {
             map_message("/mapping/reset", &[]),
             Ok(Command::MappingReset)
         );
+    }
+
+    #[test]
+    fn blackout_et_freeze_se_mappent() {
+        assert_eq!(
+            map_message("/blackout", &[OscType::Int(1)]),
+            Ok(Command::BlackoutSet {
+                actif: true,
+                fondu_ms: None
+            })
+        );
+        assert_eq!(
+            map_message("/blackout", &[OscType::Bool(false), OscType::Int(500)]),
+            Ok(Command::BlackoutSet {
+                actif: false,
+                fondu_ms: Some(500)
+            })
+        );
+        assert_eq!(
+            map_message("/freeze", &[OscType::Int(1)]),
+            Ok(Command::FreezeSet { actif: true })
+        );
+        assert!(map_message("/blackout", &[]).is_err());
     }
 
     #[test]

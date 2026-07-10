@@ -5,6 +5,12 @@
 
 ## [Non publié]
 
+- **Boutons de régie** : **BLACKOUT** (voile noir avec rampe animée —
+  300 ms par défaut, réglable — l'état complet continue en dessous et
+  revient intact) et **FREEZE** (gel de la source vidéo sur la dernière
+  frame, transport vivant en dessous). Gros boutons sur le Dashboard,
+  OSC `/blackout 1 [fondu_ms]` et `/freeze 1`, exposés en OSCQuery,
+  parité stricte CPU/GPU, aperçu web assombri aussi.
 - **Installation par profils** : `deploy/installer-windows.ps1` (nouveau)
   et `deploy/install.sh` (refondu) proposent Complet / Lecteur+Mapping /
   Synchro / Lumières / Minimal — chaque profil écrit `node.toml` +

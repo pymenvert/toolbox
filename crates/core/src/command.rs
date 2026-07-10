@@ -165,6 +165,18 @@ pub enum Command {
     MasqueSupprime {
         index: u8,
     },
+    /// Blackout de régie : voile noir sur la sortie (l'état continue en
+    /// dessous). `fondu_ms` absent = durée mémorisée. OSC : `/blackout`.
+    BlackoutSet {
+        actif: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fondu_ms: Option<u64>,
+    },
+    /// Gel d'image : la source vidéo reste sur la dernière frame reçue,
+    /// le transport continue en dessous. OSC : `/freeze`.
+    FreezeSet {
+        actif: bool,
+    },
     /// Active/désactive le mapping sans perdre les réglages (bypass).
     SetMappingEnabled {
         enabled: bool,
@@ -442,6 +454,26 @@ mod tests {
             (
                 serde_json::to_string(&Command::MasqueSupprime { index: 1 }).expect("ser"),
                 r#"{"cmd":"masque_supprime","index":1}"#,
+            ),
+            (
+                serde_json::to_string(&Command::BlackoutSet {
+                    actif: true,
+                    fondu_ms: Some(500),
+                })
+                .expect("ser"),
+                r#"{"cmd":"blackout_set","actif":true,"fondu_ms":500}"#,
+            ),
+            (
+                serde_json::to_string(&Command::BlackoutSet {
+                    actif: false,
+                    fondu_ms: None,
+                })
+                .expect("ser"),
+                r#"{"cmd":"blackout_set","actif":false}"#,
+            ),
+            (
+                serde_json::to_string(&Command::FreezeSet { actif: true }).expect("ser"),
+                r#"{"cmd":"freeze_set","actif":true}"#,
             ),
         ];
         for (got, want) in cases {

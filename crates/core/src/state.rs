@@ -86,6 +86,26 @@ impl Default for BlendingState {
     }
 }
 
+/// Blackout de régie (V3) : voile noir sur la sortie, avec fondu. L'état du
+/// player, du mapping et des effets est intact dessous — relâcher le
+/// blackout retrouve exactement l'image d'avant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct BlackoutState {
+    pub actif: bool,
+    /// Durée de la rampe vers le noir (et retour), en millisecondes.
+    pub fondu_ms: u64,
+}
+
+impl Default for BlackoutState {
+    fn default() -> Self {
+        Self {
+            actif: false,
+            fondu_ms: 300,
+        }
+    }
+}
+
 /// Un masque (V2) : un quadrilatère NOIR en espace de sortie (cacher une
 /// fenêtre, un relief…). Coordonnées normalisées comme les coins du mapping.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -348,6 +368,15 @@ pub struct NodeState {
     /// Masques noirs en espace de sortie (8 max).
     #[serde(default)]
     pub masques: Vec<Masque>,
+    /// Voile noir de régie (bouton panique). Défauts serde : anciens
+    /// presets OK.
+    #[serde(default)]
+    pub blackout: BlackoutState,
+    /// Gel d'image : la source vidéo reste sur la dernière frame reçue
+    /// (le transport continue en dessous ; mapping, couleur et effets
+    /// restent vivants).
+    #[serde(default)]
+    pub freeze: bool,
     /// Mire de test affichée à la place du média (`None` = média normal).
     /// Sauvegardée dans les presets : un preset "réglage VP" est légitime.
     #[serde(default)]
@@ -442,6 +471,15 @@ pub enum Event {
     /// Masque supprimé.
     MasqueSupprimeEvt {
         index: u8,
+    },
+    /// Blackout de régie posé ou levé.
+    BlackoutChanged {
+        actif: bool,
+        fondu_ms: u64,
+    },
+    /// Gel d'image posé ou levé.
+    FreezeChanged {
+        actif: bool,
     },
     PresetSaved {
         name: String,
@@ -750,6 +788,25 @@ impl NodeState {
                 self.masques.remove(i);
                 Ok(vec![Event::MasqueSupprimeEvt { index: *index }])
             }
+            Command::BlackoutSet { actif, fondu_ms } => {
+                if let Some(ms) = fondu_ms {
+                    if *ms > 10_000 {
+                        return Err(CoreError::InvalidCommand(format!(
+                            "fondu de blackout trop long : {ms} ms (10 000 max)"
+                        )));
+                    }
+                    self.blackout.fondu_ms = *ms;
+                }
+                self.blackout.actif = *actif;
+                Ok(vec![Event::BlackoutChanged {
+                    actif: *actif,
+                    fondu_ms: self.blackout.fondu_ms,
+                }])
+            }
+            Command::FreezeSet { actif } => {
+                self.freeze = *actif;
+                Ok(vec![Event::FreezeChanged { actif: *actif }])
+            }
             Command::MappingReset => {
                 self.mapping = MappingState::default();
                 Ok(vec![Event::MappingReset])
@@ -862,6 +919,12 @@ impl NodeState {
                 check_range("masque.x", corner.x, -0.5, 1.5)?;
                 check_range("masque.y", corner.y, -0.5, 1.5)?;
             }
+        }
+        if self.blackout.fondu_ms > 10_000 {
+            return Err(CoreError::InvalidCommand(format!(
+                "blackout.fondu_ms hors bornes : {} (10 000 max)",
+                self.blackout.fondu_ms
+            )));
         }
         if let Some(media) = &self.player.media {
             validate_media_path(media)?;
@@ -1303,6 +1366,50 @@ mod tests {
         // Le reset du mapping réactive (état par défaut complet).
         s.apply(&Command::MappingReset).expect("reset");
         assert!(s.mapping.enabled);
+    }
+
+    #[test]
+    fn blackout_et_freeze_se_posent_et_se_levent() {
+        let mut s = NodeState::default();
+        assert!(!s.blackout.actif && !s.freeze, "inactifs par défaut");
+
+        // Poser avec un fondu explicite : la durée est mémorisée.
+        let ev = s
+            .apply(&Command::BlackoutSet {
+                actif: true,
+                fondu_ms: Some(500),
+            })
+            .expect("blackout on");
+        assert_eq!(
+            ev,
+            vec![Event::BlackoutChanged {
+                actif: true,
+                fondu_ms: 500
+            }]
+        );
+        assert!(s.blackout.actif);
+
+        // Lever SANS fondu_ms : la durée mémorisée reste.
+        s.apply(&Command::BlackoutSet {
+            actif: false,
+            fondu_ms: None,
+        })
+        .expect("blackout off");
+        assert!(!s.blackout.actif);
+        assert_eq!(s.blackout.fondu_ms, 500);
+
+        // Fondu hors bornes refusé, état intact.
+        assert!(s
+            .apply(&Command::BlackoutSet {
+                actif: true,
+                fondu_ms: Some(60_000),
+            })
+            .is_err());
+        assert!(!s.blackout.actif);
+
+        let ev = s.apply(&Command::FreezeSet { actif: true }).expect("gel");
+        assert_eq!(ev, vec![Event::FreezeChanged { actif: true }]);
+        assert!(s.freeze);
     }
 
     #[test]

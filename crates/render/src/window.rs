@@ -150,6 +150,11 @@ fn run_event_loop(config: WindowConfig, channels: OutputChannels) {
         started_at: std::time::Instant::now(),
         window: None,
         painter: None,
+        blackout_prec: false,
+        blackout_depart: 0.0,
+        blackout_depuis: std::time::Instant::now(),
+        blackout_niveau: 0.0,
+        frame_gelee: None,
     };
     if let Err(err) = event_loop.run_app(&mut app) {
         error!(%err, "event loop de la fenêtre de sortie terminé en erreur");
@@ -238,6 +243,14 @@ struct OutputApp {
     started_at: std::time::Instant,
     window: Option<Arc<Window>>,
     painter: Option<Painter>,
+    /// Rampe du blackout de régie : consigne précédente, niveau au moment
+    /// du dernier changement, instant du changement, niveau courant.
+    blackout_prec: bool,
+    blackout_depart: f32,
+    blackout_depuis: std::time::Instant,
+    blackout_niveau: f32,
+    /// Frame retenue pendant un gel d'image (`state.freeze`).
+    frame_gelee: Option<VideoFrame>,
 }
 
 impl OutputApp {
@@ -369,12 +382,41 @@ impl OutputApp {
             return; // fenêtre réduite : rien à peindre
         };
         let snapshot = self.state.borrow().clone();
-        let video = self.video.borrow().clone();
+        // Gel d'image : la frame affichée au moment du gel est retenue tant
+        // que `freeze` est posé — le transport continue en dessous.
+        let video = if snapshot.freeze {
+            if self.frame_gelee.is_none() {
+                self.frame_gelee = self.video.borrow().clone();
+            }
+            self.frame_gelee.clone()
+        } else {
+            self.frame_gelee = None;
+            self.video.borrow().clone()
+        };
+        // Rampe du blackout : au changement de consigne, la rampe repart du
+        // niveau courant (relâcher en plein fondu redescend de là).
+        let cible = if snapshot.blackout.actif { 1.0 } else { 0.0 };
+        if snapshot.blackout.actif != self.blackout_prec {
+            self.blackout_prec = snapshot.blackout.actif;
+            self.blackout_depart = self.blackout_niveau;
+            self.blackout_depuis = std::time::Instant::now();
+        }
+        #[allow(clippy::cast_possible_truncation)] // fondu borné à 10 s
+        let ecoule = self.blackout_depuis.elapsed().as_millis() as u64;
+        let niveau = toolbox_engine::niveau_rampe(
+            cible,
+            self.blackout_depart,
+            ecoule,
+            snapshot.blackout.fondu_ms,
+        );
+        self.blackout_niveau = niveau;
         let time = self.started_at.elapsed().as_secs_f32();
         // L'emprunt du peintre doit se terminer avant de compter la frame
         // (le compteur emprunte `self` à son tour).
         let presented = match painter {
-            Painter::Gpu(gpu) => gpu.render(&snapshot, video.as_ref(), time, w.get(), h.get()),
+            Painter::Gpu(gpu) => {
+                gpu.render(&snapshot, video.as_ref(), time, w.get(), h.get(), niveau)
+            }
             Painter::Cpu(surface) => {
                 if let Err(err) = surface.resize(w, h) {
                     warn!(%err, "surface de sortie non retaillée");
@@ -390,6 +432,7 @@ impl OutputApp {
                             h.get(),
                             &mut buffer,
                         );
+                        toolbox_engine::appliquer_blackout(&mut buffer, niveau);
                         match buffer.present() {
                             Ok(()) => true,
                             Err(err) => {
@@ -407,6 +450,12 @@ impl OutputApp {
         };
         if presented {
             self.count_presented_frame();
+        }
+        // Rampe en cours : on continue à redessiner jusqu'à la cible.
+        if (niveau - cible).abs() > 0.001 {
+            if let Some(window) = &self.window {
+                window.request_redraw();
+            }
         }
     }
 

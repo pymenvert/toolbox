@@ -158,6 +158,42 @@ fn appliquer_blending(blending: &toolbox_core::BlendingState, pixel: u32, u: f64
     (canal(16) << 16) | (canal(8) << 8) | canal(0)
 }
 
+/// Niveau courant d'une rampe de blackout : progresse linéairement de
+/// `depart` vers `cible` en `fondu_ms`. Pure — l'appelant fournit le temps
+/// écoulé depuis le changement de consigne. `fondu_ms == 0` : saut direct.
+pub fn niveau_rampe(cible: f32, depart: f32, ecoule_ms: u64, fondu_ms: u64) -> f32 {
+    if fondu_ms == 0 || ecoule_ms >= fondu_ms {
+        return cible;
+    }
+    #[allow(clippy::cast_precision_loss)] // bornés à 10 000 ms
+    let t = (ecoule_ms as f32 / fondu_ms as f32).clamp(0.0, 1.0);
+    depart + (cible - depart) * t
+}
+
+/// Voile noir de régie sur un buffer `0RGB` : chaque canal est multiplié
+/// par `1 - niveau` (0 = intact, 1 = noir). MÊME formule que `warp.wgsl`.
+pub fn appliquer_blackout(out: &mut [u32], niveau: f32) {
+    let niveau = niveau.clamp(0.0, 1.0);
+    if niveau <= 0.0 {
+        return;
+    }
+    if niveau >= 1.0 {
+        out.fill(0);
+        return;
+    }
+    let garde = f64::from(1.0 - niveau);
+    for px in out.iter_mut() {
+        let canal = |decalage: u32| -> u32 {
+            let brut = f64::from((*px >> decalage) & 0xFF);
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            {
+                ((brut * garde).round() as u32).min(255)
+            }
+        };
+        *px = (canal(16) << 16) | (canal(8) << 8) | canal(0);
+    }
+}
+
 /// Couleur d'un pixel de sortie, packée en `0RGB`.
 fn shade(
     source: &Source<'_>,
@@ -427,6 +463,33 @@ fn pack(rgb: [f32; 3]) -> u32 {
 mod tests {
     use super::*;
     use toolbox_core::{Command, NodeState};
+
+    /// La rampe de blackout progresse linéairement puis sature à la cible.
+    #[test]
+    fn la_rampe_blackout_est_lineaire_et_saturee() {
+        // Montée 0 → 1 sur 400 ms.
+        assert!((niveau_rampe(1.0, 0.0, 0, 400) - 0.0).abs() < 1e-6);
+        assert!((niveau_rampe(1.0, 0.0, 100, 400) - 0.25).abs() < 1e-6);
+        assert!((niveau_rampe(1.0, 0.0, 400, 400) - 1.0).abs() < 1e-6);
+        assert!((niveau_rampe(1.0, 0.0, 4000, 400) - 1.0).abs() < 1e-6);
+        // Descente depuis un niveau intermédiaire (relâché en pleine rampe).
+        assert!((niveau_rampe(0.0, 0.6, 200, 400) - 0.3).abs() < 1e-6);
+        // Sans fondu : saut direct.
+        assert!((niveau_rampe(1.0, 0.0, 0, 0) - 1.0).abs() < 1e-6);
+    }
+
+    /// Le voile noir multiplie chaque canal par 1 - niveau (parité WGSL).
+    #[test]
+    fn le_blackout_assombrit_chaque_canal() {
+        let mut px = [0x00FF8040_u32, 0x00000000];
+        appliquer_blackout(&mut px, 0.0);
+        assert_eq!(px[0], 0x00FF8040, "niveau 0 : intact");
+        appliquer_blackout(&mut px, 0.5);
+        assert_eq!(px[0], (128 << 16) | (64 << 8) | 32);
+        let mut px = [0x00FF8040_u32];
+        appliquer_blackout(&mut px, 1.0);
+        assert_eq!(px[0], 0, "niveau 1 : noir");
+    }
 
     /// Le fondu de bords suit la rampe gamma exacte, bord par bord.
     #[test]

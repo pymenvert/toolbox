@@ -718,6 +718,11 @@ async fn preview_png(
     let png = cache.get_or_render(width, &state, frame_key, || {
         let mut pixels = vec![0u32; (width * height) as usize];
         toolbox_engine::render_frame(&state, video.as_ref(), time, width, height, &mut pixels);
+        // L'aperçu reflète le blackout de régie (niveau final, sans la
+        // rampe animée — elle vit dans la fenêtre de sortie).
+        if state.blackout.actif {
+            toolbox_engine::appliquer_blackout(&mut pixels, 1.0);
+        }
         let mut rgb = Vec::with_capacity(pixels.len() * 3);
         for px in &pixels {
             rgb.extend_from_slice(&[(px >> 16) as u8, (px >> 8) as u8, *px as u8]);

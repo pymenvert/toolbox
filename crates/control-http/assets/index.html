@@ -71,6 +71,13 @@
   button.primary { background: var(--accent); border-color: var(--accent); font-weight: 600; }
   button.danger { color: #ffb0b0; }
   button.danger:hover { border-color: var(--critical); }
+  /* Boutons de régie (blackout / freeze) : gros, francs, état visible. */
+  button.regie {
+    flex: 1; min-height: 44px; font-weight: 700; letter-spacing: 1px;
+    border-width: 2px; transition: background .15s, border-color .15s;
+  }
+  button.regie.on { background: var(--critical); border-color: var(--critical); color: #fff; }
+  #btnFreeze.on { background: #2563eb; border-color: #2563eb; }
   button.on { background: var(--surface-2); border-color: var(--accent); color: var(--ink); box-shadow: inset 0 0 0 1px var(--accent); }
   button:disabled { opacity: .45; cursor: default; }
   section.page { flex: 1; overflow: auto; padding: 18px; display: none; }
@@ -315,6 +322,10 @@
           <button class="loopbtn mini" data-mode="off">Off</button>
           <button class="loopbtn mini" data-mode="one">Un seul</button>
           <button class="loopbtn mini" data-mode="all">Playlist</button>
+        </div>
+        <div class="rowbtns" style="margin-top:12px">
+          <button id="btnBlackout" class="regie" title="Voile noir sur la sortie (l'&eacute;tat continue en dessous) &mdash; OSC : /blackout">BLACKOUT</button>
+          <button id="btnFreeze" class="regie" title="Gel de la derni&egrave;re image affich&eacute;e &mdash; OSC : /freeze">FREEZE</button>
         </div>
       </div>
       <div class="card">
@@ -873,7 +884,7 @@ function applyState(s) {
   state = s;
   renderTransport(); renderMediaInfo(); renderVolume(); renderLoop();
   renderPlaylist(); renderMapping(); renderColor();
-  renderBlending(); renderMasques(); renderEffects();
+  renderBlending(); renderMasques(); renderEffects(); renderRegie();
 }
 
 function onEvent(m) {
@@ -908,6 +919,10 @@ function onEvent(m) {
       renderMapping(); break;
     case "test_pattern_changed": state.test_pattern = m.pattern; renderMapping(); break;
     case "blending_changed": state.blending = m.blending; renderBlending(); break;
+    case "blackout_changed":
+      state.blackout = { actif: m.actif, fondu_ms: m.fondu_ms };
+      renderRegie(); break;
+    case "freeze_changed": state.freeze = m.actif; renderRegie(); break;
     case "masque_changed":
       if (!state.masques) state.masques = [];
       state.masques[m.index] = { corners: m.corners };
@@ -972,6 +987,11 @@ $("#btnPrev").addEventListener("click", () => sendCmd({ cmd: "playlist_prev" }))
 $("#btnNext").addEventListener("click", () => sendCmd({ cmd: "playlist_next" }));
 $$(".loopbtn").forEach(b => b.addEventListener("click", () => sendCmd({ cmd: "set_loop", mode: b.dataset.mode })));
 bindSlider($("#vol"), v => sendCmd({ cmd: "set_volume", volume: clamp(v, 0, 1) }));
+/* Boutons de régie : bascule immédiate, l'état revient par le WebSocket. */
+$("#btnBlackout").addEventListener("click", () =>
+  sendCmd({ cmd: "blackout_set", actif: !(state && state.blackout && state.blackout.actif) }));
+$("#btnFreeze").addEventListener("click", () =>
+  sendCmd({ cmd: "freeze_set", actif: !(state && state.freeze) }));
 
 function renderTransport() {
   if (!state) return;
@@ -1000,6 +1020,11 @@ function renderVolume() {
 function renderLoop() {
   if (!state) return;
   $$(".loopbtn").forEach(b => b.classList.toggle("on", b.dataset.mode === state.player.loop_mode));
+}
+function renderRegie() {
+  if (!state) return;
+  $("#btnBlackout").classList.toggle("on", !!(state.blackout && state.blackout.actif));
+  $("#btnFreeze").classList.toggle("on", !!state.freeze);
 }
 
 /* --- barre de progression / seek --- */

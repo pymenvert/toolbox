@@ -208,6 +208,10 @@ pub fn namespace(state: &NodeState) -> Value {
             "seek": leaf("/seek", "f", "Position (secondes)", None, None),
             "load": leaf("/load", "s", "Charger une source (fichier, rtsp://, capture://N, ndi://Nom)", None, None),
             "volume": leaf("/volume", "f", "Volume", Some(json!([state.player.volume])), Some(range01())),
+            "blackout": leaf("/blackout", "i", "Blackout de régie (0|1, + fondu ms optionnel)",
+                Some(json!([i32::from(state.blackout.actif)])), None),
+            "freeze": leaf("/freeze", "i", "Gel d'image (0|1)",
+                Some(json!([i32::from(state.freeze)])), None),
             "loop": leaf("/loop", "s", "Boucle : off | one | all", Some(json!([match state.player.loop_mode {
                 toolbox_core::LoopMode::Off => "off",
                 toolbox_core::LoopMode::One => "one",
