@@ -34,7 +34,7 @@ oscquery = 8081    # auto-découverte des paramètres OSC (Chataigne : hôte + c
 media = "media"
 presets = "presets"       # les presets de mapping seul vont dans presets/mapping/
 shaders = "shaders"
-logs = "logs"
+logs = "logs"             # journal quotidien sur disque (toolbox.log.AAAA-MM-JJ, 14 jours gardés)
 
 [output]
 # Fenêtre de sortie : mires de test et vidéo déformées en direct par le

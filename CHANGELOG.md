@@ -5,6 +5,11 @@
 
 ## [Non publié]
 
+- **Journal sur disque** : en plus de la page de logs (mémoire), le node
+  écrit un fichier par jour dans `paths.logs`
+  (`toolbox.log.AAAA-MM-JJ`, 14 jours gardés, purge au démarrage) —
+  lisible APRÈS un crash ou une coupure de courant. Écriture non
+  bloquante : une carte SD lente ne fige jamais le node.
 - **Supervision des services** : un service du node (player, HTTP, OSC,
   fader…) qui panique ou se termine avant l'arrêt demandé est tracé en
   ERROR (visible dans les logs et le diagnostic) au lieu de disparaître en

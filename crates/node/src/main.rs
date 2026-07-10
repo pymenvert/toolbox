@@ -20,12 +20,15 @@ use toolbox_core::{
 use toolbox_engine::{MemoryBackend, PlaybackPosition, Player, PlayerBackend};
 
 mod fleet;
+mod journal;
 mod supervision;
 
 use supervision::spawn_service;
 
 fn main() -> ExitCode {
-    let (config, config_path, logs) = match bootstrap() {
+    // `_file_guard` doit vivre jusqu'à la fin du process : à sa chute, les
+    // dernières lignes du journal sur disque sont vidées.
+    let (config, config_path, logs, _file_guard) = match bootstrap() {
         Ok(parts) => parts,
         Err(err) => {
             eprintln!("toolbox-node : {err}");
@@ -65,7 +68,14 @@ fn main() -> ExitCode {
 
 /// Charge la config PUIS installe le logging (la taille du ring buffer de la
 /// page de logs vient de la config).
-fn bootstrap() -> Result<(NodeConfig, PathBuf, LogBuffer), Box<dyn std::error::Error>> {
+type Bootstrap = (
+    NodeConfig,
+    PathBuf,
+    LogBuffer,
+    Option<tracing_appender::non_blocking::WorkerGuard>,
+);
+
+fn bootstrap() -> Result<Bootstrap, Box<dyn std::error::Error>> {
     let explicit_path = std::env::args().nth(1).map(PathBuf::from);
     let config_path = explicit_path
         .clone()
@@ -79,6 +89,26 @@ fn bootstrap() -> Result<(NodeConfig, PathBuf, LogBuffer), Box<dyn std::error::E
     }
     let config = NodeConfig::load(&config_path)?;
 
+    // Journal sur disque (un fichier par jour dans paths.logs). Un disque
+    // en lecture seule ou plein n'empêche pas le node de démarrer.
+    let (file_layer, file_guard) = match journal::disk_writer(&config.paths.logs) {
+        Ok((writer, guard)) => (
+            Some(
+                tracing_subscriber::fmt::layer()
+                    .with_writer(writer)
+                    .with_ansi(false),
+            ),
+            Some(guard),
+        ),
+        Err(err) => {
+            eprintln!(
+                "toolbox-node : journal sur disque indisponible ({}) : {err}",
+                config.paths.logs.display()
+            );
+            (None, None)
+        }
+    };
+
     let logs = LogBuffer::new(config.limits.log_buffer);
     tracing_subscriber::registry()
         .with(
@@ -86,10 +116,11 @@ fn bootstrap() -> Result<(NodeConfig, PathBuf, LogBuffer), Box<dyn std::error::E
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .with(tracing_subscriber::fmt::layer())
+        .with(file_layer)
         .with(logs.layer())
         .init();
 
-    Ok((config, config_path, logs))
+    Ok((config, config_path, logs, file_guard))
 }
 
 async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::error::Error>> {
