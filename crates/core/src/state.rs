@@ -318,29 +318,12 @@ pub enum Event {
     },
 }
 
-/// Valide un chemin de média : relatif, canonique, sans traversée.
-///
-/// Le chemin est toujours relatif au dossier `media/` du node ; accepter un
-/// chemin absolu ou `..` permettrait de lire n'importe quel fichier de la
-/// machine via l'API réseau. Refusé ici = refusé pour TOUTES les interfaces.
+/// Valide une source média : fichier relatif à `media/` (sans traversée),
+/// URL réseau autorisée, `capture://N` ou `ndi://Nom` — voir
+/// [`crate::source::MediaSource`]. Refusé ici = refusé pour TOUTES les
+/// interfaces.
 pub fn validate_media_path(path: &str) -> Result<(), CoreError> {
-    if path.is_empty() {
-        return Err(CoreError::InvalidCommand("load: chemin vide".into()));
-    }
-    if path.contains('\0') {
-        return Err(CoreError::InvalidMediaPath(path.into()));
-    }
-    if path.starts_with('/') || path.starts_with('\\') {
-        return Err(CoreError::InvalidMediaPath(path.into()));
-    }
-    // Chemin Windows absolu type `C:\...` ou `C:/...`.
-    if path.as_bytes().get(1) == Some(&b':') {
-        return Err(CoreError::InvalidMediaPath(path.into()));
-    }
-    if path.split(['/', '\\']).any(|part| part == "..") {
-        return Err(CoreError::InvalidMediaPath(path.into()));
-    }
-    Ok(())
+    crate::source::MediaSource::parse(path).map(|_| ())
 }
 
 impl NodeState {
@@ -869,6 +852,24 @@ mod tests {
         })
         .expect("chemin sain");
         assert_eq!(s.player.media.as_deref(), Some("clips/boucle_01.mp4"));
+    }
+
+    #[test]
+    fn network_capture_and_ndi_sources_are_accepted() {
+        let mut s = NodeState::default();
+        for src in ["rtsp://10.0.0.5:8554/cam", "capture://0", "ndi://Régie"] {
+            s.apply(&Command::Load {
+                path: (*src).into(),
+            })
+            .expect("source");
+            assert_eq!(s.player.media.as_deref(), Some(*src));
+        }
+        // file:// contournerait la validation des chemins : refusé.
+        assert!(s
+            .apply(&Command::Load {
+                path: "file:///etc/passwd".into()
+            })
+            .is_err());
     }
 
     #[test]

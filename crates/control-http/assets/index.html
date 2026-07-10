@@ -427,6 +427,19 @@
         <tbody id="mediaBody"></tbody>
       </table>
     </div>
+    <div class="card" style="margin-top:14px">
+      <h3>Source externe</h3>
+      <div class="presetRow">
+        <input type="text" id="srcExterne" placeholder="rtsp://…  ·  srt://…  ·  capture://0  ·  ndi://Nom">
+        <button id="srcCharger" class="primary">Charger</button>
+      </div>
+      <div class="hint">
+        <code>capture://0</code> = première webcam ou carte d'acquisition HDMI/USB &middot;
+        <code>rtsp://</code> / <code>srt://</code> / <code>http(s)://</code> = flux r&eacute;seau &middot;
+        <code>ndi://Nom de la source</code> = flux NDI (plugin GStreamer + runtime NDI requis).
+        Les sources live n'ont ni dur&eacute;e ni barre de progression.
+      </div>
+    </div>
   </section>
 
   <!-- ================= PRESETS ================= -->
@@ -1219,6 +1232,15 @@ function uploadOne(file, done) {
   xhr.onerror = () => { toast("Échec de l’envoi de « " + file.name + " »", "err"); done(); };
   xhr.send(file);
 }
+
+/* Source externe : flux réseau, capture locale ou NDI. */
+$("#srcCharger").addEventListener("click", () => {
+  const src = $("#srcExterne").value.trim();
+  if (!src) { toast("Indique une source (rtsp://…, capture://0, ndi://Nom)", "err"); return; }
+  sendCmd({ cmd: "load", path: src });
+  sendCmd({ cmd: "play" });
+});
+$("#srcExterne").addEventListener("keydown", e => { if (e.key === "Enter") $("#srcCharger").click(); });
 
 /* ===================== Presets ===================== */
 let presets = [], pendingDeletePreset = null;

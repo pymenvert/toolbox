@@ -101,10 +101,15 @@ impl<B: PlayerBackend> Player<B> {
         self.position_tx.subscribe()
     }
 
-    /// Résout un chemin de média (déjà validé par le core : relatif, sans
-    /// `..`) sous le dossier `media/`.
+    /// Résout une source média : un fichier (déjà validé : relatif, sans
+    /// `..`) est ancré sous `media/` ; les autres sources (`rtsp://`,
+    /// `capture://`, `ndi://`…) passent telles quelles au backend.
     fn resolve(&self, rel: &str) -> PathBuf {
-        self.media_root.join(rel)
+        use toolbox_core::MediaSource;
+        match MediaSource::parse(rel) {
+            Ok(MediaSource::File(_)) | Err(_) => self.media_root.join(rel),
+            Ok(_) => PathBuf::from(rel),
+        }
     }
 
     /// Recale entièrement le backend sur un état complet (démarrage,
@@ -346,7 +351,13 @@ impl MemoryBackend {
 
 impl PlayerBackend for MemoryBackend {
     fn load(&mut self, path: &Path) -> Result<(), PlayerError> {
-        if self.check_files && !path.is_file() {
+        // Seules les sources fichier sont vérifiées sur disque : une URL
+        // réseau ou une capture n'a pas de fichier à trouver.
+        let is_file_source = matches!(
+            toolbox_core::MediaSource::parse(&path.to_string_lossy()),
+            Ok(toolbox_core::MediaSource::File(_)) | Err(_)
+        );
+        if self.check_files && is_file_source && !path.is_file() {
             return Err(PlayerError::Media(format!(
                 "fichier introuvable : {}",
                 path.display()
@@ -622,6 +633,26 @@ mod tests {
             Some(Path::new("/tmp/media/autre.mp4"))
         );
         assert!((player.backend.volume() - 0.8).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn live_sources_bypass_file_check() {
+        let bus = Bus::new(8, 8);
+        let handle = bus.handle();
+        // check_files = true : un fichier absent serait refusé…
+        let backend = MemoryBackend::new(5.0, true);
+        let mut player = Player::new(backend, handle, "/nulle/part");
+        // …mais une capture ou un flux réseau n'est pas un fichier.
+        for src in ["capture://0", "rtsp://10.0.0.5/cam", "ndi://Régie"] {
+            player.handle_event(&Event::MediaLoaded {
+                path: (*src).into(),
+            });
+            assert_eq!(
+                player.backend.loaded_path(),
+                Some(Path::new(*src)),
+                "source {src} transmise telle quelle au backend"
+            );
+        }
     }
 
     #[test]
