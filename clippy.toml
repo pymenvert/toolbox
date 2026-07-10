@@ -2,3 +2,5 @@
 # expect() est le bon outil pour faire échouer proprement.
 allow-expect-in-tests = true
 allow-unwrap-in-tests = true
+# panic! dans un `let ... else` de test = échec explicite, même logique.
+allow-panic-in-tests = true

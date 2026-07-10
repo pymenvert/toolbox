@@ -292,7 +292,7 @@ mod tests {
         // Canal 10 (1-indexé) = canal brut 9.
         assert_eq!(
             resolve(
-                &[binding.clone()],
+                std::slice::from_ref(&binding),
                 &MidiEvent::NoteOn {
                     channel: 9,
                     note: 60,
