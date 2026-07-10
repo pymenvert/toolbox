@@ -5,6 +5,9 @@
 
 ## [Non publié]
 
+- **Arrêt propre sur SIGTERM** (Linux/Pi) : `systemctl stop` déclenche le
+  même arrêt propre que Ctrl-C (services signalés, attente bornée) au lieu
+  de laisser systemd tuer le node au timeout.
 - **Fondu du mapping seul** : bouton « Fondu » dans la carte Mappings
   enregistrés (onglet Mapping), commande `mapping_fade`, OSC
   `/mapping/fade nom secondes` — coins et recadrage glissent vers le

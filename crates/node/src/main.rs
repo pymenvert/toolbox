@@ -422,7 +422,7 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
         player = config.modules.player,
         "prêt — Ctrl-C pour arrêter"
     );
-    tokio::signal::ctrl_c().await?;
+    attendre_arret().await?;
     info!("arrêt demandé");
 
     // Arrêt propre : signal aux services, fermeture du dernier émetteur du
@@ -464,6 +464,26 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
 
 /// Monte un player (backend quelconque) sur le bus dans une tâche dédiée et
 /// retourne le canal de position de lecture.
+/// Attend une demande d'arrêt : Ctrl-C partout, plus SIGTERM sous Unix —
+/// c'est le signal qu'envoie systemd à `systemctl stop` ; sans lui, le
+/// service serait tué au timeout sans arrêt propre.
+async fn attendre_arret() -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        let mut sigterm =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => result,
+            _ = sigterm.recv() => {
+                info!("SIGTERM reçu (systemctl stop)");
+                Ok(())
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    tokio::signal::ctrl_c().await
+}
+
 fn spawn_player<B: PlayerBackend + 'static>(
     backend: B,
     handle: &BusHandle,
