@@ -5,6 +5,10 @@
 
 ## [Non publié]
 
+- **Supervision des services** : un service du node (player, HTTP, OSC,
+  fader…) qui panique ou se termine avant l'arrêt demandé est tracé en
+  ERROR (visible dans les logs et le diagnostic) au lieu de disparaître en
+  silence ; le node continue avec ses autres services.
 - **Export diagnostic ZIP** (brief 7.2) : bouton « Exporter le diagnostic »
   (Système) et `GET /api/diagnostic.zip` — état complet, journal, infos
   système, écrans, médias, presets, parc mDNS dans une archive à joindre

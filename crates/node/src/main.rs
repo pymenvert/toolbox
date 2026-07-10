@@ -20,6 +20,9 @@ use toolbox_core::{
 use toolbox_engine::{MemoryBackend, PlaybackPosition, Player, PlayerBackend};
 
 mod fleet;
+mod supervision;
+
+use supervision::spawn_service;
 
 fn main() -> ExitCode {
     let (config, config_path, logs) = match bootstrap() {
@@ -121,11 +124,11 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
     // interpolées sur le bus.
     services.push((
         "fader",
-        tokio::spawn(toolbox_core::fader::run(
-            handle.clone(),
-            presets.clone(),
+        spawn_service(
+            "fader",
             shutdown_rx.clone(),
-        )),
+            toolbox_core::fader::run(handle.clone(), presets.clone(), shutdown_rx.clone()),
+        ),
     ));
 
     // Canaux de la sortie vidéo : frames décodées (backend → fenêtre),
@@ -241,7 +244,7 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
         let shutdown = shutdown_rx.clone();
         services.push((
             "http",
-            tokio::spawn(async move {
+            spawn_service("http", shutdown_rx.clone(), async move {
                 if let Err(err) = toolbox_control_http::serve(http_config, app, shutdown).await {
                     error!(%err, "le serveur HTTP s'est arrêté en erreur");
                 }
@@ -259,7 +262,7 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
         let shutdown = shutdown_rx.clone();
         services.push((
             "osc",
-            tokio::spawn(async move {
+            spawn_service("osc", shutdown_rx.clone(), async move {
                 if let Err(err) = toolbox_control_osc::serve(osc_config, osc_bus, shutdown).await {
                     error!(%err, "le serveur OSC s'est arrêté en erreur");
                 }
@@ -272,7 +275,7 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
             let shutdown = shutdown_rx.clone();
             services.push((
                 "osc-feedback",
-                tokio::spawn(async move {
+                spawn_service("osc-feedback", shutdown_rx.clone(), async move {
                     if let Err(err) =
                         toolbox_control_osc::feedback(target, feedback_bus, shutdown).await
                     {
@@ -292,7 +295,7 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
         let shutdown = shutdown_rx.clone();
         services.push((
             "oscquery",
-            tokio::spawn(async move {
+            spawn_service("oscquery", shutdown_rx.clone(), async move {
                 if let Err(err) =
                     toolbox_control_http::oscquery::serve(bind, port, oscquery_state, shutdown)
                         .await
@@ -435,7 +438,7 @@ fn spawn_player<B: PlayerBackend + 'static>(
     let mut shutdown = shutdown_rx.clone();
     services.push((
         "player",
-        tokio::spawn(async move {
+        spawn_service("player", shutdown_rx.clone(), async move {
             tokio::select! {
                 () = player.run() => {},
                 _ = shutdown.changed() => {},
