@@ -1,0 +1,5 @@
+ See the log for details (C:\ProgramData\chocolatey\logs\chocolatey.log).
+
+Failures
+ - gstreamer-devel (exited -1) - Error while running 'C:\ProgramData\chocolatey\lib\gstreamer-devel\tools\chocolateyInstall.ps1'.
+ See log for details.
