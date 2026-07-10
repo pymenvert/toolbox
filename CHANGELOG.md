@@ -3,7 +3,11 @@
 Évolutions notables du node Toolbox. Format inspiré de
 [Keep a Changelog](https://keepachangelog.com/fr/), versionnage SemVer.
 
-## [Non publié]
+## [2.0.0] — 2026-07-11
+
+La V2 : synchronisation à la frame, console lumières Art-Net, séquenceur,
+fichiers du parc, interrupteurs de fonctions, edge blending et masques,
+santé système, OTA. (LUT .cube et mesh warp suivront en 2.1.0.)
 
 - **Edge blending + masques** (onglet Mapping) : bandes de fondu vers le
   noir sur chaque bord de la sortie (largeur par bord + gamma projecteur,

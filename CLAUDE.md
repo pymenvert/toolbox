@@ -118,6 +118,22 @@ Sous Windows, aucune dépendance système (midir utilise WinMM).
   Aperçu Dashboard, mot de passe optionnel et médias auto-rafraîchis y
   sont aussi (post-v1.0.0). La revue WebSocket est faite : Lagged→resync,
   ping, arrêt propre — rien à corriger.
+- v2.0.0 (2026-07-11, nuit autonome sur demande de Pym) : onglet
+  Fonctions (core::features + node::bascules, services réellement
+  arrêtés/relancés à chaud, fonctions.json), fenêtre dormante (canal
+  `enabled`, peintre détruit), **sync à la frame** (node::sync,
+  maître/suiveurs UDP auto-config, set_rate + INSTANT_RATE_CHANGE gst,
+  dérive mesurée < 2 ms en réel, test de convergence CI en médiane),
+  fichiers du parc (proxy + push serveur-side anti-SSRF, reqwest sans
+  TLS), **console Art-Net** (crate toolbox-artnet : trames ArtDMX figées
+  par test, faders/scènes/chasers, 30 Hz, lumieres.json), **séquenceur**
+  (core::sequenceur : cues = commandes du bus, GO/après/quotidien,
+  sequences.json), santé (pastilles fonctions + erreurs récentes +
+  dérive dans /api/system), OTA expérimental (control-http::ota, curl +
+  tar système, bascule à 3 temps avec .precedent), edge blending +
+  masques (BlendingState + 8 Masque, parité raster/warp.wgsl 29 vec4,
+  vérifiés au pixel, le fader fait glisser le blending). Restent pour
+  2.1 : LUT .cube, mesh warp (tâche #48), sorties NDI/RTSP.
 - La chaîne vidéo Pi (DRM/KMS) et le bench GStreamer sur matériel réel
   attendent le retour de Pym.
 

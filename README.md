@@ -8,7 +8,7 @@ Cibles : Raspberry Pi 4/5, Linux, Windows.
 > Cadrage complet (décisions, plan, architecture, recherches) : dossier
 > `Toolbox/docs/` du projet — ce repo ne contient que le code.
 
-## État — v1.1.0
+## État — v2.0.0
 
 La chaîne complète est fonctionnelle et testée (160+ tests, CI Linux +
 Windows + check ARM64) : **lecture vidéo réelle** (GStreamer, boucle sans
@@ -24,6 +24,14 @@ Côté exploitation : **retour d'état OSC** (les curseurs de Chataigne
 suivent le node), auto-découverte **OSCQuery + mDNS** (aucune IP à taper),
 **export diagnostic ZIP**, journal quotidien sur disque, supervision des
 services, arrêt propre `systemctl stop`, mot de passe optionnel de l'UI.
+
+La V2 ajoute : **synchronisation multi-node à la frame** (maître/suiveurs,
+dérive mesurée < 2 ms), **console lumières Art-Net** (faders, scènes,
+chasers), **séquenceur** (cues, enchaînements, programmation quotidienne),
+**fichiers du parc** (voir/pousser les médias de toutes les machines,
+1 → N), **interrupteurs de fonctions** (chaque service réellement arrêté
+à chaud, zéro ressource), **edge blending + masques**, page **santé**,
+mise à jour **OTA** expérimentale.
 
 📖 **[Manuel utilisateur](docs/manuel.html)** — démarrage rapide,
 calibrage pas à pas, référence OSC/MIDI/config, dépannage.
