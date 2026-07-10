@@ -120,7 +120,9 @@ jobs:
           set -o pipefail
           cargo clippy -p toolbox-gst --features gstreamer --all-targets -- -D warnings 2>&1 | tee gst.log
           cargo test -p toolbox-gst --features gstreamer 2>&1 | tee -a gst.log
-          cargo check -p toolbox-node --features gstreamer 2>&1 | tee -a gst.log
+          # --no-default-features : ni ALSA ni winit ici, seul le câblage
+          # gstreamer du node est vérifié (le reste l'est par le job check).
+          cargo check -p toolbox-node --no-default-features --features gstreamer 2>&1 | tee -a gst.log
       - name: Publier les logs en cas d'échec
         if: failure()
         run: |

@@ -118,7 +118,7 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
     // Canaux de la sortie vidéo : frames décodées (backend → fenêtre),
     // réglages à chaud (API web → fenêtre, initialisés depuis [output]) et
     // écrans détectés (fenêtre → API web).
-    let (video_tx, video_rx) = watch::channel(None);
+    let (video_tx, video_rx) = watch::channel::<Option<toolbox_engine::VideoFrame>>(None);
     let (output_settings_tx, output_settings_rx) = watch::channel(OutputSettings {
         monitor: config.output.monitor,
         fullscreen: config.output.fullscreen,
@@ -240,8 +240,14 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
         None
     };
     #[cfg(not(feature = "render"))]
-    if config.output.enabled {
-        warn!("fenêtre de sortie demandée mais ce binaire est compilé sans (feature `render`)");
+    {
+        // Pas de fenêtre dans ce binaire : canaux de sortie sans consommateur.
+        drop(video_rx);
+        drop(output_settings_rx);
+        drop(monitors_tx);
+        if config.output.enabled {
+            warn!("fenêtre de sortie demandée mais ce binaire est compilé sans (feature `render`)");
+        }
     }
 
     // MIDI (optionnel à la compilation : dépend d'ALSA sous Linux).
