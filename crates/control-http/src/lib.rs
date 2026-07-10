@@ -9,7 +9,8 @@
 //! - `GET /ws` : événements en direct (état + position de lecture) ;
 //! - `GET /ws/logs` : page de logs en direct ;
 //! - médiathèque : liste, upload (streaming, borné), renommage, suppression ;
-//! - presets : liste, suppression (save/load passent par des commandes) ;
+//! - presets : liste, suppression (save/load passent par des commandes) —
+//!   idem pour les presets de mapping (`/api/mapping-presets`) ;
 //! - `GET /api/system` : monitoring (CPU, mémoire, température).
 //!
 //! Sécurité V1 : réseau local de confiance (pas d'authentification — P4.4
@@ -36,7 +37,8 @@ use tracing::{info, warn};
 use toolbox_core::media::validate_upload_name;
 use toolbox_core::state::Event;
 use toolbox_core::{
-    BusHandle, Command, CoreError, LogBuffer, MediaInfo, MediaLibrary, PresetStore, Source,
+    BusHandle, Command, CoreError, LogBuffer, MappingStore, MediaInfo, MediaLibrary, PresetStore,
+    Source,
 };
 use toolbox_engine::PlaybackPosition;
 
@@ -68,6 +70,7 @@ pub struct HttpConfig {
 pub struct AppState {
     bus: BusHandle,
     presets: PresetStore,
+    mapping_presets: MappingStore,
     media: MediaLibrary,
     logs: LogBuffer,
     position: watch::Receiver<PlaybackPosition>,
@@ -77,9 +80,11 @@ pub struct AppState {
 }
 
 impl AppState {
+    #[allow(clippy::too_many_arguments)] // constructeur d'assemblage, appelé une fois.
     pub fn new(
         bus: BusHandle,
         presets: PresetStore,
+        mapping_presets: MappingStore,
         media: MediaLibrary,
         logs: LogBuffer,
         position: watch::Receiver<PlaybackPosition>,
@@ -89,6 +94,7 @@ impl AppState {
         Self {
             bus,
             presets,
+            mapping_presets,
             media,
             logs,
             position,
@@ -138,6 +144,8 @@ pub fn router(app: AppState) -> Router {
         .route("/api/command", post(post_command))
         .route("/api/presets", get(presets_list))
         .route("/api/presets/{name}", delete(preset_delete))
+        .route("/api/mapping-presets", get(mapping_presets_list))
+        .route("/api/mapping-presets/{name}", delete(mapping_preset_delete))
         .route("/api/media", get(media_list))
         // Un seul motif pour PUT et DELETE : deux motifs différents sur le
         // même segment ({name} et {*path}) seraient un conflit de routage.
@@ -229,6 +237,19 @@ async fn preset_delete(
 ) -> Result<StatusCode, ApiError> {
     app.presets.delete(&name)?;
     info!(preset = %name, "preset supprimé via l'API");
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn mapping_presets_list(State(app): State<AppState>) -> Result<Json<Vec<String>>, ApiError> {
+    Ok(Json(app.mapping_presets.list()?))
+}
+
+async fn mapping_preset_delete(
+    State(app): State<AppState>,
+    Path(name): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    app.mapping_presets.delete(&name)?;
+    info!(mapping = %name, "preset de mapping supprimé via l'API");
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -488,9 +509,13 @@ mod tests {
     fn testbed() -> TestBed {
         let dir = tempfile::tempdir().expect("tempdir");
         let presets = PresetStore::open(dir.path().join("presets")).expect("presets");
+        let mapping_presets =
+            MappingStore::open(dir.path().join("presets").join("mapping")).expect("mappings");
         let media = MediaLibrary::open(dir.path().join("media"), 1024 * 1024).expect("media");
         let logs = LogBuffer::new(64);
-        let bus = Bus::new(64, 64).with_presets(presets.clone());
+        let bus = Bus::new(64, 64)
+            .with_presets(presets.clone())
+            .with_mapping_presets(mapping_presets.clone());
         let handle = bus.handle();
         tokio::spawn(bus.run());
         let (_position_tx, position_rx) = watch::channel(PlaybackPosition::default());
@@ -503,6 +528,7 @@ mod tests {
         let app = AppState::new(
             handle,
             presets,
+            mapping_presets,
             media,
             logs,
             position_rx,
@@ -666,6 +692,8 @@ mod tests {
     async fn upload_too_large_is_refused_and_cleaned() {
         let dir = tempfile::tempdir().expect("tempdir");
         let presets = PresetStore::open(dir.path().join("presets")).expect("presets");
+        let mapping_presets =
+            MappingStore::open(dir.path().join("presets").join("mapping")).expect("mappings");
         let media = MediaLibrary::open(dir.path().join("media"), 8).expect("media");
         let logs = LogBuffer::new(8);
         let bus = Bus::new(8, 8);
@@ -675,6 +703,7 @@ mod tests {
         let app = AppState::new(
             handle,
             presets,
+            mapping_presets,
             media.clone(),
             logs,
             prx,
@@ -740,6 +769,76 @@ mod tests {
             .router
             .oneshot(
                 HttpRequest::delete("/api/presets/scene")
+                    .body(Body::empty())
+                    .expect("req"),
+            )
+            .await
+            .expect("resp");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn mapping_preset_api_lists_and_deletes() {
+        let bed = testbed();
+        // Sauvegarde du mapping seul via commande (comme l'UI le ferait).
+        let response = bed
+            .router
+            .clone()
+            .oneshot(
+                HttpRequest::post("/api/command")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"cmd":"mapping_save","name":"salon"}"#))
+                    .expect("req"),
+            )
+            .await
+            .expect("resp");
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        // Listé dans le dépôt de mapping…
+        let response = bed
+            .router
+            .clone()
+            .oneshot(
+                HttpRequest::get("/api/mapping-presets")
+                    .body(Body::empty())
+                    .expect("req"),
+            )
+            .await
+            .expect("resp");
+        let json = body_json(response).await;
+        assert_eq!(json[0], "salon");
+
+        // …et PAS dans les presets d'état complet (dépôts séparés).
+        let response = bed
+            .router
+            .clone()
+            .oneshot(
+                HttpRequest::get("/api/presets")
+                    .body(Body::empty())
+                    .expect("req"),
+            )
+            .await
+            .expect("resp");
+        let json = body_json(response).await;
+        assert_eq!(json.as_array().map(Vec::len), Some(0));
+
+        let response = bed
+            .router
+            .clone()
+            .oneshot(
+                HttpRequest::delete("/api/mapping-presets/salon")
+                    .body(Body::empty())
+                    .expect("req"),
+            )
+            .await
+            .expect("resp");
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+        let response = bed
+            .router
+            .oneshot(
+                HttpRequest::delete("/api/mapping-presets/salon")
                     .body(Body::empty())
                     .expect("req"),
             )

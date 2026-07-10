@@ -11,6 +11,7 @@
 //! `/volume f` `/playlist/set p1 p2 …` `/playlist/go i` `/playlist/next`
 //! `/playlist/prev` `/corner/<0-3> x y` `/rotation 0|90|180|270`
 //! `/flip h v` `/crop l t r b` `/color/<param> f` `/mapping/reset`
+//! `/mapping/enabled 0|1` `/mapping/save nom` `/mapping/load nom`
 //! `/pattern grid|checker|corners|off` `/preset/save nom` `/preset/load nom`
 //!
 //! Un message invalide est tracé (visible dans la page de logs) et ignoré :
@@ -183,6 +184,15 @@ pub fn map_message(addr: &str, args: &[OscType]) -> Result<Command, MapError> {
             }),
             _ => Err(bad("attendu : quatre floats (gauche, haut, droite, bas)")),
         },
+        "/mapping/enabled" => bool_arg(args, 0)
+            .map(|enabled| Command::SetMappingEnabled { enabled })
+            .ok_or_else(|| bad("attendu : booléen (0|1)")),
+        "/mapping/save" => string_arg(args, 0)
+            .map(|name| Command::MappingSave { name })
+            .ok_or_else(|| bad("attendu : nom (string)")),
+        "/mapping/load" => string_arg(args, 0)
+            .map(|name| Command::MappingLoad { name })
+            .ok_or_else(|| bad("attendu : nom (string)")),
         "/pattern" => parse_pattern(args).ok_or_else(|| bad("attendu : grid|checker|corners|off")),
         "/preset/save" => string_arg(args, 0)
             .map(|name| Command::PresetSave { name })
@@ -486,6 +496,36 @@ mod tests {
                 name: "scene_01".into()
             })
         );
+    }
+
+    #[test]
+    fn mapping_toggle_and_presets_map() {
+        // Toggle tolérant sur les types (int, bool), comme /flip.
+        assert_eq!(
+            map_message("/mapping/enabled", &[OscType::Int(0)]),
+            Ok(Command::SetMappingEnabled { enabled: false })
+        );
+        assert_eq!(
+            map_message("/mapping/enabled", &[OscType::Bool(true)]),
+            Ok(Command::SetMappingEnabled { enabled: true })
+        );
+        assert_eq!(
+            map_message("/mapping/save", &[OscType::String("salon".into())]),
+            Ok(Command::MappingSave {
+                name: "salon".into()
+            })
+        );
+        assert_eq!(
+            map_message("/mapping/load", &[OscType::String("salon".into())]),
+            Ok(Command::MappingLoad {
+                name: "salon".into()
+            })
+        );
+        // Argument manquant : erreur propre, pas de panique.
+        assert!(matches!(
+            map_message("/mapping/save", &[]),
+            Err(MapError::BadArguments { .. })
+        ));
     }
 
     #[test]
