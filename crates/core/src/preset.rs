@@ -1,15 +1,20 @@
-//! Presets : l'état complet du node sauvegardé/rechargé en JSON sur disque.
+//! Presets : documents JSON sauvegardés/rechargés sur disque.
 //!
-//! Un preset = un fichier `<name>.json` dans le dossier `presets/`.
+//! Un preset = un fichier `<name>.json` dans son dossier. Deux dépôts :
+//! - [`PresetStore`] : l'état complet du node (`presets/`) ;
+//! - [`MappingStore`] : le mapping seul (`presets/mapping/`), pour
+//!   enregistrer/charger un calage sans toucher au média ni à la couleur.
+//!
 //! Écriture atomique (fichier temporaire + rename) : un crash en pleine
 //! sauvegarde ne corrompt jamais un preset existant — exigence "solide".
 
 use std::fs;
 use std::io::Write;
+use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 
 use crate::error::CoreError;
-use crate::state::NodeState;
+use crate::state::{MappingState, NodeState};
 
 /// Caractères autorisés dans un nom de preset (sécurité : pas de traversée
 /// de chemin type `../../etc/passwd`, pas d'espaces exotiques).
@@ -26,30 +31,67 @@ fn validate_name(name: &str) -> Result<(), CoreError> {
     }
 }
 
-/// Dépôt de presets sur disque.
-#[derive(Debug, Clone)]
-pub struct PresetStore {
-    dir: PathBuf,
+/// Un document stockable : sérialisable et auto-validé au chargement.
+pub trait Validated: serde::Serialize + serde::de::DeserializeOwned {
+    fn validate(&self) -> Result<(), CoreError>;
 }
 
-impl PresetStore {
+impl Validated for NodeState {
+    fn validate(&self) -> Result<(), CoreError> {
+        NodeState::validate(self)
+    }
+}
+
+impl Validated for MappingState {
+    fn validate(&self) -> Result<(), CoreError> {
+        MappingState::validate(self)
+    }
+}
+
+/// Dépôt de presets d'état complet (`presets/`).
+pub type PresetStore = Store<NodeState>;
+/// Dépôt de presets de mapping seul (`presets/mapping/`).
+pub type MappingStore = Store<MappingState>;
+
+/// Dépôt de documents JSON sur disque, générique sur le type stocké.
+#[derive(Debug)]
+pub struct Store<T> {
+    dir: PathBuf,
+    _stored: PhantomData<T>,
+}
+
+// Clone manuel : `derive` exigerait `T: Clone` alors que le store ne
+// contient aucun `T`.
+impl<T> Clone for Store<T> {
+    fn clone(&self) -> Self {
+        Self {
+            dir: self.dir.clone(),
+            _stored: PhantomData,
+        }
+    }
+}
+
+impl<T: Validated> Store<T> {
     /// Ouvre (et crée si besoin) le dossier de presets.
     pub fn open(dir: impl Into<PathBuf>) -> Result<Self, CoreError> {
         let dir = dir.into();
         fs::create_dir_all(&dir).map_err(|e| CoreError::io(dir.display().to_string(), e))?;
-        Ok(Self { dir })
+        Ok(Self {
+            dir,
+            _stored: PhantomData,
+        })
     }
 
     fn path_of(&self, name: &str) -> PathBuf {
         self.dir.join(format!("{name}.json"))
     }
 
-    /// Sauvegarde atomique de l'état sous `name` : écriture dans un fichier
+    /// Sauvegarde atomique du document sous `name` : écriture dans un fichier
     /// temporaire, `sync_all` (flush disque — un Pi peut perdre le courant à
     /// tout instant), puis rename atomique par-dessus l'ancien preset.
-    pub fn save(&self, name: &str, state: &NodeState) -> Result<(), CoreError> {
+    pub fn save(&self, name: &str, value: &T) -> Result<(), CoreError> {
         validate_name(name)?;
-        let json = serde_json::to_vec_pretty(state)?;
+        let json = serde_json::to_vec_pretty(value)?;
         let final_path = self.path_of(name);
         let tmp_path = self.dir.join(format!(".{name}.json.tmp"));
         {
@@ -65,19 +107,19 @@ impl PresetStore {
         Ok(())
     }
 
-    /// Charge le preset `name`. L'état est **validé** après lecture : un
+    /// Charge le preset `name`. Le document est **validé** après lecture : un
     /// fichier corrompu ou édité à la main avec des valeurs hors bornes est
     /// refusé plutôt que de devenir l'état du node.
-    pub fn load(&self, name: &str) -> Result<NodeState, CoreError> {
+    pub fn load(&self, name: &str) -> Result<T, CoreError> {
         validate_name(name)?;
         let path = self.path_of(name);
         if !path.exists() {
             return Err(CoreError::PresetNotFound(name.to_string()));
         }
         let bytes = fs::read(&path).map_err(|e| CoreError::io(path.display().to_string(), e))?;
-        let state: NodeState = serde_json::from_slice(&bytes)?;
-        state.validate()?;
-        Ok(state)
+        let value: T = serde_json::from_slice(&bytes)?;
+        value.validate()?;
+        Ok(value)
     }
 
     /// Liste les presets disponibles (triés, sans extension).
@@ -188,6 +230,29 @@ mod tests {
         // JSON illisible → erreur propre, pas de panic.
         std::fs::write(&path, b"{pas du json").expect("corrupt");
         assert!(store.load("ok").is_err());
+    }
+
+    #[test]
+    fn mapping_store_roundtrip_and_validation() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store: MappingStore =
+            Store::open(dir.path().join("presets").join("mapping")).expect("open");
+
+        let mut mapping = MappingState::default();
+        mapping.corners[2] = crate::state::Corner { x: 0.9, y: 0.85 };
+        mapping.enabled = false;
+        store.save("salon", &mapping).expect("save");
+        assert_eq!(store.load("salon").expect("load"), mapping);
+        assert_eq!(store.list().expect("list"), vec!["salon"]);
+
+        // Un fichier trafiqué (coin hors bornes) est refusé au chargement.
+        let path = store.dir().join("salon.json");
+        let text = std::fs::read_to_string(&path).expect("read");
+        std::fs::write(&path, text.replace("0.9", "42.0")).expect("tamper");
+        assert!(matches!(
+            store.load("salon"),
+            Err(CoreError::OutOfRange { .. })
+        ));
     }
 
     #[test]

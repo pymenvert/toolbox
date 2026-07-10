@@ -23,5 +23,5 @@ pub use config::NodeConfig;
 pub use error::CoreError;
 pub use logging::{LogBuffer, LogEntry};
 pub use media::{MediaInfo, MediaLibrary};
-pub use preset::PresetStore;
-pub use state::{Event, LoopMode, NodeState, Rotation, Transport};
+pub use preset::{MappingStore, PresetStore};
+pub use state::{Event, LoopMode, MappingState, NodeState, Rotation, Transport};

@@ -64,6 +64,9 @@ pub enum TestPattern {
 /// | `set_crop`         | `/crop <l> <t> <r> <b>`      |
 /// | `color_set`        | `/color/<param> <f32>`       |
 /// | `mapping_reset`    | `/mapping/reset`             |
+/// | `set_mapping_enabled` | `/mapping/enabled <0|1>`  |
+/// | `mapping_save`     | `/mapping/save <name>`       |
+/// | `mapping_load`     | `/mapping/load <name>`       |
 /// | `set_test_pattern` | `/pattern <name|off>`        |
 /// | `preset_save`      | `/preset/save <name>`        |
 /// | `preset_load`      | `/preset/load <name>`        |
@@ -124,6 +127,20 @@ pub enum Command {
         value: f32,
     },
     MappingReset,
+    /// Active/désactive le mapping sans perdre les réglages (bypass).
+    SetMappingEnabled {
+        enabled: bool,
+    },
+    /// Sauvegarde le mapping seul (coins, rotation, miroirs, recadrage) sous
+    /// `name` — indépendant des presets d'état complet.
+    MappingSave {
+        name: String,
+    },
+    /// Remplace le mapping courant par le preset de mapping `name`.
+    /// La lecture en cours n'est pas interrompue.
+    MappingLoad {
+        name: String,
+    },
     /// Affiche une mire de test (`None` = retour au média).
     SetTestPattern {
         pattern: Option<TestPattern>,
@@ -198,6 +215,13 @@ mod tests {
             Command::PresetLoad {
                 name: "scene_01".into(),
             },
+            Command::SetMappingEnabled { enabled: false },
+            Command::MappingSave {
+                name: "salon".into(),
+            },
+            Command::MappingLoad {
+                name: "salon".into(),
+            },
         ] {
             let json = serde_json::to_string(&cmd).expect("serialize");
             let back: Command = serde_json::from_str(&json).expect("deserialize");
@@ -263,6 +287,35 @@ mod tests {
                 })
                 .expect("ser"),
                 r#"{"cmd":"color_set","param":"gain_r","value":1.5}"#,
+            ),
+        ];
+        for (got, want) in cases {
+            assert_eq!(got, want);
+        }
+    }
+
+    /// Formats JSON des commandes de mapping (toggle + presets dédiés) :
+    /// contrat public, figé par test.
+    #[test]
+    fn mapping_commands_json_format_is_stable() {
+        let cases = [
+            (
+                serde_json::to_string(&Command::SetMappingEnabled { enabled: false }).expect("ser"),
+                r#"{"cmd":"set_mapping_enabled","enabled":false}"#,
+            ),
+            (
+                serde_json::to_string(&Command::MappingSave {
+                    name: "salon".into(),
+                })
+                .expect("ser"),
+                r#"{"cmd":"mapping_save","name":"salon"}"#,
+            ),
+            (
+                serde_json::to_string(&Command::MappingLoad {
+                    name: "salon".into(),
+                })
+                .expect("ser"),
+                r#"{"cmd":"mapping_load","name":"salon"}"#,
             ),
         ];
         for (got, want) in cases {

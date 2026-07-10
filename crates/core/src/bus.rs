@@ -15,7 +15,7 @@ use tokio::sync::{broadcast, mpsc, watch};
 use tracing::{info, warn};
 
 use crate::command::Command;
-use crate::preset::PresetStore;
+use crate::preset::{MappingStore, PresetStore};
 use crate::state::{Event, NodeState};
 
 /// Origine d'une commande, pour les logs et le debug terrain
@@ -89,6 +89,7 @@ pub struct Bus {
     events: broadcast::Sender<Event>,
     state_tx: watch::Sender<NodeState>,
     presets: Option<PresetStore>,
+    mapping_presets: Option<MappingStore>,
     handle: BusHandle,
 }
 
@@ -111,6 +112,7 @@ impl Bus {
             events,
             state_tx,
             presets: None,
+            mapping_presets: None,
             handle,
         }
     }
@@ -120,6 +122,14 @@ impl Bus {
     #[must_use]
     pub fn with_presets(mut self, store: PresetStore) -> Self {
         self.presets = Some(store);
+        self
+    }
+
+    /// Attache un dépôt de presets de mapping : `mapping_save`/`mapping_load`
+    /// deviennent fonctionnels. Sans dépôt, ces commandes sont refusées.
+    #[must_use]
+    pub fn with_mapping_presets(mut self, store: MappingStore) -> Self {
+        self.mapping_presets = Some(store);
         self
     }
 
@@ -140,6 +150,7 @@ impl Bus {
             &self.events,
             &self.state_tx,
             self.presets.as_ref(),
+            self.mapping_presets.as_ref(),
             source,
             command,
         )
@@ -150,6 +161,7 @@ impl Bus {
         events: &broadcast::Sender<Event>,
         state_tx: &watch::Sender<NodeState>,
         presets: Option<&PresetStore>,
+        mapping_presets: Option<&MappingStore>,
         source: Source,
         command: &Command,
     ) -> Vec<Event> {
@@ -174,6 +186,28 @@ impl Bus {
                 }),
                 None => Err(crate::error::CoreError::InvalidCommand(
                     "aucun dépôt de presets configuré".into(),
+                )),
+            },
+            Command::MappingSave { name } => match mapping_presets {
+                Some(store) => store
+                    .save(name, &state.mapping)
+                    .map(|()| vec![Event::MappingSaved { name: name.clone() }]),
+                None => Err(crate::error::CoreError::InvalidCommand(
+                    "aucun dépôt de presets de mapping configuré".into(),
+                )),
+            },
+            // Ne remplace QUE le mapping : la lecture en cours continue
+            // (pas de StateReplaced, qui resynchroniserait le player).
+            Command::MappingLoad { name } => match mapping_presets {
+                Some(store) => store.load(name).map(|mapping| {
+                    state.mapping = mapping.clone();
+                    vec![Event::MappingLoaded {
+                        name: name.clone(),
+                        mapping,
+                    }]
+                }),
+                None => Err(crate::error::CoreError::InvalidCommand(
+                    "aucun dépôt de presets de mapping configuré".into(),
                 )),
             },
             other => state.apply(other),
@@ -210,6 +244,7 @@ impl Bus {
             events,
             state_tx,
             presets,
+            mapping_presets,
             handle,
         } = self;
         drop(handle);
@@ -220,6 +255,7 @@ impl Bus {
                 &events,
                 &state_tx,
                 presets.as_ref(),
+                mapping_presets.as_ref(),
                 source,
                 &command,
             );
@@ -426,5 +462,73 @@ mod tests {
         assert!(emitted.is_empty());
         assert_eq!(bus.state().player.volume, 0.7);
         assert_eq!(bus.state().player.transport, Transport::Stopped);
+    }
+
+    #[tokio::test]
+    async fn mapping_save_and_load_via_bus_keeps_playback() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = MappingStore::open(dir.path().join("presets").join("mapping")).expect("open");
+        let mut bus = Bus::new(16, 16).with_mapping_presets(store);
+
+        // Calage : un coin déplacé, puis sauvegarde du mapping seul.
+        bus.dispatch(
+            Source::Http,
+            &Command::CornerSet {
+                index: 2,
+                x: 0.8,
+                y: 0.9,
+            },
+        );
+        let saved = bus.dispatch(
+            Source::Http,
+            &Command::MappingSave {
+                name: "salon".into(),
+            },
+        );
+        assert_eq!(
+            saved,
+            vec![Event::MappingSaved {
+                name: "salon".into()
+            }]
+        );
+
+        // Lecture en cours + mapping remis à zéro entre-temps.
+        bus.dispatch(
+            Source::Http,
+            &Command::Load {
+                path: "clips/a.mp4".into(),
+            },
+        );
+        bus.dispatch(Source::Http, &Command::Play);
+        bus.dispatch(Source::Http, &Command::MappingReset);
+
+        // Recharger le mapping : restauré, et la lecture n'est PAS interrompue
+        // (un seul événement MappingLoaded, pas de StateReplaced).
+        let emitted = bus.dispatch(
+            Source::Http,
+            &Command::MappingLoad {
+                name: "salon".into(),
+            },
+        );
+        assert_eq!(emitted.len(), 1);
+        let Event::MappingLoaded { name, mapping } = &emitted[0] else {
+            panic!("attendu MappingLoaded, reçu {:?}", emitted[0]);
+        };
+        assert_eq!(name, "salon");
+        assert_eq!(mapping.corners[2], crate::state::Corner { x: 0.8, y: 0.9 });
+        assert_eq!(&bus.state().mapping, mapping);
+        assert_eq!(bus.state().player.transport, Transport::Playing);
+        assert_eq!(bus.state().player.media.as_deref(), Some("clips/a.mp4"));
+    }
+
+    #[tokio::test]
+    async fn mapping_preset_commands_without_store_are_rejected() {
+        let mut bus = Bus::new(4, 4);
+        assert!(bus
+            .dispatch(Source::Osc, &Command::MappingSave { name: "x".into() })
+            .is_empty());
+        assert!(bus
+            .dispatch(Source::Osc, &Command::MappingLoad { name: "x".into() })
+            .is_empty());
     }
 }

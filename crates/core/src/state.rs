@@ -67,6 +67,11 @@ pub struct CropState {
 /// les presets écrits par d'anciennes versions restent chargeables.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MappingState {
+    /// Mapping actif ? À `false`, le rendu ignore tout le bloc (coins,
+    /// rotation, miroirs, recadrage) : image brute plein cadre. Les valeurs
+    /// sont conservées et reprennent effet à la réactivation.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
     pub corners: [Corner; 4],
     #[serde(default)]
     pub rotation: Rotation,
@@ -81,6 +86,7 @@ pub struct MappingState {
 impl Default for MappingState {
     fn default() -> Self {
         Self {
+            enabled: true,
             corners: [
                 Corner { x: 0.0, y: 0.0 },
                 Corner { x: 1.0, y: 0.0 },
@@ -93,6 +99,26 @@ impl Default for MappingState {
             crop: CropState::default(),
         }
     }
+}
+
+impl MappingState {
+    /// Invariants du mapping seul (partagés avec la validation de l'état
+    /// complet et le chargement d'un preset de mapping).
+    pub fn validate(&self) -> Result<(), CoreError> {
+        for corner in &self.corners {
+            check_range("corner.x", corner.x, -0.5, 1.5)?;
+            check_range("corner.y", corner.y, -0.5, 1.5)?;
+        }
+        check_range("crop.left", self.crop.left, 0.0, 0.45)?;
+        check_range("crop.top", self.crop.top, 0.0, 0.45)?;
+        check_range("crop.right", self.crop.right, 0.0, 0.45)?;
+        check_range("crop.bottom", self.crop.bottom, 0.0, 0.45)?;
+        Ok(())
+    }
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn one() -> f32 {
@@ -263,6 +289,19 @@ pub enum Event {
         value: f32,
     },
     MappingReset,
+    MappingEnabledChanged {
+        enabled: bool,
+    },
+    /// Un preset de mapping a été sauvegardé sur disque.
+    MappingSaved {
+        name: String,
+    },
+    /// Un preset de mapping a remplacé le mapping courant. Contrairement à
+    /// `StateReplaced`, le player n'est pas concerné : la lecture continue.
+    MappingLoaded {
+        name: String,
+        mapping: MappingState,
+    },
     TestPatternChanged {
         pattern: Option<TestPattern>,
     },
@@ -494,15 +533,20 @@ impl NodeState {
                 self.mapping = MappingState::default();
                 Ok(vec![Event::MappingReset])
             }
+            Command::SetMappingEnabled { enabled } => {
+                self.mapping.enabled = *enabled;
+                Ok(vec![Event::MappingEnabledChanged { enabled: *enabled }])
+            }
             Command::SetTestPattern { pattern } => {
                 self.test_pattern = *pattern;
                 Ok(vec![Event::TestPatternChanged { pattern: *pattern }])
             }
-            Command::PresetSave { .. } | Command::PresetLoad { .. } => {
-                Err(CoreError::InvalidCommand(
-                    "les presets sont gérés par le bus (PresetStore), pas par l'état".into(),
-                ))
-            }
+            Command::PresetSave { .. }
+            | Command::PresetLoad { .. }
+            | Command::MappingSave { .. }
+            | Command::MappingLoad { .. } => Err(CoreError::InvalidCommand(
+                "les presets sont gérés par le bus (stores sur disque), pas par l'état".into(),
+            )),
         }
     }
 
@@ -550,15 +594,7 @@ impl NodeState {
                 )));
             }
         }
-        for corner in &self.mapping.corners {
-            check_range("corner.x", corner.x, -0.5, 1.5)?;
-            check_range("corner.y", corner.y, -0.5, 1.5)?;
-        }
-        let crop = &self.mapping.crop;
-        check_range("crop.left", crop.left, 0.0, 0.45)?;
-        check_range("crop.top", crop.top, 0.0, 0.45)?;
-        check_range("crop.right", crop.right, 0.0, 0.45)?;
-        check_range("crop.bottom", crop.bottom, 0.0, 0.45)?;
+        self.mapping.validate()?;
         for (param, value) in [
             (ColorParam::Brightness, self.color.brightness),
             (ColorParam::Contrast, self.color.contrast),
@@ -869,6 +905,8 @@ mod tests {
         let s: NodeState = serde_json::from_str(legacy).expect("legacy");
         assert_eq!(s.player.loop_mode, LoopMode::Off);
         assert_eq!(s.mapping.rotation, Rotation::R0);
+        // Champ ajouté après coup : un preset ancien reste actif par défaut.
+        assert!(s.mapping.enabled);
         assert_eq!(s.color.gain_r, 1.0);
         assert_eq!(s.test_pattern, None);
         s.validate().expect("valide");
@@ -878,6 +916,26 @@ mod tests {
     fn presets_rejected_by_state() {
         let mut s = NodeState::default();
         assert!(s.apply(&Command::PresetSave { name: "x".into() }).is_err());
+        assert!(s.apply(&Command::MappingSave { name: "x".into() }).is_err());
+        assert!(s.apply(&Command::MappingLoad { name: "x".into() }).is_err());
+    }
+
+    #[test]
+    fn mapping_enabled_toggles_and_survives_reset() {
+        let mut s = NodeState::default();
+        assert!(s.mapping.enabled, "actif par défaut");
+        let ev = s
+            .apply(&Command::SetMappingEnabled { enabled: false })
+            .expect("disable");
+        assert_eq!(ev, vec![Event::MappingEnabledChanged { enabled: false }]);
+        assert!(!s.mapping.enabled);
+        // Les réglages sont conservés pendant la désactivation.
+        s.apply(&Command::SetRotation { degrees: 90 })
+            .expect("rotation");
+        assert_eq!(s.mapping.rotation, Rotation::R90);
+        // Le reset du mapping réactive (état par défaut complet).
+        s.apply(&Command::MappingReset).expect("reset");
+        assert!(s.mapping.enabled);
     }
 
     #[test]
