@@ -5,6 +5,13 @@
 
 ## [Non publié]
 
+- **Edge blending + masques** (onglet Mapping) : bandes de fondu vers le
+  noir sur chaque bord de la sortie (largeur par bord + gamma projecteur,
+  OSC `/blending g d h b gamma`) pour recouvrir plusieurs projecteurs sans
+  sur-brillance ; et jusqu'à 8 masques noirs (quadrilatères en espace de
+  sortie) pour cacher fenêtres et reliefs. Même formule au pixel près dans
+  la référence CPU et le shader GPU (validé naga) ; le fondu de preset
+  fait aussi glisser le blending. Vérifié au pixel sur l'aperçu réel.
 - **Mise à jour OTA (expérimental)** : page Système → « Mise à jour ».
   Trois temps prudents : vérifier la dernière release GitHub, télécharger
   le binaire de la plateforme À CÔTÉ (garde-fous : taille, format ;

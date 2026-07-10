@@ -32,4 +32,6 @@ pub use media::{MediaInfo, MediaLibrary};
 pub use output::{MonitorInfo, OutputSettings};
 pub use preset::{MappingStore, PresetStore};
 pub use source::MediaSource;
-pub use state::{Event, LoopMode, MappingState, NodeState, Rotation, Transport};
+pub use state::{
+    BlendingState, Event, LoopMode, MappingState, Masque, NodeState, Rotation, Transport,
+};

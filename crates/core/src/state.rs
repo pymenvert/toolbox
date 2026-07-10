@@ -60,6 +60,39 @@ pub struct CropState {
     pub bottom: f32,
 }
 
+/// Fondu de bords (edge blending, V2) : sur chaque bord de la SORTIE, une
+/// bande où l'image glisse vers le noir — pour recouvrir deux projecteurs
+/// sans sur-brillance. Largeurs en fraction de la sortie (0 = pas de bande),
+/// `gamma` compense la réponse du projecteur (2.2 typique).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct BlendingState {
+    pub gauche: f32,
+    pub droite: f32,
+    pub haut: f32,
+    pub bas: f32,
+    pub gamma: f32,
+}
+
+impl Default for BlendingState {
+    fn default() -> Self {
+        Self {
+            gauche: 0.0,
+            droite: 0.0,
+            haut: 0.0,
+            bas: 0.0,
+            gamma: 2.2,
+        }
+    }
+}
+
+/// Un masque (V2) : un quadrilatère NOIR en espace de sortie (cacher une
+/// fenêtre, un relief…). Coordonnées normalisées comme les coins du mapping.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Masque {
+    pub corners: [Corner; 4],
+}
+
 /// Mapping 4 coins + orientation + recadrage.
 /// Ordre des coins : 0=HG, 1=HD, 2=BD, 3=BG.
 ///
@@ -309,6 +342,12 @@ pub struct NodeState {
     /// Effets (défauts serde : les presets anciens restent chargeables).
     #[serde(default)]
     pub effects: EffectsState,
+    /// Fondu de bords multi-projecteurs (défauts serde : anciens presets OK).
+    #[serde(default)]
+    pub blending: BlendingState,
+    /// Masques noirs en espace de sortie (8 max).
+    #[serde(default)]
+    pub masques: Vec<Masque>,
     /// Mire de test affichée à la place du média (`None` = média normal).
     /// Sauvegardée dans les presets : un preset "réglage VP" est légitime.
     #[serde(default)]
@@ -390,6 +429,19 @@ pub enum Event {
     },
     TestPatternChanged {
         pattern: Option<TestPattern>,
+    },
+    /// Fondu de bords modifié.
+    BlendingChanged {
+        blending: BlendingState,
+    },
+    /// Masque posé ou remplacé.
+    MasqueChanged {
+        index: u8,
+        corners: [Corner; 4],
+    },
+    /// Masque supprimé.
+    MasqueSupprimeEvt {
+        index: u8,
     },
     PresetSaved {
         name: String,
@@ -629,6 +681,63 @@ impl NodeState {
                     value: *value,
                 }])
             }
+            Command::BlendingSet {
+                gauche,
+                droite,
+                haut,
+                bas,
+                gamma,
+            } => {
+                for (nom, valeur) in [
+                    ("blending.gauche", *gauche),
+                    ("blending.droite", *droite),
+                    ("blending.haut", *haut),
+                    ("blending.bas", *bas),
+                ] {
+                    check_range(nom, valeur, 0.0, 0.45)?;
+                }
+                check_range("blending.gamma", *gamma, 0.5, 4.0)?;
+                self.blending = BlendingState {
+                    gauche: *gauche,
+                    droite: *droite,
+                    haut: *haut,
+                    bas: *bas,
+                    gamma: *gamma,
+                };
+                Ok(vec![Event::BlendingChanged {
+                    blending: self.blending,
+                }])
+            }
+            Command::MasqueSet { index, corners } => {
+                for corner in corners {
+                    check_range("masque.x", corner.x, -0.5, 1.5)?;
+                    check_range("masque.y", corner.y, -0.5, 1.5)?;
+                }
+                let index = usize::from(*index);
+                if index < self.masques.len() {
+                    self.masques[index].corners = *corners;
+                } else if index == self.masques.len() && index < 8 {
+                    self.masques.push(Masque { corners: *corners });
+                } else {
+                    return Err(CoreError::InvalidCommand(format!(
+                        "index de masque invalide : {index} ({} masques, 8 max)",
+                        self.masques.len()
+                    )));
+                }
+                #[allow(clippy::cast_possible_truncation)] // < 8
+                Ok(vec![Event::MasqueChanged {
+                    index: index as u8,
+                    corners: *corners,
+                }])
+            }
+            Command::MasqueSupprime { index } => {
+                let i = usize::from(*index);
+                if i >= self.masques.len() {
+                    return Err(CoreError::InvalidCommand(format!("masque {i} inexistant")));
+                }
+                self.masques.remove(i);
+                Ok(vec![Event::MasqueSupprimeEvt { index: *index }])
+            }
             Command::MappingReset => {
                 self.mapping = MappingState::default();
                 Ok(vec![Event::MappingReset])
@@ -716,6 +825,27 @@ impl NodeState {
     pub fn validate(&self) -> Result<(), CoreError> {
         check_range("player.volume", self.player.volume, 0.0, 1.0)?;
         check_range("player.rate", self.player.rate, 0.25, 4.0)?;
+        for (nom, valeur) in [
+            ("blending.gauche", self.blending.gauche),
+            ("blending.droite", self.blending.droite),
+            ("blending.haut", self.blending.haut),
+            ("blending.bas", self.blending.bas),
+        ] {
+            check_range(nom, valeur, 0.0, 0.45)?;
+        }
+        check_range("blending.gamma", self.blending.gamma, 0.5, 4.0)?;
+        if self.masques.len() > 8 {
+            return Err(CoreError::InvalidCommand(format!(
+                "trop de masques : {} (8 max)",
+                self.masques.len()
+            )));
+        }
+        for masque in &self.masques {
+            for corner in &masque.corners {
+                check_range("masque.x", corner.x, -0.5, 1.5)?;
+                check_range("masque.y", corner.y, -0.5, 1.5)?;
+            }
+        }
         if let Some(media) = &self.player.media {
             validate_media_path(media)?;
         }

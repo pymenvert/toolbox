@@ -374,6 +374,23 @@
           <div class="hint">Enregistre uniquement le mapping (coins, orientation, recadrage) &mdash; pas le m&eacute;dia ni la couleur. Charger n&rsquo;interrompt pas la lecture ; &laquo;&nbsp;Fondu&nbsp;&raquo; y glisse en 2&nbsp;s.</div>
         </div>
         <div class="card">
+          <h3>Edge blending</h3>
+          <div class="hint" style="margin-bottom:8px">Bandes de fondu vers le noir sur
+          les bords de la sortie — pour recouvrir deux projecteurs sans sur-brillance.</div>
+          <div id="blendRows"></div>
+          <div class="hint">Gamma 2.2 = projecteur typique. R&eacute;glable aussi en OSC :
+          <code>/blending g d h b gamma</code>.</div>
+        </div>
+        <div class="card">
+          <h3>Masques</h3>
+          <ul class="plist" id="masqueList"></ul>
+          <div class="rowbtns">
+            <button id="masqueAjoute" class="mini">+ masque (rectangle central)</button>
+          </div>
+          <div class="hint">Zones NOIRES en espace de sortie (cacher une fen&ecirc;tre, un
+          relief). Ajuste les coins au clavier dans la liste (x,y normalis&eacute;s 0..1).</div>
+        </div>
+        <div class="card">
           <h3>Sortie</h3>
           <div class="presetRow">
             <select id="outMonitor" style="flex:1;min-width:120px"></select>
@@ -822,6 +839,7 @@ function applyState(s) {
   state = s;
   renderTransport(); renderMediaInfo(); renderVolume(); renderLoop();
   renderPlaylist(); renderMapping(); renderColor();
+  renderBlending(); renderMasques(); renderEffects();
 }
 
 function onEvent(m) {
@@ -855,6 +873,14 @@ function onEvent(m) {
         flip_h: false, flip_v: false, crop: { left:0, top:0, right:0, bottom:0 } };
       renderMapping(); break;
     case "test_pattern_changed": state.test_pattern = m.pattern; renderMapping(); break;
+    case "blending_changed": state.blending = m.blending; renderBlending(); break;
+    case "masque_changed":
+      if (!state.masques) state.masques = [];
+      state.masques[m.index] = { corners: m.corners };
+      renderMasques(); break;
+    case "masque_supprime_evt":
+      if (state.masques) state.masques.splice(m.index, 1);
+      renderMasques(); break;
     case "preset_saved": toast("Preset « " + m.name + " » sauvegardé"); loadPresets(); break;
     case "preset_loaded": toast("Preset « " + m.name + " » chargé"); loadPresets(); break;
     case "preset_fade_started": toast("Fondu vers « " + m.name + " » (" + m.seconds + " s)"); break;
@@ -872,7 +898,7 @@ $$("nav a").forEach(a => a.addEventListener("click", () => {
   const p = a.dataset.page;
   $$(".page").forEach(s => s.classList.toggle("visible", s.id === "page-" + p));
   $("#pagetitle").textContent = pageTitles[p];
-  if (p === "mapping") sizeStage();
+  if (p === "mapping") { sizeStage(); renderBlending(); renderMasques(); }
   if (p === "features") loadFeatures();
   if (p === "lights") loadDmx();
   if (p === "cues") { loadCues(); loadMedia(); loadPresets(); }
@@ -1216,6 +1242,90 @@ $$(".mirebtn").forEach(b => b.addEventListener("click", () => {
 $("#mapReset").addEventListener("click", () => sendCmd({ cmd: "mapping_reset" }));
 $("#mapEnabled").addEventListener("change", e => {
   sendCmd({ cmd: "set_mapping_enabled", enabled: e.target.checked });
+});
+
+/* Edge blending + masques (V2). */
+const blendDefs = [["gauche", "Gauche"], ["droite", "Droite"], ["haut", "Haut"], ["bas", "Bas"], ["gamma", "Gamma"]];
+function renderBlending() {
+  const zone = $("#blendRows");
+  if (!zone || !state) return;
+  const b = state.blending || { gauche: 0, droite: 0, haut: 0, bas: 0, gamma: 2.2 };
+  if (!zone.children.length) {
+    blendDefs.forEach(([clef, nom]) => {
+      const row = document.createElement("div");
+      row.className = "presetRow";
+      row.style.alignItems = "center";
+      const lab = document.createElement("label");
+      lab.className = "muted"; lab.style.cssText = "font-size:.85em;width:60px"; lab.textContent = nom;
+      const range = document.createElement("input");
+      range.type = "range"; range.dataset.blend = clef; range.style.flex = "1";
+      if (clef === "gamma") { range.min = 0.5; range.max = 4; range.step = 0.05; }
+      else { range.min = 0; range.max = 0.45; range.step = 0.005; }
+      const val = document.createElement("span");
+      val.style.cssText = "font-variant-numeric:tabular-nums;width:46px;text-align:right;font-size:12px;color:var(--muted)";
+      let dernier = 0;
+      const envoie = () => {
+        const courant = {};
+        $$("#blendRows input[data-blend]").forEach(i => { courant[i.dataset.blend] = +i.value; });
+        sendCmd({ cmd: "blending_set", gauche: courant.gauche, droite: courant.droite,
+          haut: courant.haut, bas: courant.bas, gamma: courant.gamma });
+      };
+      range.addEventListener("input", () => {
+        val.textContent = (+range.value).toFixed(clef === "gamma" ? 2 : 3);
+        const t = Date.now();
+        if (t - dernier > 80) { dernier = t; envoie(); }
+      });
+      range.addEventListener("change", envoie);
+      row.appendChild(lab); row.appendChild(range); row.appendChild(val);
+      zone.appendChild(row);
+    });
+  }
+  $$("#blendRows input[data-blend]").forEach(range => {
+    if (document.activeElement === range) return; // pas de recalage en plein drag
+    const v = b[range.dataset.blend];
+    range.value = v;
+    range.nextElementSibling.textContent = (+v).toFixed(range.dataset.blend === "gamma" ? 2 : 3);
+  });
+}
+function renderMasques() {
+  const ul = $("#masqueList");
+  if (!ul || !state) return;
+  const masques = state.masques || [];
+  ul.innerHTML = "";
+  if (!masques.length) ul.innerHTML = '<li class="empty" style="border:none">Aucun masque.</li>';
+  masques.forEach((m, index) => {
+    const li = document.createElement("li");
+    li.style.flexWrap = "wrap";
+    const nm = document.createElement("span"); nm.className = "nm"; nm.textContent = "Masque " + (index + 1);
+    const del = document.createElement("button"); del.className = "mini danger"; del.textContent = "✕";
+    del.addEventListener("click", () => sendCmd({ cmd: "masque_supprime", index: index }));
+    li.appendChild(nm); li.appendChild(del);
+    const grille = document.createElement("div");
+    grille.style.cssText = "flex-basis:100%;display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding-top:4px";
+    m.corners.forEach((c, ci) => {
+      ["x", "y"].forEach(axe => {
+        const inp = document.createElement("input");
+        inp.type = "number"; inp.step = 0.01; inp.min = -0.5; inp.max = 1.5;
+        inp.value = (+c[axe]).toFixed(2);
+        inp.title = "coin " + ci + " · " + axe;
+        inp.style.cssText = "font-size:11px;padding:3px";
+        inp.addEventListener("change", () => {
+          const corners = state.masques[index].corners.map(k => ({ x: k.x, y: k.y }));
+          corners[ci][axe] = +inp.value;
+          sendCmd({ cmd: "masque_set", index: index, corners: corners });
+        });
+        grille.appendChild(inp);
+      });
+    });
+    li.appendChild(grille);
+    ul.appendChild(li);
+  });
+}
+$("#masqueAjoute").addEventListener("click", () => {
+  const index = (state && state.masques ? state.masques.length : 0);
+  if (index >= 8) { toast("8 masques maximum", "err"); return; }
+  sendCmd({ cmd: "masque_set", index: index, corners: [
+    { x: 0.4, y: 0.4 }, { x: 0.6, y: 0.4 }, { x: 0.6, y: 0.6 }, { x: 0.4, y: 0.6 }] });
 });
 
 /* Presets de mapping (indépendants des presets d'état complet). */

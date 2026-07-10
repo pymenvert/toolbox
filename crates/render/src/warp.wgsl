@@ -21,6 +21,12 @@ struct Uniforms {
     fx_a: vec4<f32>,
     // miroir, temps (secondes, pour le bruit animé)
     fx_b: vec4<f32>,
+    // fondu de bords : gauche, droite, haut, bas (largeurs 0..0.45)
+    blending_a: vec4<f32>,
+    // fondu de bords : gamma, nombre de masques
+    blending_b: vec4<f32>,
+    // masques : 8 quadrilatères × 2 vec4 (x0,y0,x1,y1) puis (x2,y2,x3,y3)
+    masques: array<vec4<f32>, 16>,
 }
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
@@ -186,6 +192,54 @@ fn apply_pixel_effects(rgb_in: vec3<f32>, t: vec2<f32>) -> vec3<f32> {
     return rgb;
 }
 
+// Le pixel de sortie p est-il couvert par un masque ? Test « même côté »
+// sur les quatre arêtes — MÊME formule que raster.rs (dans_un_masque).
+fn dans_un_masque(p: vec2<f32>) -> bool {
+    let nb = u32(u.blending_b.y);
+    for (var m = 0u; m < nb; m = m + 1u) {
+        let a = u.masques[m * 2u];
+        let b = u.masques[m * 2u + 1u];
+        let c0 = a.xy;
+        let c1 = a.zw;
+        let c2 = b.xy;
+        let c3 = b.zw;
+        var positifs = 0u;
+        var negatifs = 0u;
+        // Arête c0→c1, c1→c2, c2→c3, c3→c0.
+        for (var i = 0u; i < 4u; i = i + 1u) {
+            var s = c0; var e = c1;
+            if i == 1u { s = c1; e = c2; }
+            if i == 2u { s = c2; e = c3; }
+            if i == 3u { s = c3; e = c0; }
+            let croix = (e.x - s.x) * (p.y - s.y) - (e.y - s.y) * (p.x - s.x);
+            if croix >= 0.0 { positifs = positifs + 1u; }
+            if croix <= 0.0 { negatifs = negatifs + 1u; }
+        }
+        if positifs == 4u || negatifs == 4u {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Rampe d'un bord du fondu — MÊME formule que raster.rs (facteur_blending).
+fn rampe_blending(distance: f32, largeur: f32, gamma: f32) -> f32 {
+    if largeur <= 0.0 || distance >= largeur {
+        return 1.0;
+    }
+    return pow(max(distance, 0.0) / largeur, gamma);
+}
+
+fn facteur_blending(p: vec2<f32>) -> f32 {
+    let gamma = max(u.blending_b.x, 0.5);
+    var facteur = 1.0;
+    facteur = facteur * rampe_blending(p.x, u.blending_a.x, gamma);
+    facteur = facteur * rampe_blending(1.0 - p.x, u.blending_a.y, gamma);
+    facteur = facteur * rampe_blending(p.y, u.blending_a.z, gamma);
+    facteur = facteur * rampe_blending(1.0 - p.y, u.blending_a.w, gamma);
+    return facteur;
+}
+
 @fragment
 fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     let black = vec4<f32>(0.0, 0.0, 0.0, 1.0);
@@ -194,6 +248,10 @@ fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
         return black;
     }
     let p = frag.xy / u.misc.xy;
+    // Masques : zones NOIRES en espace de sortie, avant tout calcul.
+    if dans_un_masque(p) {
+        return black;
+    }
     // 1. Warp inverse : hors du quad de mapping, rien n'est projeté.
     let q = apply3(u.warp_inv_c0, u.warp_inv_c1, u.warp_inv_c2, p);
     if q.x < 0.0 || q.x > 1.0 || q.y < 0.0 || q.y > 1.0 {
@@ -221,5 +279,7 @@ fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     // 4. Correction couleur puis effets de teinte.
     rgb = apply_color(rgb);
     rgb = apply_pixel_effects(rgb, t);
+    // 5. Fondu de bords : atténuation finale en espace de sortie.
+    rgb = rgb * facteur_blending(p);
     return vec4<f32>(rgb, 1.0);
 }

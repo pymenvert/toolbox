@@ -66,12 +66,89 @@ pub fn render_frame(
 
     let (w, h) = (width.max(1) as usize, height.max(1) as usize);
     let effects = state.effects;
+    let blending = state.blending;
+    let masques = &state.masques;
     for (i, px) in out.iter_mut().enumerate().take(w * h) {
         let (x, y) = (i % w, i / w);
         let u = (x as f64 + 0.5) / w as f64;
         let v = (y as f64 + 0.5) / h as f64;
-        *px = shade(&source, &warp_inv, &params, &effects, time, u, v);
+        // Masques : zones NOIRES en espace de sortie, avant tout calcul.
+        if dans_un_masque(masques, u, v) {
+            *px = 0;
+            continue;
+        }
+        let couleur = shade(&source, &warp_inv, &params, &effects, time, u, v);
+        // Fondu de bords : atténuation finale en espace de sortie.
+        *px = appliquer_blending(&blending, couleur, u, v);
     }
+}
+
+/// Le pixel (u, v) est-il couvert par un masque ? Test « même côté » sur les
+/// quatre arêtes du quadrilatère (convexe, sens libre). MÊME formule que
+/// `warp.wgsl` — toute divergence est un bug.
+pub fn dans_un_masque(masques: &[toolbox_core::Masque], u: f64, v: f64) -> bool {
+    masques.iter().any(|masque| {
+        let c = &masque.corners;
+        let mut positifs = 0;
+        let mut negatifs = 0;
+        for i in 0..4 {
+            let a = c[i];
+            let b = c[(i + 1) % 4];
+            let croix = (f64::from(b.x) - f64::from(a.x)) * (v - f64::from(a.y))
+                - (f64::from(b.y) - f64::from(a.y)) * (u - f64::from(a.x));
+            if croix >= 0.0 {
+                positifs += 1;
+            }
+            if croix <= 0.0 {
+                negatifs += 1;
+            }
+        }
+        positifs == 4 || negatifs == 4
+    })
+}
+
+/// Facteur de fondu de bords au pixel (u, v) : produit des rampes de chaque
+/// bord actif, corrigées gamma. 1.0 = plein, 0.0 = noir au ras du bord.
+/// MÊME formule que `warp.wgsl`.
+pub fn facteur_blending(blending: &toolbox_core::BlendingState, u: f64, v: f64) -> f64 {
+    let gamma = f64::from(blending.gamma.max(0.5));
+    let mut facteur = 1.0_f64;
+    let rampe = |distance: f64, largeur: f32| -> f64 {
+        let largeur = f64::from(largeur);
+        if largeur <= 0.0 || distance >= largeur {
+            1.0
+        } else {
+            (distance.max(0.0) / largeur).powf(gamma)
+        }
+    };
+    facteur *= rampe(u, blending.gauche);
+    facteur *= rampe(1.0 - u, blending.droite);
+    facteur *= rampe(v, blending.haut);
+    facteur *= rampe(1.0 - v, blending.bas);
+    facteur
+}
+
+/// Applique le fondu de bords à un pixel packé `0RGB`.
+fn appliquer_blending(blending: &toolbox_core::BlendingState, pixel: u32, u: f64, v: f64) -> u32 {
+    if blending.gauche <= 0.0
+        && blending.droite <= 0.0
+        && blending.haut <= 0.0
+        && blending.bas <= 0.0
+    {
+        return pixel;
+    }
+    let facteur = facteur_blending(blending, u, v);
+    if facteur >= 1.0 {
+        return pixel;
+    }
+    let canal = |decalage: u32| -> u32 {
+        let brut = f64::from((pixel >> decalage) & 0xFF);
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        {
+            ((brut * facteur).round() as u32).min(255)
+        }
+    };
+    (canal(16) << 16) | (canal(8) << 8) | canal(0)
 }
 
 /// Couleur d'un pixel de sortie, packée en `0RGB`.
@@ -343,6 +420,101 @@ fn pack(rgb: [f32; 3]) -> u32 {
 mod tests {
     use super::*;
     use toolbox_core::{Command, NodeState};
+
+    /// Le fondu de bords suit la rampe gamma exacte, bord par bord.
+    #[test]
+    fn le_blending_suit_la_rampe_gamma() {
+        let blending = toolbox_core::BlendingState {
+            gauche: 0.2,
+            droite: 0.0,
+            haut: 0.0,
+            bas: 0.0,
+            gamma: 2.0,
+        };
+        // Hors bande : plein. (Tolérance 1e-6 : largeurs f32 — règle projet.)
+        assert!((facteur_blending(&blending, 0.5, 0.5) - 1.0).abs() < 1e-6);
+        // Mi-bande, gamma 2 : (0.5)^2 = 0.25.
+        assert!((facteur_blending(&blending, 0.1, 0.5) - 0.25).abs() < 1e-6);
+        // Au ras du bord : noir.
+        assert!(facteur_blending(&blending, 0.0, 0.5) < 1e-6);
+        // Deux bords opposés se multiplient.
+        let double = toolbox_core::BlendingState {
+            droite: 0.2,
+            ..blending
+        };
+        assert!((facteur_blending(&double, 0.9, 0.5) - 0.25).abs() < 1e-6);
+        // Application au pixel : blanc mi-bande → 25 %.
+        let pixel = appliquer_blending(&blending, 0x00FF_FFFF, 0.1, 0.5);
+        assert_eq!(pixel, 0x0040_4040); // 255*0.25 = 63.75 → 64 = 0x40
+    }
+
+    /// Le test point-dans-quadrilatère couvre les deux sens d'enroulement
+    /// et les points extérieurs.
+    #[test]
+    fn les_masques_couvrent_leur_quadrilatere() {
+        use toolbox_core::state::Corner;
+        let carre = toolbox_core::Masque {
+            corners: [
+                Corner { x: 0.25, y: 0.25 },
+                Corner { x: 0.75, y: 0.25 },
+                Corner { x: 0.75, y: 0.75 },
+                Corner { x: 0.25, y: 0.75 },
+            ],
+        };
+        let masques = vec![carre];
+        assert!(dans_un_masque(&masques, 0.5, 0.5));
+        assert!(!dans_un_masque(&masques, 0.1, 0.5));
+        assert!(!dans_un_masque(&masques, 0.5, 0.9));
+        // Sens inverse (horaire) : même couverture.
+        let mut inverse = carre;
+        inverse.corners.reverse();
+        assert!(dans_un_masque(&[inverse], 0.5, 0.5));
+        assert!(!dans_un_masque(&[inverse], 0.9, 0.9));
+        assert!(!dans_un_masque(&[], 0.5, 0.5));
+    }
+
+    /// Sur une image rendue : le masque rend noir, le blending assombrit le
+    /// bord gauche sans toucher le centre.
+    #[test]
+    fn rendu_avec_masque_et_blending() {
+        let mut state = state_with(&[Command::SetTestPattern {
+            pattern: Some(toolbox_core::TestPattern::Checker),
+        }]);
+        state
+            .apply(&Command::BlendingSet {
+                gauche: 0.25,
+                droite: 0.0,
+                haut: 0.0,
+                bas: 0.0,
+                gamma: 2.0,
+            })
+            .expect("blending");
+        state
+            .apply(&Command::MasqueSet {
+                index: 0,
+                corners: [
+                    toolbox_core::state::Corner { x: 0.6, y: 0.4 },
+                    toolbox_core::state::Corner { x: 0.9, y: 0.4 },
+                    toolbox_core::state::Corner { x: 0.9, y: 0.6 },
+                    toolbox_core::state::Corner { x: 0.6, y: 0.6 },
+                ],
+            })
+            .expect("masque");
+        let (w, h) = (64u32, 36u32);
+        let mut out = vec![0u32; (w * h) as usize];
+        render_frame(&state, None, 0.0, w, h, &mut out);
+        let px = |x: u32, y: u32| out[(y * w + x) as usize];
+        // Centre du masque : noir absolu.
+        assert_eq!(px(48, 18), 0);
+        // Bord gauche (dans la bande) : plus sombre que le centre-gauche
+        // équivalent hors bande.
+        let bord = px(2, 18);
+        let plein = px(20, 18);
+        assert!(
+            bord < plein,
+            "bord {bord:#x} pas plus sombre que {plein:#x}"
+        );
+    }
 
     fn state_with(commands: &[Command]) -> NodeState {
         let mut state = NodeState::default();

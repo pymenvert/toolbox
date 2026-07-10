@@ -254,6 +254,16 @@ pub fn event_to_osc(event: &toolbox_core::Event) -> Option<OscMessage> {
             "/mapping/fade",
             vec![OscType::String(name.clone()), OscType::Float(*seconds)],
         ),
+        Event::BlendingChanged { blending } => message(
+            "/blending",
+            vec![
+                OscType::Float(blending.gauche),
+                OscType::Float(blending.droite),
+                OscType::Float(blending.haut),
+                OscType::Float(blending.bas),
+                OscType::Float(blending.gamma),
+            ],
+        ),
         Event::MappingLoaded { name, .. } => {
             message("/mapping/loaded", vec![OscType::String(name.clone())])
         }
@@ -356,6 +366,24 @@ pub fn map_message(addr: &str, args: &[OscType]) -> Result<Command, MapError> {
                 bottom,
             }),
             _ => Err(bad("attendu : quatre floats (gauche, haut, droite, bas)")),
+        },
+        "/blending" => match (
+            float_arg(args, 0),
+            float_arg(args, 1),
+            float_arg(args, 2),
+            float_arg(args, 3),
+            float_arg(args, 4),
+        ) {
+            (Some(gauche), Some(droite), Some(haut), Some(bas), Some(gamma)) => {
+                Ok(Command::BlendingSet {
+                    gauche,
+                    droite,
+                    haut,
+                    bas,
+                    gamma,
+                })
+            }
+            _ => Err(bad("attendu : cinq floats (gauche, droite, haut, bas, gamma)")),
         },
         "/mapping/enabled" => bool_arg(args, 0)
             .map(|enabled| Command::SetMappingEnabled { enabled })

@@ -16,7 +16,7 @@ use toolbox_core::state::{NodeState, Transport};
 use toolbox_engine::{RenderParams, VideoFrame};
 
 /// Uniforms du shader — disposition identique à `struct Uniforms` de
-/// `warp.wgsl` (9 × vec4).
+/// `warp.wgsl` (29 × vec4).
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct Uniforms {
@@ -32,6 +32,12 @@ struct Uniforms {
     fx_a: [f32; 4],
     /// miroir, temps (secondes)
     fx_b: [f32; 4],
+    /// fondu de bords : gauche, droite, haut, bas
+    blending_a: [f32; 4],
+    /// fondu de bords : gamma, nombre de masques
+    blending_b: [f32; 4],
+    /// masques : 8 quadrilatères × 4 coins = 2 vec4 (x0,y0,x1,y1) chacun
+    masques: [[f32; 4]; 16],
 }
 
 /// Colonnes vec4 d'une matrice 3x3 exportée colonne-major (`to_gl`).
@@ -368,8 +374,33 @@ impl GpuPainter {
                 state.effects.sharpen,
             ],
             fx_b: [state.effects.mirror, time, 0.0, 0.0],
+            blending_a: [
+                state.blending.gauche,
+                state.blending.droite,
+                state.blending.haut,
+                state.blending.bas,
+            ],
+            #[allow(clippy::cast_precision_loss)] // ≤ 8
+            blending_b: [
+                state.blending.gamma,
+                state.masques.len().min(8) as f32,
+                0.0,
+                0.0,
+            ],
+            masques: masques_vec4(&state.masques),
         }
     }
+}
+
+/// Emballe les masques (8 max) en paires de vec4 : (x0,y0,x1,y1), (x2,y2,x3,y3).
+fn masques_vec4(masques: &[toolbox_core::Masque]) -> [[f32; 4]; 16] {
+    let mut out = [[0.0f32; 4]; 16];
+    for (i, masque) in masques.iter().take(8).enumerate() {
+        let c = &masque.corners;
+        out[i * 2] = [c[0].x, c[0].y, c[1].x, c[1].y];
+        out[i * 2 + 1] = [c[2].x, c[2].y, c[3].x, c[3].y];
+    }
+    out
 }
 
 fn create_video_texture(device: &wgpu::Device, width: u32, height: u32) -> wgpu::Texture {

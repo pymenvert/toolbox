@@ -70,6 +70,9 @@ pub enum TestPattern {
 /// | `mapping_save`     | `/mapping/save <name>`       |
 /// | `mapping_load`     | `/mapping/load <name>`       |
 /// | `mapping_fade`     | `/mapping/fade <name> <s>`   |
+/// | `blending_set`     | `/blending <g> <d> <h> <b> <gamma>` |
+/// | `masque_set`       | — (UI/REST)                  |
+/// | `masque_supprime`  | — (UI/REST)                  |
 /// | `set_test_pattern` | `/pattern <name|off>`        |
 /// | `preset_save`      | `/preset/save <name>`        |
 /// | `preset_load`      | `/preset/load <name>`        |
@@ -143,6 +146,25 @@ pub enum Command {
         value: f32,
     },
     MappingReset,
+    /// Fondu de bords multi-projecteurs : largeur de bande par bord
+    /// (0..=0.45, 0 = aucun) + gamma projecteur (0.5..=4.0, 2.2 typique).
+    BlendingSet {
+        gauche: f32,
+        droite: f32,
+        haut: f32,
+        bas: f32,
+        gamma: f32,
+    },
+    /// Pose ou remplace un masque noir (quadrilatère en espace de sortie).
+    /// `index` == nombre de masques → ajout (8 max).
+    MasqueSet {
+        index: u8,
+        corners: [crate::state::Corner; 4],
+    },
+    /// Supprime le masque `index`.
+    MasqueSupprime {
+        index: u8,
+    },
     /// Active/désactive le mapping sans perdre les réglages (bypass).
     SetMappingEnabled {
         enabled: bool,
@@ -391,6 +413,21 @@ mod tests {
             (
                 serde_json::to_string(&Command::SetRate { rate: 1.25 }).expect("ser"),
                 r#"{"cmd":"set_rate","rate":1.25}"#,
+            ),
+            (
+                serde_json::to_string(&Command::BlendingSet {
+                    gauche: 0.1,
+                    droite: 0.0,
+                    haut: 0.0,
+                    bas: 0.0,
+                    gamma: 2.2,
+                })
+                .expect("ser"),
+                r#"{"cmd":"blending_set","gauche":0.1,"droite":0.0,"haut":0.0,"bas":0.0,"gamma":2.2}"#,
+            ),
+            (
+                serde_json::to_string(&Command::MasqueSupprime { index: 1 }).expect("ser"),
+                r#"{"cmd":"masque_supprime","index":1}"#,
             ),
         ];
         for (got, want) in cases {

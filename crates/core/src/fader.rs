@@ -127,6 +127,23 @@ pub fn plan(from: &NodeState, to: &NodeState, t: f32) -> Vec<Command> {
         });
     }
 
+    // Fondu de bords : continu, il glisse aussi.
+    let (ba, bb) = (&from.blending, &to.blending);
+    if differs(ba.gauche, bb.gauche)
+        || differs(ba.droite, bb.droite)
+        || differs(ba.haut, bb.haut)
+        || differs(ba.bas, bb.bas)
+        || differs(ba.gamma, bb.gamma)
+    {
+        commands.push(Command::BlendingSet {
+            gauche: lerp(ba.gauche, bb.gauche),
+            droite: lerp(ba.droite, bb.droite),
+            haut: lerp(ba.haut, bb.haut),
+            bas: lerp(ba.bas, bb.bas),
+            gamma: lerp(ba.gamma, bb.gamma),
+        });
+    }
+
     if t >= 1.0 {
         if from.mapping.enabled != to.mapping.enabled {
             commands.push(Command::SetMappingEnabled {
