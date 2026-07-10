@@ -8,19 +8,25 @@ Cibles : Raspberry Pi 4/5, Linux, Windows.
 > Cadrage complet (décisions, plan, architecture, recherches) : dossier
 > `Toolbox/docs/` du projet — ce repo ne contient que le code.
 
-## État — V1 logicielle
+## État — V1
 
-Toute la chaîne de contrôle est fonctionnelle et testée (140+ tests, CI
-Linux + Windows + check ARM64). Le rendu vidéo réel (GStreamer + GLES)
-arrive dès la validation du bench phase 0 sur le matériel : en attendant, un
-backend simulé fait vivre transport/position/boucles/playlists de bout en
-bout — l'UI, l'OSC et le MIDI sont donc démontrables sur n'importe quel PC.
+La chaîne complète est fonctionnelle et testée (150+ tests, CI Linux +
+Windows + check ARM64) : **lecture vidéo réelle** (GStreamer, boucle sans
+coupure), **fenêtre de sortie** avec warp/mires/couleur calculés par le
+**GPU** (wgpu/Vulkan, repli CPU automatique), sélection d'écran et plein
+écran depuis l'UI, compteur d'images/seconde, mappings enregistrés,
+démarrage automatique. Sans GStreamer sur la machine, un backend simulé
+prend le relais : l'UI, l'OSC et le MIDI restent démontrables partout.
+
+📖 **[Manuel utilisateur](docs/manuel.html)** — démarrage rapide,
+calibrage pas à pas, référence OSC/MIDI/config, dépannage.
 
 ## Démarrage rapide
 
-**Binaires prêts** : onglet *Actions* de GitHub → dernier run vert →
-*Artifacts* → `toolbox-node-windows-x64`, `toolbox-node-linux-x64` ou
-`toolbox-node-raspberrypi-arm64`.
+**Binaires prêts** : page **[Releases](https://github.com/pymenvert/toolbox/releases)**
+(sans compte) — `toolbox-node-windows-x64-gstreamer` (pack complet avec
+vidéo, rien à installer), `toolbox-node-windows-x64` (léger),
+`toolbox-node-linux-x64`, `toolbox-node-raspberrypi-arm64`.
 
 ```bash
 # ou compilation locale (Linux : sudo apt install libasound2-dev)

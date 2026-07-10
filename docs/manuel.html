@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Toolbox — Manuel</title>
+<style>
+/* =========================================================================
+   Charte : dérivée de l'interface du node (fond bleu-nuit, accent bleu).
+   Jetons redéfinis par thème — les composants ne consomment que les jetons.
+   ========================================================================= */
+:root {
+  --fond: #0e1116;
+  --surface: #151b23;
+  --surface-2: #1c242e;
+  --lisere: #2a3441;
+  --encre: #e8edf4;
+  --encre-2: #9aa7b8;
+  --sourdine: #6b7789;
+  --accent: #3987e5;
+  --accent-doux: rgba(57, 135, 229, .14);
+  --ok: #37b26c;
+  --alerte: #d9a13b;
+  --rayon: 10px;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --fond: #f4f6f9; --surface: #ffffff; --surface-2: #eaeef4;
+    --lisere: #d4dbe4; --encre: #16202c; --encre-2: #47566a;
+    --sourdine: #7a879a; --accent: #2270cc; --accent-doux: rgba(34, 112, 204, .10);
+    color-scheme: light;
+  }
+}
+:root[data-theme="light"] {
+  --fond: #f4f6f9; --surface: #ffffff; --surface-2: #eaeef4;
+  --lisere: #d4dbe4; --encre: #16202c; --encre-2: #47566a;
+  --sourdine: #7a879a; --accent: #2270cc; --accent-doux: rgba(34, 112, 204, .10);
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --fond: #0e1116; --surface: #151b23; --surface-2: #1c242e;
+  --lisere: #2a3441; --encre: #e8edf4; --encre-2: #9aa7b8;
+  --sourdine: #6b7789; --accent: #3987e5; --accent-doux: rgba(57, 135, 229, .14);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; margin: 0; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+body {
+  background: var(--fond); color: var(--encre);
+  font: 16px/1.65 "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+code, kbd, pre, .mono {
+  font-family: "Cascadia Code", Consolas, "SF Mono", monospace;
+  font-size: .92em;
+}
+
+/* ---------- Gabarit : sommaire fixe + colonne de lecture ---------- */
+.cadre { display: grid; grid-template-columns: 250px minmax(0, 1fr); max-width: 1140px; margin: 0 auto; }
+nav.sommaire {
+  position: sticky; top: 0; align-self: start; height: 100dvh; overflow-y: auto;
+  padding: 28px 20px; border-right: 1px solid var(--lisere);
+}
+nav.sommaire .marque { display: flex; align-items: center; gap: 10px; margin-bottom: 22px; }
+nav.sommaire .marque svg { flex: none; }
+nav.sommaire .marque b { font-size: 17px; letter-spacing: .3px; }
+nav.sommaire .marque small { display: block; color: var(--sourdine); font-size: 11px; }
+nav.sommaire a {
+  display: block; color: var(--encre-2); text-decoration: none;
+  padding: 6px 10px; border-radius: 7px; font-size: 13.5px; margin: 1px 0;
+}
+nav.sommaire a:hover { background: var(--surface-2); color: var(--encre); }
+nav.sommaire a:focus-visible, main a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+nav.sommaire .lot { text-transform: uppercase; letter-spacing: 1.4px; font-size: 10.5px; color: var(--sourdine); margin: 18px 10px 6px; }
+main { padding: 0 48px 96px; min-width: 0; }
+@media (max-width: 880px) {
+  .cadre { grid-template-columns: 1fr; }
+  nav.sommaire { position: static; height: auto; border-right: none; border-bottom: 1px solid var(--lisere); }
+  main { padding: 0 20px 64px; }
+}
+
+/* ---------- Héros ---------- */
+header.heros { padding: 64px 0 40px; border-bottom: 1px solid var(--lisere); margin-bottom: 8px; }
+.heros .versionne { display: inline-flex; align-items: center; gap: 8px; background: var(--accent-doux); color: var(--accent);
+  border-radius: 999px; padding: 4px 14px; font-size: 12.5px; font-weight: 600; letter-spacing: .4px; margin-bottom: 18px; }
+.heros h1 { font-size: clamp(34px, 6vw, 52px); line-height: 1.08; font-weight: 700; letter-spacing: -1px; text-wrap: balance; }
+.heros p.chapo { color: var(--encre-2); font-size: 18px; max-width: 58ch; margin-top: 14px; text-wrap: pretty; }
+.heros .scene { margin-top: 30px; }
+
+/* ---------- Corps ---------- */
+section { padding-top: 30px; }
+section + section { margin-top: 26px; border-top: 1px solid var(--lisere); }
+.sur-titre { text-transform: uppercase; letter-spacing: 1.8px; font-size: 11px; color: var(--accent); font-weight: 700; margin-bottom: 6px; }
+h2 { font-size: 27px; letter-spacing: -.4px; margin-bottom: 14px; text-wrap: balance; scroll-margin-top: 24px; }
+h3 { font-size: 18px; margin: 26px 0 8px; }
+p, li { max-width: 68ch; color: var(--encre); }
+p { margin: 10px 0; }
+p.note, li { color: var(--encre-2); }
+ul, ol { padding-left: 22px; margin: 10px 0; }
+li { margin: 5px 0; }
+li::marker { color: var(--accent); }
+a { color: var(--accent); }
+strong { color: var(--encre); }
+
+kbd { background: var(--surface-2); border: 1px solid var(--lisere); border-bottom-width: 2px; border-radius: 5px; padding: 1px 7px; font-size: 12px; }
+code { background: var(--surface-2); border-radius: 5px; padding: 2px 6px; }
+pre { background: var(--surface); border: 1px solid var(--lisere); border-radius: var(--rayon);
+  padding: 14px 18px; overflow-x: auto; margin: 14px 0; line-height: 1.55; }
+pre code { background: none; padding: 0; }
+pre .c { color: var(--sourdine); }
+
+/* Cartes (installation, onglets) */
+.cartes { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin: 16px 0; }
+.carte { background: var(--surface); border: 1px solid var(--lisere); border-radius: var(--rayon); padding: 18px; min-width: 0; }
+.carte h4 { font-size: 15px; margin-bottom: 6px; }
+.carte p { font-size: 14px; color: var(--encre-2); margin: 4px 0; max-width: none; }
+.carte .voyant { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); margin-right: 7px; }
+
+/* Étapes numérotées (vraies séquences uniquement) */
+ol.etapes { list-style: none; padding: 0; counter-reset: etape; margin: 18px 0; }
+ol.etapes li { counter-increment: etape; display: grid; grid-template-columns: 34px 1fr; gap: 14px; padding: 12px 0;
+  border-bottom: 1px dashed var(--lisere); color: var(--encre); }
+ol.etapes li:last-child { border-bottom: none; }
+ol.etapes li::before { content: counter(etape); width: 30px; height: 30px; border-radius: 50%;
+  background: var(--accent-doux); color: var(--accent); font-weight: 700; font-size: 14px;
+  display: grid; place-items: center; margin-top: 2px; }
+ol.etapes b { display: block; }
+ol.etapes span { color: var(--encre-2); font-size: 14.5px; }
+
+/* Encarts */
+.encart { border-left: 3px solid var(--accent); background: var(--accent-doux); border-radius: 0 var(--rayon) var(--rayon) 0;
+  padding: 12px 16px; margin: 16px 0; font-size: 14.5px; color: var(--encre); max-width: 72ch; }
+.encart.attention { border-left-color: var(--alerte); background: color-mix(in srgb, var(--alerte) 12%, transparent); }
+.encart b { display: block; font-size: 12px; text-transform: uppercase; letter-spacing: 1.2px; margin-bottom: 4px; color: var(--accent); }
+.encart.attention b { color: var(--alerte); }
+
+/* Tables de référence */
+.defile { overflow-x: auto; margin: 14px 0; border: 1px solid var(--lisere); border-radius: var(--rayon); }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th { text-align: left; font-size: 11.5px; text-transform: uppercase; letter-spacing: 1px; color: var(--sourdine);
+  padding: 10px 14px; border-bottom: 1px solid var(--lisere); background: var(--surface); }
+td { padding: 9px 14px; border-bottom: 1px solid var(--lisere); color: var(--encre-2); vertical-align: top; }
+tr:last-child td { border-bottom: none; }
+td:first-child { color: var(--encre); white-space: nowrap; }
+tbody tr:hover td { background: var(--surface); }
+
+footer { margin-top: 60px; padding-top: 24px; border-top: 1px solid var(--lisere); color: var(--sourdine); font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="cadre">
+
+<nav class="sommaire" aria-label="Sommaire">
+  <div class="marque">
+    <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
+      <rect x="1" y="1" width="32" height="32" rx="7" fill="none" stroke="var(--lisere)"/>
+      <path d="M7 9 L27 6 L24 26 L9 23 Z" fill="var(--accent-doux)" stroke="var(--accent)" stroke-width="1.6" stroke-linejoin="round"/>
+      <circle cx="7" cy="9" r="2.4" fill="var(--accent)"/><circle cx="27" cy="6" r="2.4" fill="var(--accent)"/>
+      <circle cx="24" cy="26" r="2.4" fill="var(--accent)"/><circle cx="9" cy="23" r="2.4" fill="var(--accent)"/>
+    </svg>
+    <div><b>Toolbox</b><small>Manuel · v1.0</small></div>
+  </div>
+  <div class="lot">Prise en main</div>
+  <a href="#demarrage">Démarrage rapide</a>
+  <a href="#installation">Installation</a>
+  <a href="#interface">L'interface</a>
+  <div class="lot">Sur le terrain</div>
+  <a href="#calibrage">Calibrer un projecteur</a>
+  <a href="#lecture">Lire des vidéos</a>
+  <a href="#autonome">Show autonome</a>
+  <div class="lot">Référence</div>
+  <a href="#osc">Contrôle OSC</a>
+  <a href="#midi">Contrôle MIDI</a>
+  <a href="#config">node.toml</a>
+  <a href="#depannage">Dépannage</a>
+</nav>
+
+<main>
+<header class="heros">
+  <span class="versionne">Version 1.0</span>
+  <h1>Projeter une vidéo, exactement là où il faut.</h1>
+  <p class="chapo">Toolbox transforme un ordinateur — ou un Raspberry Pi — en node de
+  projection : lecture vidéo, mapping 4 coins, correction couleur, le tout piloté
+  depuis n'importe quel navigateur, en OSC ou en MIDI. Il redémarre seul, en plein
+  show, après une coupure de courant.</p>
+  <svg class="scene" width="100%" height="150" viewBox="0 0 720 150" aria-label="Un cadre vidéo déformé sur ses quatre coins" role="img">
+    <rect x="0" y="0" width="720" height="150" rx="12" fill="var(--surface)"/>
+    <g stroke="var(--lisere)" stroke-width="1">
+      <line x1="120" y1="0" x2="120" y2="150"/><line x1="240" y1="0" x2="240" y2="150"/>
+      <line x1="360" y1="0" x2="360" y2="150"/><line x1="480" y1="0" x2="480" y2="150"/>
+      <line x1="600" y1="0" x2="600" y2="150"/><line x1="0" y1="75" x2="720" y2="75"/>
+    </g>
+    <path d="M150 38 L560 22 L590 122 L180 132 Z" fill="var(--accent-doux)" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round"/>
+    <g stroke="var(--accent)" stroke-width="1" opacity=".45">
+      <line x1="252" y1="34" x2="283" y2="129"/><line x1="355" y1="30" x2="385" y2="127"/><line x1="458" y1="26" x2="488" y2="124"/>
+      <line x1="158" y1="61" x2="567" y2="47"/><line x1="166" y1="85" x2="575" y2="72"/><line x1="173" y1="109" x2="582" y2="97"/>
+    </g>
+    <g fill="var(--fond)" stroke="var(--accent)" stroke-width="2">
+      <circle cx="150" cy="38" r="7"/><circle cx="560" cy="22" r="7"/><circle cx="590" cy="122" r="7"/><circle cx="180" cy="132" r="7"/>
+    </g>
+  </svg>
+</header>
+
+<section id="demarrage">
+  <div class="sur-titre">Prise en main</div>
+  <h2>Démarrage rapide</h2>
+  <p>Cinq minutes entre le téléchargement et une vidéo mappée sur le mur.</p>
+  <ol class="etapes">
+    <li><div><b>Dézippe le pack et lance <code>toolbox-node.exe</code></b>
+      <span>La fenêtre de sortie s'ouvre (noire : c'est normal, rien n'est encore projeté).</span></div></li>
+    <li><div><b>Ouvre <code>http://localhost:8080</code></b>
+      <span>Depuis le même ordinateur, ou <code>http://IP-de-la-machine:8080</code> depuis un téléphone sur le même réseau.</span></div></li>
+    <li><div><b>Onglet Médias : dépose une vidéo, puis « Charger »</b>
+      <span>Pour un gros fichier, copie-le directement dans le dossier <code>media/</code> à côté du logiciel.</span></div></li>
+    <li><div><b>Lecture ▶</b>
+      <span>La vidéo apparaît dans la fenêtre de sortie, avec le son. Le badge « img/s » indique la fluidité réelle.</span></div></li>
+    <li><div><b>Onglet Mapping : tire les 4 coins</b>
+      <span>L'image suit en direct. <kbd>F11</kbd> dans la fenêtre de sortie pour le plein écran.</span></div></li>
+  </ol>
+</section>
+
+<section id="installation">
+  <div class="sur-titre">Prise en main</div>
+  <h2>Installation</h2>
+  <p>Les binaires se téléchargent depuis la page
+  <a href="https://github.com/pymenvert/toolbox/releases">Releases du dépôt GitHub</a>
+  (aucun compte requis). Un dossier suffit : tout est portable, les dossiers
+  <code>media/ presets/ logs/</code> se créent à côté au premier lancement.</p>
+  <div class="cartes">
+    <div class="carte">
+      <h4><span class="voyant"></span>Windows — pack complet</h4>
+      <p><code>toolbox-node-windows-x64-gstreamer</code></p>
+      <p>Lecture vidéo incluse (décodeurs GStreamer livrés dans le zip).
+      Dézipper, double-cliquer, rien à installer. Recommandé.</p>
+    </div>
+    <div class="carte">
+      <h4><span class="voyant" style="background:var(--alerte)"></span>Windows — léger</h4>
+      <p><code>toolbox-node-windows-x64</code></p>
+      <p>Sans lecture vidéo (mires et calibrage uniquement), ~10 Mo.
+      Pour piloter ou tester sans projeter.</p>
+    </div>
+    <div class="carte">
+      <h4><span class="voyant"></span>Ubuntu / Debian</h4>
+      <p><code>toolbox-node-linux-x64</code></p>
+      <p>Vidéo : <code>sudo apt install gstreamer1.0-plugins-base
+      gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-libav</code></p>
+    </div>
+    <div class="carte">
+      <h4><span class="voyant"></span>Raspberry Pi 4 / 5</h4>
+      <p><code>toolbox-node-raspberrypi-arm64</code></p>
+      <p>Mêmes paquets GStreamer que Ubuntu. L'installeur
+      <code>deploy/install.sh</code> configure le service systemd
+      (démarrage au boot, relance en cas de crash).</p>
+    </div>
+  </div>
+</section>
+
+<section id="interface">
+  <div class="sur-titre">Prise en main</div>
+  <h2>L'interface web</h2>
+  <p>Tout se pilote depuis le navigateur — ordinateur, tablette ou téléphone.
+  Plusieurs appareils peuvent être connectés en même temps : chacun voit les
+  changements des autres en direct.</p>
+  <div class="cartes">
+    <div class="carte"><h4>Dashboard</h4><p>Transport (lecture, pause, stop), barre de
+      progression, volume, playlist, badge img/s.</p></div>
+    <div class="carte"><h4>Mapping</h4><p>Les 4 coins (souris, tactile ou flèches du
+      clavier), rotation, miroirs, recadrage, mires de test, mappings enregistrés,
+      choix de l'écran de sortie.</p></div>
+    <div class="carte"><h4>Couleur</h4><p>Luminosité, contraste, gamma, saturation,
+      teinte et gains RVB. Double-clic sur un curseur : retour au neutre.</p></div>
+    <div class="carte"><h4>Médias</h4><p>Dépôt de fichiers, renommage, suppression.
+      Les fichiers copiés directement dans <code>media/</code> apparaissent aussi.</p></div>
+    <div class="carte"><h4>Presets</h4><p>L'état complet du node (média, mapping,
+      couleur, playlist) sauvegardé sous un nom, rechargeable en un clic.</p></div>
+    <div class="carte"><h4>Logs &amp; Système</h4><p>Journal en direct du node,
+      charge machine, mémoire, température (Pi).</p></div>
+  </div>
+</section>
+
+<section id="calibrage">
+  <div class="sur-titre">Sur le terrain</div>
+  <h2>Calibrer un vidéoprojecteur</h2>
+  <ol class="etapes">
+    <li><div><b>Choisis la sortie</b>
+      <span>Onglet Mapping, carte « Sortie » : sélectionne l'écran du projecteur
+      et coche « Plein écran ». Appliqué immédiatement, retenu pour les
+      prochains démarrages.</span></div></li>
+    <li><div><b>Affiche une mire</b>
+      <span>« Grille » pour la géométrie, « Coins » pour identifier chaque angle
+      (0 = haut gauche, 1 = haut droit, 2 = bas droit, 3 = bas gauche).</span></div></li>
+    <li><div><b>Cale les 4 coins sur la surface</b>
+      <span>Tire les poignées jusqu'à ce que la grille épouse le mur, l'écran ou
+      le décor. Clavier : flèches = pas de 0,001, <kbd>Maj</kbd> + flèches = 0,01.
+      Les coins peuvent sortir du cadre (marge de 50 %).</span></div></li>
+    <li><div><b>Ajuste orientation et recadrage</b>
+      <span>Rotation par quarts de tour, miroirs H/V, recadrage par bord
+      (projecteur au plafond, image à rogner…).</span></div></li>
+    <li><div><b>Enregistre le mapping</b>
+      <span>Carte « Mappings enregistrés » : donne-lui un nom. Tu pourras le
+      recharger sans toucher au média ni à la couleur — même en pleine lecture.</span></div></li>
+  </ol>
+  <div class="encart"><b>Astuce</b>La case « Mapping actif » bypasse toute la
+  déformation sans perdre les réglages : pratique pour comparer avant/après ou
+  projeter plein cadre temporairement.</div>
+</section>
+
+<section id="lecture">
+  <div class="sur-titre">Sur le terrain</div>
+  <h2>Lire des vidéos</h2>
+  <p>La lecture s'appuie sur GStreamer : MP4 (H.264/H.265), WebM, MOV, MKV et la
+  plupart des formats courants, avec accélération matérielle quand la machine en
+  a une. Le badge <strong>img/s</strong> à côté de la barre de lecture affiche le
+  débit d'images réellement projetées — s'il colle à la cadence du fichier
+  (24, 25, 30…), tout va bien.</p>
+  <h3>Boucles et playlists</h3>
+  <ul>
+    <li><strong>Boucle « un »</strong> : le média repart sans coupure (enchaînement
+    natif GStreamer, aucun trou noir).</li>
+    <li><strong>Boucle « tout »</strong> : enchaîne la playlist et recommence.</li>
+    <li><strong>Playlist</strong> : construite dans le Dashboard ; suivant/précédent
+    au clic, en OSC ou en MIDI.</li>
+  </ul>
+  <h3>Gros fichiers</h3>
+  <p class="note">Le dépôt via le navigateur est plafonné (2 Go par défaut,
+  réglable par <code>[limits] max_upload_mb</code>). Au-delà, copie simplement le
+  fichier dans le dossier <code>media/</code> : il apparaît dans l'onglet Médias.</p>
+  <div class="encart attention"><b>Priorité d'affichage</b>Une mire de test
+  sélectionnée passe toujours devant la vidéo (le calibrage prime). Pense à
+  remettre la mire sur « Off » pour revoir l'image.</div>
+</section>
+
+<section id="autonome">
+  <div class="sur-titre">Sur le terrain</div>
+  <h2>Show autonome</h2>
+  <p>Objectif : brancher la machine, elle projette. Trois briques :</p>
+  <ol class="etapes">
+    <li><div><b>Un preset de show</b>
+      <span>Règle tout (média, mapping, couleur), puis onglet Presets →
+      sauvegarde sous un nom, par exemple <code>show</code>.</span></div></li>
+    <li><div><b>Le mode kiosque dans <code>node.toml</code></b>
+      <span><code>[startup] preset = "show"</code> et <code>autoplay = true</code> :
+      à chaque démarrage du node, le preset se charge et la lecture démarre.</span></div></li>
+    <li><div><b>Le lancement au démarrage de la machine</b>
+      <span>Windows : copie <code>install-autostart-windows.bat</code> à côté de
+      l'exe et double-clique (retrait : relancer avec <code>--remove</code>).
+      Pi/Linux : le service systemd installé par <code>deploy/install.sh</code>
+      démarre au boot et relance en cas de crash.</span></div></li>
+  </ol>
+</section>
+
+<section id="osc">
+  <div class="sur-titre">Référence</div>
+  <h2>Contrôle OSC</h2>
+  <p>UDP, port <code>9000</code> par défaut. Types d'arguments tolérants
+  (int/float/bool interchangeables — pensé pour Chataigne). Un message invalide
+  est journalisé et ignoré : l'OSC ne plante jamais le node.</p>
+  <div class="defile"><table>
+    <thead><tr><th>Adresse</th><th>Arguments</th><th>Action</th></tr></thead>
+    <tbody>
+      <tr><td><code>/play</code> · <code>/pause</code> · <code>/stop</code></td><td>—</td><td>Transport</td></tr>
+      <tr><td><code>/load</code></td><td>chemin</td><td>Charge un média (relatif à <code>media/</code>)</td></tr>
+      <tr><td><code>/seek</code></td><td>secondes</td><td>Position de lecture</td></tr>
+      <tr><td><code>/volume</code></td><td>0..1</td><td>Volume</td></tr>
+      <tr><td><code>/loop</code></td><td><code>off|one|all</code> ou 0|1|2</td><td>Mode de boucle</td></tr>
+      <tr><td><code>/playlist/set</code></td><td>chemins…</td><td>Remplace la playlist</td></tr>
+      <tr><td><code>/playlist/go</code></td><td>index</td><td>Saute à l'élément</td></tr>
+      <tr><td><code>/playlist/next</code> · <code>/playlist/prev</code></td><td>—</td><td>Navigation</td></tr>
+      <tr><td><code>/corner/0</code> … <code>/corner/3</code></td><td>x y</td><td>Déplace un coin (0..1, marge ±0,5)</td></tr>
+      <tr><td><code>/rotation</code></td><td>0|90|180|270</td><td>Rotation de la source</td></tr>
+      <tr><td><code>/flip</code></td><td>h v (0|1)</td><td>Miroirs</td></tr>
+      <tr><td><code>/crop</code></td><td>g h d b</td><td>Recadrage par bord (0..0,45)</td></tr>
+      <tr><td><code>/color/brightness</code> etc.</td><td>valeur</td><td><code>contrast gamma saturation hue gain_r gain_g gain_b</code></td></tr>
+      <tr><td><code>/mapping/reset</code></td><td>—</td><td>Mapping aux valeurs neutres</td></tr>
+      <tr><td><code>/mapping/enabled</code></td><td>0|1</td><td>Bypass du mapping</td></tr>
+      <tr><td><code>/mapping/save</code> · <code>/mapping/load</code></td><td>nom</td><td>Mappings enregistrés</td></tr>
+      <tr><td><code>/pattern</code></td><td><code>grid|checker|corners|off</code></td><td>Mire de test</td></tr>
+      <tr><td><code>/preset/save</code> · <code>/preset/load</code></td><td>nom</td><td>Presets d'état complet</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">La même grammaire existe en JSON sur <code>POST /api/command</code>
+  et sur le WebSocket <code>/ws</code> — voir la table dans
+  <code>crates/core/src/command.rs</code>.</p>
+</section>
+
+<section id="midi">
+  <div class="sur-titre">Référence</div>
+  <h2>Contrôle MIDI</h2>
+  <p>Les bindings se déclarent dans <code>node.toml</code> : une note déclenche une
+  commande, un contrôleur continu (CC) pilote un paramètre mis à l'échelle.</p>
+  <pre><code>[modules]
+midi = true
+
+[midi]
+port = "APC"                 <span class="c"># sous-chaîne du nom du port (absent = premier port)</span>
+
+[[midi.bindings]]
+note = 60                    <span class="c"># C4 déclenche la lecture</span>
+command = { cmd = "play" }
+
+[[midi.bindings]]
+cc = 7                       <span class="c"># le fader 7 pilote le volume</span>
+scale = "volume"             <span class="c"># 0..127 → 0..1 (aussi : brightness, gamma, hue…)</span>
+
+[[midi.bindings]]
+note = 62
+channel = 10                 <span class="c"># canal précis (1..16)</span>
+command = { cmd = "preset_load", name = "scene_01" }</code></pre>
+</section>
+
+<section id="config">
+  <div class="sur-titre">Référence</div>
+  <h2>Configuration — node.toml</h2>
+  <p>Un fichier optionnel à côté du binaire. Tout champ absent prend sa valeur
+  par défaut : un <code>node.toml</code> vide (ou manquant) démarre en mode
+  portable. Le fichier complet documenté : <code>node.toml.example</code>.</p>
+  <div class="defile"><table>
+    <thead><tr><th>Section</th><th>Rôle</th><th>Défauts</th></tr></thead>
+    <tbody>
+      <tr><td><code>name</code></td><td>Nom du node sur le réseau</td><td>nom de la machine</td></tr>
+      <tr><td><code>[modules]</code></td><td>Activer player, http, osc, midi</td><td>player, http, osc</td></tr>
+      <tr><td><code>[ports]</code></td><td>Adresse d'écoute et ports</td><td>http 8080 · osc 9000</td></tr>
+      <tr><td><code>[output]</code></td><td>Fenêtre de sortie : écran, plein écran, GPU</td><td>activée · écran 0 · gpu</td></tr>
+      <tr><td><code>[startup]</code></td><td>Mode kiosque : preset + autoplay</td><td>désactivé</td></tr>
+      <tr><td><code>[paths]</code></td><td>Dossiers média, presets, logs</td><td>relatifs au binaire</td></tr>
+      <tr><td><code>[limits]</code></td><td>Taille max d'upload, taille du journal</td><td>2048 Mo · 1000 lignes</td></tr>
+      <tr><td><code>[midi]</code></td><td>Port et bindings</td><td>—</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">L'écran et le plein écran choisis dans l'UI sont mémorisés dans
+  <code>sortie.json</code> (créé à côté de <code>node.toml</code>) et priment sur
+  <code>[output]</code> au démarrage suivant. Supprime ce fichier pour revenir à
+  la config.</p>
+</section>
+
+<section id="depannage">
+  <div class="sur-titre">Référence</div>
+  <h2>Dépannage</h2>
+  <div class="defile"><table>
+    <thead><tr><th>Symptôme</th><th>Cause probable</th><th>Solution</th></tr></thead>
+    <tbody>
+      <tr><td>Fenêtre de sortie noire</td><td>Rien à projeter</td>
+        <td>Normal sans mire ni lecture en cours. Choisis une mire (onglet Mapping) ou lance un média.</td></tr>
+      <tr><td>La vidéo ne se lance pas</td><td>Binaire léger ou GStreamer absent</td>
+        <td>Prends le pack <code>…-gstreamer</code> (Windows) ou installe les paquets GStreamer (Linux/Pi). Les logs indiquent « backend simulé » dans ce cas.</td></tr>
+      <tr><td>Image saccadée</td><td>Rendu processeur actif</td>
+        <td>Vérifie « rendu GPU actif » dans la page Logs. Sinon : pilotes graphiques (Vulkan) à mettre à jour ; le badge img/s permet de comparer.</td></tr>
+      <tr><td>UI inaccessible depuis le téléphone</td><td>Pare-feu ou mauvaise IP</td>
+        <td>Autorise le port 8080 (privé) sur la machine ; vérifie que les deux appareils partagent le même réseau.</td></tr>
+      <tr><td>Écran du projecteur introuvable</td><td>Branché après le lancement</td>
+        <td>Change d'écran dans la carte « Sortie » : la liste est re-détectée à chaque application.</td></tr>
+      <tr><td>Le fichier refuse de s'uploader</td><td>Plus gros que la limite</td>
+        <td>Copie-le directement dans <code>media/</code>, ou augmente <code>[limits] max_upload_mb</code>.</td></tr>
+      <tr><td>Un preset ne charge pas</td><td>Fichier modifié à la main</td>
+        <td>Les presets invalides sont refusés (valeurs hors bornes). Le journal donne la raison exacte.</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">Chaque incident laisse une trace dans l'onglet Logs — c'est le
+  premier endroit où regarder. En cas d'échec de la CI du projet, les journaux
+  complets sont publiés sur les branches <code>ci-logs-*</code> du dépôt.</p>
+</section>
+
+<footer>
+  Toolbox v1.0 · manuel généré le 10 juillet 2026 ·
+  <a href="https://github.com/pymenvert/toolbox">github.com/pymenvert/toolbox</a>
+</footer>
+</main>
+</div>
+</body>
+</html>
