@@ -172,6 +172,17 @@ impl Default for Output {
     }
 }
 
+/// Sécurité de l'interface web (P4.4). Sans mot de passe : réseau local de
+/// confiance, comportement historique.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Security {
+    /// Mot de passe de l'UI web et de l'API (HTTP Basic, tout identifiant
+    /// accepté). Absent = pas d'authentification. L'OSC (UDP) et l'OSCQuery
+    /// restent ouverts : à réserver au réseau local ou à Tailscale.
+    pub password: Option<String>,
+}
+
 /// Bornes de ressources — un node de spectacle ne doit jamais saturer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -223,6 +234,7 @@ pub struct NodeConfig {
     pub paths: Paths,
     pub startup: Startup,
     pub output: Output,
+    pub security: Security,
     pub limits: Limits,
     pub midi: MidiSettings,
 }

@@ -53,6 +53,13 @@ gpu = true         # rendu par la carte graphique (repli CPU automatique en cas 
 #preset = "show"
 #autoplay = true
 
+[security]
+# Mot de passe de l'interface web et de l'API (absent = pas de mot de passe,
+# réseau local de confiance). Le navigateur demande les identifiants :
+# n'importe quel nom + ce mot de passe. L'OSC (UDP) reste ouvert.
+# Préférez un mot de passe sans accents (certains outils n'envoient pas l'UTF-8).
+#password = "changez-moi"
+
 [limits]
 max_upload_mb = 2048   # taille max d'un média déposé via la web UI
 log_buffer = 1000      # entrées gardées par la page de logs

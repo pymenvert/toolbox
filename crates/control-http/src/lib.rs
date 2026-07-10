@@ -112,6 +112,9 @@ pub struct AppState {
     /// Parc de nodes découverts en mDNS (JSON prêt à servir ; vide sans
     /// découverte). Publié par le module fleet du binaire.
     fleet: watch::Receiver<serde_json::Value>,
+    /// Mot de passe de l'UI/API (`[security] password`). `None` = ouvert
+    /// (réseau local de confiance, comportement historique).
+    password: Option<String>,
     started_at: Instant,
     node_name: String,
     version: String,
@@ -142,10 +145,18 @@ impl AppState {
             shutdown,
             output,
             fleet,
+            password: None,
             started_at: Instant::now(),
             node_name,
             version,
         }
+    }
+
+    /// Active le mot de passe HTTP Basic (tout identifiant, ce mot de passe).
+    #[must_use]
+    pub fn with_password(mut self, password: Option<String>) -> Self {
+        self.password = password.filter(|p| !p.is_empty());
+        self
     }
 
     /// Canal fleet inerte (tests, découverte désactivée).
@@ -212,7 +223,55 @@ pub fn router(app: AppState) -> Router {
         .route("/api/preview.png", get(preview_png))
         .route("/ws", get(ws_events_upgrade))
         .route("/ws/logs", get(ws_logs_upgrade))
+        .layer(axum::middleware::from_fn_with_state(
+            app.clone(),
+            require_password,
+        ))
         .with_state(app)
+}
+
+/// Mot de passe optionnel (HTTP Basic, tout identifiant accepté). Le
+/// navigateur affiche sa boîte de connexion native ; les identifiants
+/// suivent aussi les WebSocket de la même origine. Protection de niveau
+/// réseau local — pour Internet, passer par Tailscale.
+async fn require_password(
+    State(app): State<AppState>,
+    request: Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let Some(expected) = &app.password else {
+        return next.run(request).await;
+    };
+    use base64::Engine as _;
+    let authorized = request
+        .headers()
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Basic "))
+        .and_then(|encoded| {
+            base64::engine::general_purpose::STANDARD
+                .decode(encoded)
+                .ok()
+        })
+        .and_then(|bytes| String::from_utf8(bytes).ok())
+        .and_then(|credentials| {
+            credentials
+                .split_once(':')
+                .map(|(_, password)| password == expected)
+        })
+        .unwrap_or(false);
+    if authorized {
+        next.run(request).await
+    } else {
+        (
+            StatusCode::UNAUTHORIZED,
+            [(
+                axum::http::header::WWW_AUTHENTICATE,
+                "Basic realm=\"Toolbox\", charset=\"UTF-8\"",
+            )],
+        )
+            .into_response()
+    }
 }
 
 /// Démarre le serveur ; s'arrête proprement quand `shutdown` change.
@@ -1110,6 +1169,84 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let json = body_json(response).await;
         assert!(json["os"].is_string());
+    }
+
+    /// Le mot de passe optionnel protège tout : 401 sans identifiants,
+    /// accès avec le bon mot de passe (peu importe l'identifiant).
+    #[tokio::test]
+    async fn password_gates_everything_when_set() {
+        use base64::Engine as _;
+        let bed = testbed(); // sans mot de passe : ouvert (autres tests)
+        drop(bed);
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let presets = PresetStore::open(dir.path().join("presets")).expect("presets");
+        let mapping_presets =
+            MappingStore::open(dir.path().join("presets").join("mapping")).expect("mappings");
+        let media = MediaLibrary::open(dir.path().join("media"), 1024).expect("media");
+        let bus = Bus::new(8, 8);
+        let handle = bus.handle();
+        tokio::spawn(bus.run());
+        let (_ptx, prx) = watch::channel(PlaybackPosition::default());
+        let (_stx, srx) = watch::channel(false);
+        let app = AppState::new(
+            handle,
+            presets,
+            mapping_presets,
+            media,
+            LogBuffer::new(8),
+            prx,
+            srx,
+            OutputControl::disconnected(),
+            AppState::no_fleet(),
+            "t".into(),
+            "0".into(),
+        )
+        .with_password(Some("sésame".into()));
+        let router = router(app);
+
+        // Sans identifiants : 401 + invite Basic.
+        let response = router
+            .clone()
+            .oneshot(
+                HttpRequest::get("/api/health")
+                    .body(Body::empty())
+                    .expect("req"),
+            )
+            .await
+            .expect("resp");
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert!(response
+            .headers()
+            .get(axum::http::header::WWW_AUTHENTICATE)
+            .is_some());
+
+        // Mauvais mot de passe : 401.
+        let bad = base64::engine::general_purpose::STANDARD.encode("pym:faux");
+        let response = router
+            .clone()
+            .oneshot(
+                HttpRequest::get("/api/health")
+                    .header("authorization", format!("Basic {bad}"))
+                    .body(Body::empty())
+                    .expect("req"),
+            )
+            .await
+            .expect("resp");
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        // Bon mot de passe, identifiant quelconque : accès.
+        let good = base64::engine::general_purpose::STANDARD.encode("pym:sésame");
+        let response = router
+            .oneshot(
+                HttpRequest::get("/api/health")
+                    .header("authorization", format!("Basic {good}"))
+                    .body(Body::empty())
+                    .expect("req"),
+            )
+            .await
+            .expect("resp");
+        assert_eq!(response.status(), StatusCode::OK);
     }
 
     /// L'aperçu de la sortie est un vrai PNG aux dimensions demandées.

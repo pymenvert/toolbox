@@ -2924,6 +2924,7 @@ name = "toolbox-control-http"
 version = "1.0.0"
 dependencies = [
  "axum",
+ "base64",
  "futures-util",
  "http-body-util",
  "png",

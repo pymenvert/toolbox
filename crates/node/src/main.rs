@@ -216,7 +216,11 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
             fleet_rx.clone(),
             node_name.clone(),
             env!("CARGO_PKG_VERSION").to_string(),
-        );
+        )
+        .with_password(config.security.password.clone());
+        if config.security.password.is_some() {
+            info!("interface web protégée par mot de passe ([security])");
+        }
         let http_config = toolbox_control_http::HttpConfig {
             bind: config.ports.bind.clone(),
             port: config.ports.http,

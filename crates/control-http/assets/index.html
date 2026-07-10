@@ -1515,6 +1515,8 @@ async function loadSystem() {
   loadFleet();
   setInterval(loadSystem, 5000);
   setInterval(loadFleet, 7000);
+  // Un fichier copié directement dans media/ apparaît sans recharger la page.
+  setInterval(() => { if ($("#page-media").classList.contains("visible")) loadMedia(); }, 5000);
   sizeStage();
   paintSeek();
 })();

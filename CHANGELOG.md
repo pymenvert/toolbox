@@ -5,6 +5,11 @@
 
 ## [Non publié]
 
+- **Mot de passe optionnel de l'UI/API** (`[security] password`) : HTTP
+  Basic, tout identifiant + ce mot de passe ; absent = ouvert comme avant.
+  L'OSC (UDP) reste ouvert — réseau local ou Tailscale conseillés.
+- La liste des Médias se rafraîchit toute seule (un fichier copié dans
+  `media/` apparaît sans recharger la page).
 - **Aperçu de la sortie dans le Dashboard** : ce que projette le node
   (warp, mires, vidéo, effets), en PNG basse résolution rafraîchi toutes
   les 1,5 s — contrôlable depuis un téléphone sans voir le projecteur
