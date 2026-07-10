@@ -16,3 +16,5 @@ webui/dist/
 .claude/
 # Console lumieres persistee par le node (page Lumieres).
 lumieres.json
+# Sequences persistees par le node (page Sequences).
+sequences.json
