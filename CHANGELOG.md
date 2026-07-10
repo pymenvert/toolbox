@@ -3,7 +3,37 @@
 Évolutions notables du node Toolbox. Format inspiré de
 [Keep a Changelog](https://keepachangelog.com/fr/), versionnage SemVer.
 
-## [Non publié] — nuit du 2026-07-09 au 2026-07-10
+## [Non publié] — journée du 2026-07-10
+
+### Ajouté
+- **Fenêtre de sortie** (`crates/render`) : fenêtre native qui affiche les
+  mires puis la vidéo, déformées EN DIRECT par le mapping avec la correction
+  couleur — le calibrage projecteur est opérationnel. F11 plein écran,
+  Échap le quitte ; fermer la fenêtre n'arrête pas le node.
+- **Sélection d'écrans depuis l'UI** : carte « Sortie » de l'onglet Mapping
+  (liste des écrans détectés, plein écran), appliquée à chaud ;
+  `[output]` dans node.toml pour l'état au démarrage ;
+  API `GET /api/outputs` + `POST /api/output`.
+- **Backend vidéo GStreamer** (`crates/gst`, feature `gstreamer`) : décodage
+  réel multiplateforme (Windows/Ubuntu/Pi, accélération matérielle auto),
+  audio système, frames RGBA vers la fenêtre de sortie. Repli automatique
+  sur le backend simulé si le runtime manque. Artefact Windows
+  **pack autonome** (DLL et plugins inclus, rien à installer).
+- **Toggle mapping** : `set_mapping_enabled` (UI, OSC `/mapping/enabled`) —
+  bypass du warp sans perdre les réglages.
+- **Presets de mapping seul** : `mapping_save`/`mapping_load` (UI, OSC,
+  `/api/mapping-presets`), stockés dans `presets/mapping/` ; charger un
+  mapping n'interrompt pas la lecture.
+- **Démarrage automatique Windows** :
+  `deploy/install-autostart-windows.bat` (retrait via `--remove`).
+
+### Robustesse
+- Les WebSockets observent l'arrêt du node (extinction immédiate même UI
+  ouverte) ; ping serveur 20 s pour détecter les clients disparus.
+- Tolérance f32/f64 des tests de rendu ; `Cargo.lock` versionné ;
+  première compilation complète du workspace (CI verte sur les 3 cibles).
+
+## [0.1.0-nuit] — nuit du 2026-07-09 au 2026-07-10
 
 ### Ajouté
 - **P1.0 logs** : ring buffer borné branché sur `tracing`, flux en direct,
