@@ -148,6 +148,20 @@ Sous Windows, aucune dépendance système (midir utilise WinMM).
   envoi curl uniquement si [telemetrie] url), lanceur Chataigne
   (/api/chataigne), identité Lanterne (logo SVG nav + favicon). Chaque
   fonction vérifiée en réel sur node local (pixels d'aperçu, OSC, API).
+- v3.1.0 (2026-07-11, matin) : sorties réseau complètes — flux MJPEG
+  (/flux.mjpg, thread par client, tampons réutilisés), RTSP
+  (gst-rtsp-server, pipeline partagé, test CI DESCRIBE réel), **NDI**
+  (crate toolbox-ndi SANS feature cargo : libloading charge la lib à
+  l'exécution — FFI recopié des en-têtes du SDK v6 fourni par Pym ;
+  dossier local « NDI sdk/ » gitignoré, JAMAIS versionné ; vérifié en
+  réel via le runtime des NDI Tools de Pym, libs Pi aarch64/armhf dans
+  le SDK). Brique DRM/KMS ([output] mode = "kms", kmssink, run réel
+  attend le Pi), compositeur partagé déplacé dans engine
+  (frame/frame_rgba), perf (zéro clone d'état/allocation par frame sur
+  les chemins chauds), réglages de performance (reglages.json + carte
+  Système, profils Pi 3/4/5/PC appliqués au boot), installateur
+  intelligent (détection /proc/device-tree/model, mock TOOLBOX_MODELE),
+  archives portables avec install.sh embarqué, infobulles néophyte.
 
 ## Prochaines étapes
 

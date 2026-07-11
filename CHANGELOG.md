@@ -3,7 +3,7 @@
 Évolutions notables du node Toolbox. Format inspiré de
 [Keep a Changelog](https://keepachangelog.com/fr/), versionnage SemVer.
 
-## [Non publié]
+## [3.1.0] — 2026-07-11
 
 - **Sortie NDI** : `[ndi] sortie = true` — la sortie composée annoncée
   comme source NDI sur le réseau (OBS, vMix, moniteurs NDI), nom
@@ -40,8 +40,6 @@
   avec la feature `gstreamer`) — la sortie composée en H.264 (MJPEG en
   repli), pipeline PARTAGÉ entre les clients (dix spectateurs = un seul
   rendu + un seul encodage). Testée par la CI avec un vrai DESCRIBE RTSP.
-  La sortie NDI reste bloquée par le SDK propriétaire NewTek (licence,
-  non redistribuable en CI) — documenté, pas entamé.
 - **Flux MJPEG de la sortie** : `http://node:8080/flux.mjpg` — la sortie
   composée (mapping, couleur, LUT, blackout) en continu dans VLC, OBS ou
   un navigateur, sans rien installer. `?w=1280&fps=25` optionnels, coupé
@@ -94,6 +92,7 @@ intelligents, installation par profils, télémétrie opt-in.
   **MIDI** (binding `{cmd = "cue_go", name = "…"}`). Les scènes et
   chasers lumières sont aussi pilotables directement en OSC/MIDI
   (`/dmx/scene`, `/dmx/chaser`) — tout le vocabulaire passe par le bus.
+
 ## [2.0.0] — 2026-07-11
 
 La V2 : synchronisation à la frame, console lumières Art-Net, séquenceur,
