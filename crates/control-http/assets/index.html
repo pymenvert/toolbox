@@ -306,16 +306,16 @@
     </div>
     <div><b id="brandName">Lanterne</b><small id="brandVer">&nbsp;</small></div>
   </div>
-  <a data-page="dashboard" class="active"><span class="ic">&#9672;</span><span>Dashboard</span></a>
-  <a data-page="mapping"><span class="ic">&#11034;</span><span>Mapping</span></a>
-  <a data-page="color"><span class="ic">&#9680;</span><span>Couleur</span></a>
-  <a data-page="media"><span class="ic">&#9636;</span><span>M&eacute;dias</span></a>
-  <a data-page="presets"><span class="ic">&#9733;</span><span>Presets</span></a>
-  <a data-page="cues"><span class="ic">&#9654;</span><span>S&eacute;quences</span></a>
-  <a data-page="lights"><span class="ic">&#9728;</span><span>Lumi&egrave;res</span></a>
-  <a data-page="logs"><span class="ic">&#9776;</span><span>Logs</span></a>
-  <a data-page="features"><span class="ic">&#9211;</span><span>Fonctions</span></a>
-  <a data-page="system"><span class="ic">&#9881;</span><span>Syst&egrave;me</span></a>
+  <a data-page="dashboard" class="active" title="Lecture, volume, aper&ccedil;u de la sortie et boutons de r&eacute;gie (blackout/freeze)"><span class="ic">&#9672;</span><span>Dashboard</span></a>
+  <a data-page="mapping" title="Caler l'image sur la surface : 4 coins, grille de mesh, fondu de bords, masques, choix de l'&eacute;cran"><span class="ic">&#11034;</span><span>Mapping</span></a>
+  <a data-page="color" title="Luminosit&eacute;, contraste, teinte, gains RVB, LUT d'&eacute;talonnage et effets"><span class="ic">&#9680;</span><span>Couleur</span></a>
+  <a data-page="media" title="D&eacute;poser des vid&eacute;os/images, sources externes (cam&eacute;ra, flux) et fichiers des autres machines"><span class="ic">&#9636;</span><span>M&eacute;dias</span></a>
+  <a data-page="presets" title="Enregistrer et rappeler des &eacute;tats complets (avec fondus) + &eacute;tat de d&eacute;marrage"><span class="ic">&#9733;</span><span>Presets</span></a>
+  <a data-page="cues" title="S&eacute;quenceur : enchainer des actions &agrave; la main, &agrave; heure fixe, par jour de semaine, en OSC/MIDI"><span class="ic">&#9654;</span><span>S&eacute;quences</span></a>
+  <a data-page="lights" title="Console lumi&egrave;res Art-Net : faders DMX, sc&egrave;nes, chasers"><span class="ic">&#9728;</span><span>Lumi&egrave;res</span></a>
+  <a data-page="logs" title="Journal en direct : chaque incident laisse une trace ici"><span class="ic">&#9776;</span><span>Logs</span></a>
+  <a data-page="features" title="Activer/d&eacute;sactiver chaque fonction &mdash; d&eacute;sactiv&eacute;e = vraiment arr&ecirc;t&eacute;e, z&eacute;ro ressource"><span class="ic">&#9211;</span><span>Fonctions</span></a>
+  <a data-page="system" title="Sant&eacute;, r&eacute;seau, r&eacute;glages de performance, mise &agrave; jour, red&eacute;marrage"><span class="ic">&#9881;</span><span>Syst&egrave;me</span></a>
   <div class="spacer"></div>
   <div class="nodecard" id="nodecard">Toolbox</div>
 </nav>
@@ -352,14 +352,14 @@
           <button id="btnNext" title="Suivant">&#9197;</button>
           <div class="seek">
             <span id="posLab">--:--</span>
-            <div class="bar" id="seekbar"><i id="seekfill"></i></div>
+            <div class="bar" id="seekbar" title="Cliquer ou glisser pour se d&eacute;placer dans le m&eacute;dia"><i id="seekfill"></i></div>
             <span id="durLab">--:--</span>
             <span id="fpsBadge" class="badge" title="Frames par seconde r&eacute;ellement affich&eacute;es par la fen&ecirc;tre de sortie" style="display:none">&ndash; img/s</span>
           </div>
         </div>
         <div class="slider" style="margin-top:10px">
           <label for="vol">Volume</label>
-          <input type="range" id="vol" min="0" max="1" step="0.01" value="1" data-fmt="pct">
+          <input type="range" id="vol" min="0" max="1" step="0.01" value="1" data-fmt="pct" title="Volume du son de la vid&eacute;o (double-clic : 100 %)">
           <output id="volOut">100%</output>
         </div>
         <div class="rowbtns" style="margin-top:8px">
@@ -409,7 +409,7 @@
           <div class="row"><span>1 &middot; haut droit</span><b id="c1">&ndash;</b></div>
           <div class="row"><span>2 &middot; bas droit</span><b id="c2">&ndash;</b></div>
           <div class="row"><span>3 &middot; bas gauche</span><b id="c3">&ndash;</b></div>
-          <label class="chk" style="margin-top:8px"><input type="checkbox" id="mapEnabled" checked> Mapping actif</label>
+          <label class="chk" style="margin-top:8px" title="D&eacute;coch&eacute; : l'image repasse plein cadre sans d&eacute;formation, MAIS tous les r&eacute;glages sont conserv&eacute;s pour la r&eacute;activation"><input type="checkbox" id="mapEnabled" checked> Mapping actif</label>
           <div class="hint">D&eacute;coch&eacute; : image brute plein cadre, les r&eacute;glages sont conserv&eacute;s.</div>
           <div class="rowbtns" style="margin-top:12px">
             <button id="mapReset" class="danger">R&eacute;initialiser le mapping</button>
@@ -709,7 +709,7 @@
         <label class="muted" style="font-size:.85em">Destination Art-Net</label>
         <input type="text" id="dmxCible" style="width:170px" placeholder="255.255.255.255">
         <label class="muted" style="font-size:.85em;margin-left:12px">Master</label>
-        <input type="range" id="dmxMaster" min="0" max="255" value="255" style="flex:1;min-width:120px">
+        <input type="range" id="dmxMaster" min="0" max="255" value="255" style="flex:1;min-width:120px" title="Master : multiplie TOUS les faders envoy&eacute;s en DMX (255 = plein feu, 0 = noir lumi&egrave;res)">
         <span id="dmxMasterVal" style="font-variant-numeric:tabular-nums;width:34px;text-align:right">255</span>
       </div>
       <div class="fadersRow" id="dmxFaders"></div>
