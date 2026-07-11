@@ -189,51 +189,17 @@ fn pousser_frames(
         .name("toolbox-rtsp-frames".into())
         .spawn(move || {
             let periode = std::time::Duration::from_millis(u64::from(1000 / fps.max(1)));
-            let depart = std::time::Instant::now();
-            // Cache de LUT identique dans l'esprit à celui de la fenêtre.
-            let mut lut_cache: Option<(String, Option<toolbox_engine::Lut3d>)> = None;
-            let mut pixels = vec![0u32; (largeur * hauteur) as usize];
+            // Rendu composé partagé avec la sortie KMS : tampons réutilisés,
+            // état recopié seulement quand le bus a changé, cache de LUT.
+            let mut compositeur =
+                crate::composite::Compositeur::new(state, video, largeur, hauteur);
             loop {
                 if arret.load(Ordering::Relaxed) {
                     break;
                 }
                 let tic = std::time::Instant::now();
-                let snapshot = state.borrow().clone();
-                let frame = video.borrow().clone();
-                let nom_lut = snapshot.lut.clone();
-                match (&nom_lut, &mut lut_cache) {
-                    (None, cache) => *cache = None,
-                    (Some(nom), Some((connu, _))) if connu == nom => {}
-                    (Some(nom), cache) => {
-                        let charge =
-                            std::fs::read_to_string(std::path::Path::new("luts").join(nom))
-                                .map_err(|e| e.to_string())
-                                .and_then(|t| toolbox_engine::Lut3d::depuis_texte(&t));
-                        if let Err(err) = &charge {
-                            warn!(nom, %err, "LUT illisible pour la sortie RTSP — ignorée");
-                        }
-                        *cache = Some((nom.clone(), charge.ok()));
-                    }
-                }
-                let lut = lut_cache.as_ref().and_then(|(_, l)| l.as_ref());
-                toolbox_engine::raster::render_frame_lut(
-                    &snapshot,
-                    frame.as_ref(),
-                    lut,
-                    depart.elapsed().as_secs_f32(),
-                    largeur,
-                    hauteur,
-                    &mut pixels,
-                );
-                if snapshot.blackout.actif {
-                    toolbox_engine::appliquer_blackout(&mut pixels, 1.0);
-                }
-                let mut rgb = Vec::with_capacity(pixels.len() * 3);
-                for px in &pixels {
-                    #[allow(clippy::cast_possible_truncation)]
-                    rgb.extend_from_slice(&[(px >> 16) as u8, (px >> 8) as u8, *px as u8]);
-                }
-                let tampon = gstreamer::Buffer::from_mut_slice(rgb);
+                let rgb = compositeur.frame();
+                let tampon = gstreamer::Buffer::from_slice(rgb.to_vec());
                 if appsrc.push_buffer(tampon).is_err() {
                     // Pipeline en Flushing : plus de client, on s'arrête.
                     break;

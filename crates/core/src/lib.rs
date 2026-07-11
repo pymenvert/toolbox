@@ -24,7 +24,7 @@ pub mod state;
 
 pub use bus::{Bus, BusHandle, Source};
 pub use command::{ColorParam, Command, TestPattern};
-pub use config::{NodeConfig, SyncRole, SyncSettings};
+pub use config::{NodeConfig, Resolution, SortieMode, SyncRole, SyncSettings};
 pub use error::CoreError;
 pub use features::FeatureFlags;
 pub use logging::{LogBuffer, LogEntry};

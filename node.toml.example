@@ -50,6 +50,11 @@ enabled = true
 monitor = 0        # index de l'écran cible ; la liste détectée est dans les logs
 fullscreen = false # true = plein écran sans bordure sur l'écran cible
 gpu = true         # rendu par la carte graphique (repli CPU automatique en cas d'échec)
+# Sortie SANS bureau (Raspberry Pi OS Lite, console) : mode = "kms" remplace
+# la fenêtre par le plein écran DRM/KMS (binaire compilé avec `gstreamer`).
+# La résolution vient de [resolution] ; à valider sur Pi réel.
+#mode = "kms"
+#kms_fps = 30
 
 [startup]
 # Mode kiosque (P1.9) : au démarrage, charger un preset et lancer la lecture.

@@ -5,6 +5,13 @@
 
 ## [Non publié]
 
+- **Brique DRM/KMS** : `[output] mode = "kms"` — plein écran SANS bureau
+  (Raspberry Pi OS Lite, console) via kmssink, frames composées par la
+  référence CPU (compositeur partagé avec la sortie RTSP, tampons
+  réutilisés). Suit l'interrupteur « fenêtre de sortie » (coupé = noir).
+  Construite et testée en CI ; le run réel attend un Pi.
+- **Perf** : plus de clone d'état ni d'allocations par frame sur les
+  chemins chauds (fenêtre, flux MJPEG, sorties GStreamer).
 - **Sortie RTSP** : `rtsp://node:8554/sortie` (section `[rtsp]`, binaires
   avec la feature `gstreamer`) — la sortie composée en H.264 (MJPEG en
   repli), pipeline PARTAGÉ entre les clients (dix spectateurs = un seul

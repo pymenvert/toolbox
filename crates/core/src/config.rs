@@ -161,6 +161,18 @@ pub struct MidiSettings {
     pub bindings: Vec<MidiBinding>,
 }
 
+/// Mode de la sortie vidéo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SortieMode {
+    /// Fenêtre native (bureau Windows/Linux) — le mode historique.
+    #[default]
+    Fenetre,
+    /// Plein écran DRM/KMS SANS bureau (Raspberry Pi OS Lite, console) —
+    /// binaires compilés avec la feature `gstreamer` uniquement.
+    Kms,
+}
+
 /// Fenêtre de sortie (rendu). Tant que le backend vidéo n'est pas branché,
 /// elle affiche les mires de test warpées : le calibrage projecteur est déjà
 /// possible. La vidéo remplacera la mire dans la même fenêtre.
@@ -169,6 +181,10 @@ pub struct MidiSettings {
 pub struct Output {
     /// Ouvre la fenêtre de sortie au démarrage du node.
     pub enabled: bool,
+    /// `fenetre` (défaut) ou `kms` (plein écran console, Pi Lite).
+    pub mode: SortieMode,
+    /// Cadence de la sortie KMS (frames poussées par seconde).
+    pub kms_fps: u32,
     /// Écran cible, par index (0 = premier). La liste des écrans détectés est
     /// tracée au démarrage (visible dans la page Logs).
     pub monitor: usize,
@@ -185,6 +201,8 @@ impl Default for Output {
     fn default() -> Self {
         Self {
             enabled: true,
+            mode: SortieMode::Fenetre,
+            kms_fps: 30,
             monitor: 0,
             fullscreen: false,
             gpu: true,

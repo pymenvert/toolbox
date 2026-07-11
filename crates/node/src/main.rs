@@ -419,22 +419,65 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
         warn!("[rtsp] activé mais ce binaire est compilé sans la feature `gstreamer`");
     }
 
+    // Sortie DRM/KMS (plein écran console, Pi Lite) : remplace la fenêtre
+    // quand `[output] mode = "kms"` et que le binaire embarque GStreamer.
+    let mode_kms = config.output.mode == toolbox_core::SortieMode::Kms;
+    #[cfg(feature = "gstreamer")]
+    let kms_handle = if mode_kms {
+        let (largeur, hauteur) = match &config.resolution {
+            toolbox_core::Resolution::Fixed { width, height } => (*width, *height),
+            toolbox_core::Resolution::Auto => (1920, 1080),
+        };
+        match toolbox_gst::kms::demarrer(
+            toolbox_gst::kms::KmsConfig {
+                largeur,
+                hauteur,
+                fps: config.output.kms_fps,
+            },
+            handle.state_watch(),
+            video_rx.clone(),
+            output_enabled_rx.clone(),
+        ) {
+            Ok(h) => Some(h),
+            Err(err) => {
+                error!(%err, "sortie KMS indisponible — le node continue sans sortie");
+                None
+            }
+        }
+    } else {
+        None
+    };
+    #[cfg(not(feature = "gstreamer"))]
+    if mode_kms {
+        warn!("[output] mode = \"kms\" demandé mais ce binaire est compilé sans la feature `gstreamer`");
+    }
+
     #[cfg(feature = "render")]
-    let render_thread = Some(toolbox_render::spawn(
-        toolbox_render::WindowConfig {
-            title: format!("Toolbox — sortie ({node_name})"),
-            gpu: config.output.gpu,
-        },
-        toolbox_render::OutputChannels {
-            state: handle.state_watch(),
-            video: video_rx,
-            settings: output_settings_rx,
-            monitors: monitors_tx,
-            fps: fps_tx,
-            enabled: output_enabled_rx,
-            shutdown: shutdown_rx.clone(),
-        },
-    ));
+    let render_thread = if mode_kms {
+        // La sortie KMS remplace la fenêtre : canaux fenêtre sans usage.
+        drop(video_rx);
+        drop(output_settings_rx);
+        drop(monitors_tx);
+        drop(fps_tx);
+        drop(output_enabled_rx);
+        None
+    } else {
+        Some(toolbox_render::spawn(
+            toolbox_render::WindowConfig {
+                title: format!("Toolbox — sortie ({node_name})"),
+                gpu: config.output.gpu,
+            },
+            toolbox_render::OutputChannels {
+                state: handle.state_watch(),
+                video: video_rx,
+                settings: output_settings_rx,
+                monitors: monitors_tx,
+                fps: fps_tx,
+                enabled: output_enabled_rx,
+                shutdown: shutdown_rx.clone(),
+            },
+        ))
+    };
     #[cfg(not(feature = "render"))]
     {
         // Pas de fenêtre dans ce binaire : canaux de sortie sans consommateur.
@@ -443,7 +486,7 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
         drop(monitors_tx);
         drop(fps_tx);
         drop(output_enabled_rx);
-        if initial_features.output {
+        if initial_features.output && !mode_kms {
             warn!("fenêtre de sortie demandée mais ce binaire est compilé sans (feature `render`)");
         }
     }
@@ -575,6 +618,16 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
             .is_err()
         {
             warn!("la sortie RTSP ne s'est pas arrêtée en 5 s");
+        }
+    }
+    #[cfg(feature = "gstreamer")]
+    if let Some(kms) = kms_handle {
+        let join = tokio::task::spawn_blocking(move || kms.arreter());
+        if tokio::time::timeout(Duration::from_secs(5), join)
+            .await
+            .is_err()
+        {
+            warn!("la sortie KMS ne s'est pas arrêtée en 5 s");
         }
     }
     info!("arrêt complet");

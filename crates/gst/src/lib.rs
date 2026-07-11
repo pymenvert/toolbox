@@ -13,6 +13,10 @@
 #[cfg(feature = "gstreamer")]
 mod backend;
 #[cfg(feature = "gstreamer")]
+pub mod composite;
+#[cfg(feature = "gstreamer")]
+pub mod kms;
+#[cfg(feature = "gstreamer")]
 pub mod rtsp;
 #[cfg(feature = "gstreamer")]
 pub use backend::GstBackend;
