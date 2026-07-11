@@ -13,6 +13,8 @@ axum = { version = "0.8", features = ["ws"] }
 futures-util = { version = "0.3", default-features = false }
 # Aperçu de la sortie : encodage PNG pur Rust.
 png = "0.18"
+# Flux MJPEG de la sortie (/flux.mjpg) : encodage JPEG pur Rust.
+jpeg-encoder = "0.6"
 # Décodage des identifiants HTTP Basic (mot de passe optionnel de l'UI).
 base64 = "0.22"
 # Fichiers du parc : le node relaie ses médias vers les autres nodes en HTTP

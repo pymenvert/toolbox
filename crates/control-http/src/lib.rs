@@ -298,6 +298,7 @@ pub fn router(app: AppState) -> Router {
         .route("/api/luts", get(luts_list))
         .route("/api/luts/{name}", put(lut_upload).delete(lut_delete))
         .route("/api/preview.png", get(preview_png))
+        .route("/flux.mjpg", get(flux_mjpg))
         .route("/api/diagnostic.zip", get(diagnostic_zip))
         .route("/api/features", get(features_get).post(features_set))
         .route("/api/fleet/media", get(fleet_media))
@@ -774,6 +775,115 @@ async fn preview_png(
             .into_response(),
         None => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
+}
+
+/// Flux MJPEG de la sortie composée (`multipart/x-mixed-replace`) : la
+/// même image que la fenêtre (mapping, couleur, LUT, blackout), lisible
+/// dans VLC, OBS (source « navigateur » ou « média ») et tout navigateur.
+/// `?w=960&fps=15` optionnels (64..1920, 1..30). Chaque client a son
+/// rendu : à réserver à quelques spectateurs (le multi-client lourd,
+/// c'est la sortie RTSP).
+async fn flux_mjpg(
+    State(app): State<AppState>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    if !app.features.borrow().preview {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "aperçu désactivé (onglet Fonctions)" })),
+        )
+            .into_response();
+    }
+    let width: u32 = params
+        .get("w")
+        .and_then(|w| w.parse().ok())
+        .unwrap_or(960)
+        .clamp(64, 1920);
+    let height = width * 9 / 16;
+    let fps: u32 = params
+        .get("fps")
+        .and_then(|f| f.parse().ok())
+        .unwrap_or(15)
+        .clamp(1, 30);
+
+    // Écrivain → lecteur : le corps HTTP lit ce que la tâche de rendu
+    // pousse. Le client qui raccroche fait échouer l'écriture : fin propre.
+    let (ecrivain, lecteur) = tokio::io::duplex(256 * 1024);
+    let app_flux = app.clone();
+    tokio::spawn(async move {
+        use tokio::io::AsyncWriteExt;
+        let mut ecrivain = ecrivain;
+        let mut cadence = tokio::time::interval(std::time::Duration::from_millis(u64::from(
+            1000 / fps.max(1),
+        )));
+        cadence.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        info!(width, fps, "flux MJPEG ouvert");
+        loop {
+            cadence.tick().await;
+            if !app_flux.features.borrow().preview {
+                break; // fonction coupée en cours de route : on raccroche
+            }
+            let state = app_flux.bus.snapshot();
+            let video = app_flux.output.video.borrow().clone();
+            let lut = lut_pour_apercu(&app_flux, state.lut.as_deref()).await;
+            let time = app_flux.started_at.elapsed().as_secs_f32();
+            let jpeg = tokio::task::spawn_blocking(move || {
+                let mut pixels = vec![0u32; (width * height) as usize];
+                toolbox_engine::raster::render_frame_lut(
+                    &state,
+                    video.as_ref(),
+                    lut.as_deref(),
+                    time,
+                    width,
+                    height,
+                    &mut pixels,
+                );
+                if state.blackout.actif {
+                    toolbox_engine::appliquer_blackout(&mut pixels, 1.0);
+                }
+                let mut rgb = Vec::with_capacity(pixels.len() * 3);
+                for px in &pixels {
+                    rgb.extend_from_slice(&[(px >> 16) as u8, (px >> 8) as u8, *px as u8]);
+                }
+                let mut sortie = Vec::new();
+                let encodeur = jpeg_encoder::Encoder::new(&mut sortie, 80);
+                #[allow(clippy::cast_possible_truncation)] // ≤ 1920
+                let encode = encodeur.encode(
+                    &rgb,
+                    width as u16,
+                    height as u16,
+                    jpeg_encoder::ColorType::Rgb,
+                );
+                encode.ok().map(|()| sortie)
+            })
+            .await;
+            let Ok(Some(jpeg)) = jpeg else { break };
+            let entete = format!(
+                "--lanterne\r\nContent-Type: image/jpeg\r\nContent-Length: {}\r\n\r\n",
+                jpeg.len()
+            );
+            if ecrivain.write_all(entete.as_bytes()).await.is_err()
+                || ecrivain.write_all(&jpeg).await.is_err()
+                || ecrivain.write_all(b"\r\n").await.is_err()
+            {
+                break; // client parti
+            }
+        }
+        info!("flux MJPEG fermé");
+    });
+
+    (
+        [
+            (
+                axum::http::header::CONTENT_TYPE,
+                "multipart/x-mixed-replace; boundary=lanterne",
+            ),
+            (axum::http::header::CACHE_CONTROL, "no-store"),
+        ],
+        axum::body::Body::from_stream(tokio_util::io::ReaderStream::new(lecteur)),
+    )
+        .into_response()
 }
 
 /// LUT à appliquer à l'aperçu : chargée depuis `luts/` et mémorisée tant

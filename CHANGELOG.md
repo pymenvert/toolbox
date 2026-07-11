@@ -3,6 +3,14 @@
 Évolutions notables du node Toolbox. Format inspiré de
 [Keep a Changelog](https://keepachangelog.com/fr/), versionnage SemVer.
 
+## [Non publié]
+
+- **Flux MJPEG de la sortie** : `http://node:8080/flux.mjpg` — la sortie
+  composée (mapping, couleur, LUT, blackout) en continu dans VLC, OBS ou
+  un navigateur, sans rien installer. `?w=1280&fps=25` optionnels, coupé
+  avec la fonction Aperçu. Pour du multi-spectateur lourd : la sortie
+  RTSP (ci-dessous).
+
 ## [3.0.0] — 2026-07-11
 
 L'application prend son nom : **Lanterne** (les binaires restent
