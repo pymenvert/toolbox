@@ -5,6 +5,13 @@
 
 ## [Non publié]
 
+- **Réglages de performance** : carte Système → « Réglages de
+  performance » — profils conseillés **PC / Pi 5 / Pi 4 / Pi 3 (allégé)**
+  (résolution de rendu, GPU on/off, cadence KMS) avec conseils par
+  matériel écrits en clair, bouton **Enregistrer** (`reglages.json`,
+  appliqué au prochain lancement, borné et validé). Pi 3 : rendu
+  processeur 960×540 — sa puce graphique (GLES 2.0) ne peut pas faire
+  tourner le rendu GPU ; lecture + mapping restent disponibles.
 - **Brique DRM/KMS** : `[output] mode = "kms"` — plein écran SANS bureau
   (Raspberry Pi OS Lite, console) via kmssink, frames composées par la
   référence CPU (compositeur partagé avec la sortie RTSP, tampons

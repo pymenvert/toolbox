@@ -18,6 +18,7 @@ pub mod logging;
 pub mod media;
 pub mod output;
 pub mod preset;
+pub mod reglages;
 pub mod sequenceur;
 pub mod source;
 pub mod state;
@@ -31,6 +32,7 @@ pub use logging::{LogBuffer, LogEntry};
 pub use media::{MediaInfo, MediaLibrary};
 pub use output::{MonitorInfo, OutputSettings};
 pub use preset::{MappingStore, PresetStore};
+pub use reglages::Reglages;
 pub use source::MediaSource;
 pub use state::{
     valider_mesh, valider_nom_lut, BlendingState, Event, LoopMode, MappingState, Masque, MeshState,

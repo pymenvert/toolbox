@@ -135,7 +135,25 @@ fn bootstrap() -> Result<Bootstrap, Box<dyn std::error::Error>> {
     Ok((config, config_path, logs, file_guard))
 }
 
-async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::error::Error>> {
+async fn run(mut config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::error::Error>> {
+    // Réglages de performance (carte « Réglages » de l'UI, reglages.json) :
+    // appliqués par-dessus node.toml, comme sortie.json.
+    if let Some(reglages) = toolbox_core::Reglages::load(std::path::Path::new("reglages.json")) {
+        info!(
+            profil = %reglages.profil,
+            largeur = reglages.largeur,
+            hauteur = reglages.hauteur,
+            gpu = reglages.gpu,
+            "réglages de performance appliqués (reglages.json)"
+        );
+        config.resolution = toolbox_core::Resolution::Fixed {
+            width: reglages.largeur,
+            height: reglages.hauteur,
+        };
+        config.output.gpu = reglages.gpu;
+        config.output.kms_fps = reglages.kms_fps;
+    }
+
     let node_name = config
         .name
         .clone()

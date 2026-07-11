@@ -297,6 +297,7 @@ pub fn router(app: AppState) -> Router {
         .route("/api/chataigne/lancer", post(chataigne_lancer))
         .route("/api/luts", get(luts_list))
         .route("/api/luts/{name}", put(lut_upload).delete(lut_delete))
+        .route("/api/reglages", get(reglages_get).post(reglages_set))
         .route("/api/preview.png", get(preview_png))
         .route("/flux.mjpg", get(flux_mjpg))
         .route("/api/diagnostic.zip", get(diagnostic_zip))
@@ -940,6 +941,31 @@ async fn lut_pour_apercu(
         *cache = charge.map(|l| (nom.to_string(), std::sync::Arc::new(l)));
     }
     cache.as_ref().map(|(_, l)| l.clone())
+}
+
+/// Chemin des réglages de performance (à côté de node.toml).
+const CHEMIN_REGLAGES: &str = "reglages.json";
+
+/// Réglages de performance persistés (ou défauts si le fichier manque).
+async fn reglages_get() -> Json<toolbox_core::Reglages> {
+    Json(toolbox_core::Reglages::load(std::path::Path::new(CHEMIN_REGLAGES)).unwrap_or_default())
+}
+
+/// Enregistre les réglages de performance — appliqués au PROCHAIN
+/// lancement du node (l'UI le dit à côté du bouton).
+async fn reglages_set(
+    Json(reglages): Json<toolbox_core::Reglages>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    match reglages.save(std::path::Path::new(CHEMIN_REGLAGES)) {
+        Ok(()) => {
+            info!(profil = %reglages.profil, "réglages de performance enregistrés");
+            (StatusCode::OK, Json(serde_json::json!({ "ok": true })))
+        }
+        Err(err) => (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": err.to_string() })),
+        ),
+    }
 }
 
 /// Les fichiers `.cube` disponibles dans `luts/`.

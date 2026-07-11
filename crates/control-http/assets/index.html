@@ -811,6 +811,33 @@
       quelle &eacute;tape, l'installation actuelle reste intacte.</div>
     </div>
     <div class="card" style="margin-top:14px;max-width:720px">
+      <h3>R&eacute;glages de performance</h3>
+      <div class="presetRow">
+        <select id="regProfil" style="flex:1;min-width:130px" title="Choisis le mat&eacute;riel : les champs se remplissent avec les valeurs conseill&eacute;es">
+          <option value="pc">PC (Windows / Linux)</option>
+          <option value="pi5">Raspberry Pi 5</option>
+          <option value="pi4">Raspberry Pi 4</option>
+          <option value="pi3">Raspberry Pi 3 (all&eacute;g&eacute;)</option>
+          <option value="perso">Personnalis&eacute;</option>
+        </select>
+        <button id="regSave" class="primary">Enregistrer</button>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px">
+        <label style="font-size:12px;color:var(--muted)">Largeur
+          <input type="number" id="regLargeur" min="64" max="3840" step="2" style="width:100%" title="R&eacute;solution interne du rendu — plus petit = plus fluide sur les petites machines"></label>
+        <label style="font-size:12px;color:var(--muted)">Hauteur
+          <input type="number" id="regHauteur" min="64" max="2160" step="2" style="width:100%"></label>
+        <label style="font-size:12px;color:var(--muted)">Cadence KMS
+          <input type="number" id="regFps" min="1" max="60" style="width:100%" title="Frames par seconde de la sortie sans bureau (Pi Lite)"></label>
+      </div>
+      <label class="chk" style="margin-top:8px"><input type="checkbox" id="regGpu">
+        Rendu GPU <span class="muted" style="font-size:11px">(d&eacute;cocher sur Pi 3 : sa puce graphique est trop ancienne)</span></label>
+      <div id="regConseil" class="hint" style="margin-top:6px"></div>
+      <div class="hint">Enregistr&eacute; dans <code>reglages.json</code> et appliqu&eacute; au
+      <b>prochain lancement</b> du logiciel (la r&eacute;solution de rendu et le GPU ne
+      se changent pas &agrave; chaud).</div>
+    </div>
+    <div class="card" style="margin-top:14px;max-width:720px">
       <h3>Chataigne</h3>
       <div class="rowbtns">
         <button id="chataigneLance" style="display:none">Lancer Chataigne</button>
@@ -2487,6 +2514,50 @@ $("#majApplique").addEventListener("click", async () => {
   } catch (e) { $("#majEtat").textContent = "Bascule impossible : rien n'a changé."; }
 });
 
+/* Réglages de performance : profils conseillés par matériel, appliqués au
+   prochain lancement (reglages.json). */
+const REG_PROFILS = {
+  pc:   { largeur: 1920, hauteur: 1080, gpu: true,  kms_fps: 30,
+          conseil: "PC : tout est confortable — profil complet conseillé." },
+  pi5:  { largeur: 1920, hauteur: 1080, gpu: true,  kms_fps: 30,
+          conseil: "Pi 5 : 1080p fluide. Décodage HEVC matériel ; le H.264 passe par le processeur (ça tient très bien). Pas d'encodage matériel : garde la sortie RTSP en 720p." },
+  pi4:  { largeur: 1920, hauteur: 1080, gpu: true,  kms_fps: 30,
+          conseil: "Pi 4 : 1080p OK (décodage H.264 matériel jusqu'en 1080p). Si ça rame avec beaucoup d'effets, passe en 1280×720." },
+  pi3:  { largeur: 960,  hauteur: 540,  gpu: false, kms_fps: 20,
+          conseil: "Pi 3 (allégé) : lecture + mapping en 960×540, rendu processeur (la puce graphique est trop ancienne pour le rendu GPU). Conseillé : couper l'aperçu et le parc dans Fonctions ; éviter la sortie RTSP." },
+  perso: { conseil: "Personnalisé : règle les champs à la main." },
+};
+function renderReglages(r) {
+  $("#regProfil").value = r.profil in REG_PROFILS ? r.profil : "perso";
+  $("#regLargeur").value = r.largeur; $("#regHauteur").value = r.hauteur;
+  $("#regFps").value = r.kms_fps; $("#regGpu").checked = !!r.gpu;
+  $("#regConseil").textContent = (REG_PROFILS[$("#regProfil").value] || {}).conseil || "";
+}
+async function loadReglages() {
+  try { renderReglages(await api("/api/reglages")); } catch (e) { /* hors ligne */ }
+}
+$("#regProfil").addEventListener("change", () => {
+  const p = REG_PROFILS[$("#regProfil").value];
+  if (p && p.largeur) {
+    $("#regLargeur").value = p.largeur; $("#regHauteur").value = p.hauteur;
+    $("#regFps").value = p.kms_fps; $("#regGpu").checked = p.gpu;
+  }
+  $("#regConseil").textContent = (p || {}).conseil || "";
+});
+["regLargeur", "regHauteur", "regFps", "regGpu"].forEach(id =>
+  $("#" + id).addEventListener("change", () => { $("#regProfil").value = "perso"; }));
+$("#regSave").addEventListener("click", async () => {
+  const corps = {
+    profil: $("#regProfil").value,
+    largeur: +$("#regLargeur").value, hauteur: +$("#regHauteur").value,
+    kms_fps: +$("#regFps").value, gpu: $("#regGpu").checked,
+  };
+  try {
+    await api("/api/reglages", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corps) });
+    toast("Réglages enregistrés — appliqués au prochain lancement");
+  } catch (e) { toast("Réglages refusés (valeurs hors bornes ?)", "err"); }
+});
+
 /* Chataigne : détection à l'ouverture, lancement à la demande. */
 async function loadChataigne() {
   try {
@@ -2622,6 +2693,7 @@ function renderSante(sys) {
   loadFleet();
   loadChataigne();
   loadLuts();
+  loadReglages();
   setInterval(loadSystem, 5000);
   setInterval(loadFleet, 7000);
   loadParc();
