@@ -13,4 +13,6 @@
 #[cfg(feature = "gstreamer")]
 mod backend;
 #[cfg(feature = "gstreamer")]
+pub mod rtsp;
+#[cfg(feature = "gstreamer")]
 pub use backend::GstBackend;

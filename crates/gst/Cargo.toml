@@ -8,7 +8,12 @@ license.workspace = true
 [features]
 # Sans cette feature, la crate est vide : le workspace compile partout sans
 # les bibliothèques système GStreamer (même modèle que le MIDI/ALSA).
-gstreamer = ["dep:gstreamer", "dep:gstreamer-app", "dep:gstreamer-video"]
+gstreamer = [
+    "dep:gstreamer",
+    "dep:gstreamer-app",
+    "dep:gstreamer-video",
+    "dep:gstreamer-rtsp-server",
+]
 
 [dependencies]
 toolbox-core = { path = "../core" }
@@ -20,6 +25,8 @@ tracing = { workspace = true }
 gstreamer = { version = "0.24", optional = true, features = ["v1_18"] }
 gstreamer-app = { version = "0.24", optional = true }
 gstreamer-video = { version = "0.24", optional = true }
+# Sortie RTSP : la sortie composée servie en rtsp://node:8554/sortie.
+gstreamer-rtsp-server = { version = "0.24", optional = true }
 
 [lints]
 workspace = true

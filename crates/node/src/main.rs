@@ -391,6 +391,34 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
             }
         });
     }
+    // Sortie RTSP (feature gstreamer) : la sortie composée servie en
+    // rtsp://node:port/sortie — clone ses canaux AVANT la fenêtre.
+    #[cfg(feature = "gstreamer")]
+    let rtsp_handle = if config.rtsp.enabled {
+        match toolbox_gst::rtsp::demarrer(
+            toolbox_gst::rtsp::RtspConfig {
+                port: config.rtsp.port,
+                largeur: config.rtsp.largeur,
+                hauteur: config.rtsp.hauteur,
+                fps: config.rtsp.fps,
+            },
+            handle.state_watch(),
+            video_rx.clone(),
+        ) {
+            Ok(h) => Some(h),
+            Err(err) => {
+                error!(%err, "sortie RTSP indisponible — le node continue sans");
+                None
+            }
+        }
+    } else {
+        None
+    };
+    #[cfg(not(feature = "gstreamer"))]
+    if config.rtsp.enabled {
+        warn!("[rtsp] activé mais ce binaire est compilé sans la feature `gstreamer`");
+    }
+
     #[cfg(feature = "render")]
     let render_thread = Some(toolbox_render::spawn(
         toolbox_render::WindowConfig {
@@ -537,6 +565,16 @@ async fn run(config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std::err
             .is_err()
         {
             warn!("la fenêtre de sortie ne s'est pas fermée en 5 s");
+        }
+    }
+    #[cfg(feature = "gstreamer")]
+    if let Some(rtsp) = rtsp_handle {
+        let join = tokio::task::spawn_blocking(move || rtsp.arreter());
+        if tokio::time::timeout(Duration::from_secs(5), join)
+            .await
+            .is_err()
+        {
+            warn!("la sortie RTSP ne s'est pas arrêtée en 5 s");
         }
     }
     info!("arrêt complet");

@@ -5,6 +5,12 @@
 
 ## [Non publié]
 
+- **Sortie RTSP** : `rtsp://node:8554/sortie` (section `[rtsp]`, binaires
+  avec la feature `gstreamer`) — la sortie composée en H.264 (MJPEG en
+  repli), pipeline PARTAGÉ entre les clients (dix spectateurs = un seul
+  rendu + un seul encodage). Testée par la CI avec un vrai DESCRIBE RTSP.
+  La sortie NDI reste bloquée par le SDK propriétaire NewTek (licence,
+  non redistribuable en CI) — documenté, pas entamé.
 - **Flux MJPEG de la sortie** : `http://node:8080/flux.mjpg` — la sortie
   composée (mapping, couleur, LUT, blackout) en continu dans VLC, OBS ou
   un navigateur, sans rien installer. `?w=1280&fps=25` optionnels, coupé

@@ -120,12 +120,13 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - name: Dépendances système (GStreamer dev + plugins)
+      - name: Dépendances système (GStreamer dev + plugins + rtsp-server)
         run: |
           set -o pipefail
           sudo apt-get update 2>&1 | tail -1
           sudo apt-get install -y libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
-            gstreamer1.0-plugins-base gstreamer1.0-plugins-good 2>&1 | tail -1
+            gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+            gstreamer1.0-plugins-ugly libgstrtspserver-1.0-dev 2>&1 | tail -1
       - name: Clippy + tests + check node (feature gstreamer)
         run: |
           set -o pipefail

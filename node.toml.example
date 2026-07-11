@@ -90,6 +90,18 @@ log_buffer = 1000      # entrées gardées par la page de logs
 # OSC à cette adresse — les curseurs de Chataigne suivent le node.
 #feedback = "10.0.0.5:9001"
 
+[rtsp]
+# Sortie RTSP (binaire compilé avec la feature `gstreamer` uniquement) :
+# la sortie composée — mapping, couleur, LUT, blackout — servie en
+# rtsp://<ip-du-node>:8554/sortie (H.264 si disponible, MJPEG sinon).
+# Pipeline partagé : plusieurs clients ne coûtent qu'un rendu.
+# Pour un coup d'œil rapide sans configuration : http://<ip>:8080/flux.mjpg.
+#enabled = true
+#port = 8554
+#largeur = 1280
+#hauteur = 720
+#fps = 25
+
 [telemetrie]
 # Envoi des rapports de crash — STRICTEMENT opt-in : sans URL (défaut), rien
 # ne sort jamais de la machine. Avec une URL : au démarrage qui suit un

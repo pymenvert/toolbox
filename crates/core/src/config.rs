@@ -243,6 +243,32 @@ impl Default for SyncSettings {
     }
 }
 
+/// Sortie RTSP (feature `gstreamer` du binaire) : la sortie composée
+/// (mapping, couleur, LUT, blackout) servie en `rtsp://node:port/sortie`
+/// — H.264 si l'encodeur est présent, MJPEG sinon. Multi-clients
+/// (pipeline partagé), pensé pour OBS/VLC/régies.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RtspSettings {
+    pub enabled: bool,
+    pub port: u16,
+    pub largeur: u32,
+    pub hauteur: u32,
+    pub fps: u32,
+}
+
+impl Default for RtspSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            port: 8554,
+            largeur: 1280,
+            hauteur: 720,
+            fps: 25,
+        }
+    }
+}
+
 /// Télémétrie d'incidents — STRICTEMENT opt-in. Sans URL configurée, rien
 /// ne sort jamais de la machine. Avec une URL : au démarrage suivant un
 /// crash, le rapport (`crash.txt` du dossier de logs) est envoyé en POST
@@ -323,6 +349,7 @@ pub struct NodeConfig {
     pub limits: Limits,
     pub midi: MidiSettings,
     pub telemetrie: Telemetrie,
+    pub rtsp: RtspSettings,
 }
 
 impl NodeConfig {
@@ -422,6 +449,24 @@ mod tests {
         assert_eq!(cfg.midi.bindings[1].cc, Some(7));
         assert_eq!(cfg.midi.bindings[1].scale, Some(ScaleTarget::Volume));
         assert_eq!(cfg.midi.bindings[2].channel, Some(10));
+    }
+
+    #[test]
+    fn rtsp_desactive_par_defaut() {
+        let cfg: NodeConfig = toml::from_str("").expect("parse");
+        assert!(!cfg.rtsp.enabled);
+        assert_eq!(cfg.rtsp.port, 8554);
+        assert_eq!(
+            (cfg.rtsp.largeur, cfg.rtsp.hauteur, cfg.rtsp.fps),
+            (1280, 720, 25)
+        );
+
+        let cfg: NodeConfig =
+            toml::from_str("[rtsp]\nenabled = true\nport = 9554\nfps = 30").expect("parse");
+        assert!(cfg.rtsp.enabled);
+        assert_eq!(cfg.rtsp.port, 9554);
+        assert_eq!(cfg.rtsp.fps, 30);
+        assert_eq!(cfg.rtsp.largeur, 1280, "défauts conservés");
     }
 
     #[test]
