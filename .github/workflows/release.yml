@@ -45,9 +45,14 @@ jobs:
       - name: Build + archive
         run: |
           cargo build --release -p toolbox-node
-          mkdir -p staging
+          mkdir -p staging/deploy
           cp target/release/toolbox-node staging/
           cp deploy/run-portable.sh node.toml.example staging/
+          # L'archive est PORTABLE (dézipper et lancer) ; l'installateur
+          # intelligent (détection du matériel) est fourni pour les
+          # installations permanentes : ./deploy/install.sh
+          cp deploy/install.sh deploy/smoke.sh staging/deploy/
+          cp -r deploy/systemd staging/deploy/
           tar czf toolbox-node-linux-x64.tar.gz -C staging .
       - uses: softprops/action-gh-release@v2
         with:
@@ -122,9 +127,13 @@ jobs:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
         run: |
           cargo build --release -p toolbox-node --no-default-features --target aarch64-unknown-linux-gnu
-          mkdir -p staging
+          mkdir -p staging/deploy
           cp target/aarch64-unknown-linux-gnu/release/toolbox-node staging/
-          cp deploy/run-portable.sh deploy/install.sh node.toml.example staging/
+          cp deploy/run-portable.sh node.toml.example staging/
+          # Installateur intelligent : détecte le modèle de Pi et conseille
+          # profil + réglages (./deploy/install.sh depuis l'archive).
+          cp deploy/install.sh deploy/smoke.sh staging/deploy/
+          cp -r deploy/systemd staging/deploy/
           tar czf toolbox-node-raspberrypi-arm64.tar.gz -C staging .
       - uses: softprops/action-gh-release@v2
         with:

@@ -327,6 +327,18 @@ footer { margin-top: 60px; padding-top: 24px; border-top: 1px solid var(--lisere
   seul, et proposer le lancement à l'ouverture de session). Linux / Pi :
   <code>deploy/install.sh</code> (<code>--profil complet</code>… pour du
   non-interactif).</p>
+  <p><b>Sur Raspberry Pi, l'installateur reconnaît le modèle</b>
+  (Pi 3 / 4 / 5) et affiche ce qui est conseillé ou déconseillé pour cette
+  machine, propose le bon profil et écrit les réglages de performance
+  adaptés (Pi 3 : version allégée — lecture + mapping en 960×540, rendu
+  processeur). Tout reste modifiable ensuite dans Système → Réglages de
+  performance.</p>
+  <h3>Version portable</h3>
+  <p>Chaque archive de la page Releases est <b>portable</b> : dézipper,
+  lancer, tout vit dans le dossier (médias, presets, réglages, logs).
+  Rien n'est écrit ailleurs ; supprimer le dossier désinstalle tout.
+  L'installation « permanente » (démarrage automatique, service systemd)
+  reste un choix, via les installateurs du dossier <code>deploy/</code>.</p>
 </section>
 
 <section id="interface">

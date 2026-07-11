@@ -68,6 +68,49 @@ fi
 say "Binaire : $BINARY"
 say "Préfixe d'installation : $PREFIX"
 
+# --- détection du matériel -------------------------------------------------------
+# Reconnaît le modèle de Raspberry Pi (ou un PC) et adapte les conseils et
+# les valeurs par défaut. Surchargable pour les tests : TOOLBOX_MODELE="...".
+detecter_materiel() {
+    local modele="${TOOLBOX_MODELE:-}"
+    if [ -z "$modele" ] && [ -r /proc/device-tree/model ]; then
+        modele="$(tr -d '\0' < /proc/device-tree/model 2> /dev/null || true)"
+    fi
+    case "$modele" in
+        *"Raspberry Pi 5"*) echo pi5 ;;
+        *"Raspberry Pi 4"* | *"Compute Module 4"*) echo pi4 ;;
+        *"Raspberry Pi 3"* | *"Zero 2"*) echo pi3 ;;
+        *"Raspberry Pi"*) echo pi_ancien ;;
+        "") echo pc ;;
+        *) echo autre ;;
+    esac
+}
+
+MATERIEL="$(detecter_materiel)"
+case "$MATERIEL" in
+    pi5)
+        say "Matériel détecté : Raspberry Pi 5"
+        echo "  Conseillé   : profil complet, 1080p, rendu GPU, synchro, lumières."
+        echo "  À savoir    : décodage HEVC matériel ; H.264 décodé par le CPU (ça"
+        echo "                tient très bien) ; PAS d'encodage matériel → sortie"
+        echo "                RTSP en 720p maximum." ;;
+    pi4)
+        say "Matériel détecté : Raspberry Pi 4"
+        echo "  Conseillé   : profil complet, 1080p (décodage H.264 matériel)."
+        echo "  Déconseillé : sortie RTSP au-delà de 720p (encodage au CPU)." ;;
+    pi3)
+        say "Matériel détecté : Raspberry Pi 3 / Zero 2 — VERSION ALLÉGÉE conseillée"
+        echo "  Conseillé   : profil « lecteur » (lecture + mapping), rendu CPU en"
+        echo "                960×540, aperçu web coupé (onglet Fonctions)."
+        echo "  Déconseillé : rendu GPU (puce GLES 2.0 trop ancienne), sortie RTSP,"
+        echo "                flux MJPEG au-delà de 480p, effets lourds." ;;
+    pi_ancien)
+        say "Matériel détecté : Raspberry Pi 1/2/Zero — NON RECOMMANDÉ"
+        echo "  Ce modèle est trop léger pour Lanterne. Un Pi 4 est conseillé." ;;
+    *)
+        say "Matériel : PC / autre — profil complet conseillé." ;;
+esac
+
 # --- profil d'installation ------------------------------------------------------
 # Chaque profil écrit node.toml (modules) + fonctions.json (interrupteurs de
 # l'onglet Fonctions) : tout reste modifiable plus tard depuis l'UI.
@@ -79,8 +122,10 @@ if [ -z "$PROFIL" ]; then
     echo "  4. lumieres       — console Art-Net + OSC/MIDI, pas de vidéo"
     echo "  5. minimal        — lecteur seul (le plus léger)"
     echo "  6. personnalise   — questions module par module"
-    read -r -p "Choix [1] " answer
-    case "${answer:-1}" in
+    defaut=1
+    if [ "$MATERIEL" = pi3 ]; then defaut=2; fi
+    read -r -p "Choix [$defaut] " answer
+    case "${answer:-$defaut}" in
         1) PROFIL=complet ;;
         2) PROFIL=lecteur ;;
         3) PROFIL=synchro ;;
@@ -176,6 +221,24 @@ if [ -n "$FONCTIONS" ] && [ ! -f "$PREFIX/fonctions.json" ]; then
     printf '%s\n' "$FONCTIONS" > "$TMP_FONC"
     run cp "$TMP_FONC" "$PREFIX/fonctions.json"
     rm -f "$TMP_FONC"
+fi
+
+# Réglages de performance selon le matériel détecté (carte Système →
+# Réglages de performance pour les changer ensuite).
+if [ ! -f "$PREFIX/reglages.json" ]; then
+    REGLAGES=""
+    case "$MATERIEL" in
+        pi3) REGLAGES='{"profil":"pi3","largeur":960,"hauteur":540,"gpu":false,"kms_fps":20}' ;;
+        pi4) REGLAGES='{"profil":"pi4","largeur":1920,"hauteur":1080,"gpu":true,"kms_fps":30}' ;;
+        pi5) REGLAGES='{"profil":"pi5","largeur":1920,"hauteur":1080,"gpu":true,"kms_fps":30}' ;;
+    esac
+    if [ -n "$REGLAGES" ]; then
+        TMP_REG="$(mktemp)"
+        printf '%s\n' "$REGLAGES" > "$TMP_REG"
+        run cp "$TMP_REG" "$PREFIX/reglages.json"
+        rm -f "$TMP_REG"
+        say "Réglages de performance $MATERIEL écrits (modifiables dans l'UI)."
+    fi
 fi
 
 # --- systemd (mode kiosque P1.9) ------------------------------------------------

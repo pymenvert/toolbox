@@ -5,6 +5,15 @@
 
 ## [Non publié]
 
+- **Installateur intelligent** : `install.sh` reconnaît le modèle de
+  Raspberry Pi (3/4/5, via `/proc/device-tree/model`) et affiche ce qui
+  est conseillé/déconseillé pour la machine, propose le bon profil par
+  défaut (Pi 3 → « lecteur » allégé) et écrit les réglages de
+  performance adaptés. Un seul installateur pour tout le monde.
+- **Archives portables assumées** : chaque archive Releases se dézippe
+  et se lance (tout vit dans le dossier) ; les tar Linux et Pi embarquent
+  désormais `deploy/install.sh` (+ systemd) pour l'installation
+  permanente.
 - **Réglages de performance** : carte Système → « Réglages de
   performance » — profils conseillés **PC / Pi 5 / Pi 4 / Pi 3 (allégé)**
   (résolution de rendu, GPU on/off, cadence KMS) avec conseils par
