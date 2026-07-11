@@ -3385,7 +3385,7 @@ checksum = "756daf9b1013ebe47a8776667b466417e2d4c5679d441c26230efd9ef78692db"
 
 [[package]]
 name = "toolbox-artnet"
-version = "3.1.0"
+version = "3.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -3398,7 +3398,7 @@ dependencies = [
 
 [[package]]
 name = "toolbox-control-http"
-version = "3.1.0"
+version = "3.2.0"
 dependencies = [
  "axum",
  "base64",
@@ -3424,7 +3424,7 @@ dependencies = [
 
 [[package]]
 name = "toolbox-control-midi"
-version = "3.1.0"
+version = "3.2.0"
 dependencies = [
  "midir",
  "thiserror 2.0.18",
@@ -3434,7 +3434,7 @@ dependencies = [
 
 [[package]]
 name = "toolbox-control-osc"
-version = "3.1.0"
+version = "3.2.0"
 dependencies = [
  "rosc",
  "serde_json",
@@ -3446,7 +3446,7 @@ dependencies = [
 
 [[package]]
 name = "toolbox-core"
-version = "3.1.0"
+version = "3.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -3460,7 +3460,7 @@ dependencies = [
 
 [[package]]
 name = "toolbox-engine"
-version = "3.1.0"
+version = "3.2.0"
 dependencies = [
  "rayon",
  "serde",
@@ -3472,7 +3472,7 @@ dependencies = [
 
 [[package]]
 name = "toolbox-gst"
-version = "3.1.0"
+version = "3.2.0"
 dependencies = [
  "gstreamer",
  "gstreamer-app",
@@ -3486,7 +3486,7 @@ dependencies = [
 
 [[package]]
 name = "toolbox-ndi"
-version = "3.1.0"
+version = "3.2.0"
 dependencies = [
  "libloading",
  "tokio",
@@ -3497,7 +3497,7 @@ dependencies = [
 
 [[package]]
 name = "toolbox-node"
-version = "3.1.0"
+version = "3.2.0"
 dependencies = [
  "mdns-sd",
  "serde",
@@ -3521,7 +3521,7 @@ dependencies = [
 
 [[package]]
 name = "toolbox-render"
-version = "3.1.0"
+version = "3.2.0"
 dependencies = [
  "bytemuck",
  "naga",

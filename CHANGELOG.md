@@ -3,7 +3,7 @@
 Évolutions notables du node Toolbox. Format inspiré de
 [Keep a Changelog](https://keepachangelog.com/fr/), versionnage SemVer.
 
-## [Non publié]
+## [3.2.0] — 2026-07-11
 
 - **Découverte NDI dans l'UI** : onglet Médias → Source externe →
   bouton « ⟳ Chercher » — liste les sources NDI visibles sur le réseau
