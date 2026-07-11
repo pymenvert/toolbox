@@ -587,11 +587,19 @@
         <input type="text" id="srcExterne" placeholder="rtsp://…  ·  srt://…  ·  capture://0  ·  ndi://Nom">
         <button id="srcCharger" class="primary">Charger</button>
       </div>
+      <div class="presetRow" style="margin-top:8px">
+        <select id="ndiListe" style="flex:1;min-width:160px" title="Sources NDI d&eacute;couvertes sur le r&eacute;seau — choisir remplit le champ ci-dessus">
+          <option value="">Sources NDI du r&eacute;seau&hellip;</option>
+        </select>
+        <button id="ndiChercher" class="mini" title="Cherche les sources NDI visibles (~2 s)">&#10227; Chercher</button>
+      </div>
       <div class="hint">
         <code>capture://0</code> = première webcam ou carte d'acquisition HDMI/USB &middot;
         <code>rtsp://</code> / <code>srt://</code> / <code>http(s)://</code> = flux r&eacute;seau &middot;
-        <code>ndi://Nom de la source</code> = flux NDI (plugin GStreamer + runtime NDI requis).
-        Les sources live n'ont ni dur&eacute;e ni barre de progression.
+        <code>ndi://Nom</code> = flux NDI <b>natif</b> (le bouton « Chercher » liste les
+        sources visibles : OBS, cam&eacute;ras, autres nodes Lanterne — rien &agrave; installer
+        si le runtime NDI est l&agrave;). Les sources live n'ont ni dur&eacute;e ni barre de
+        progression, et reviennent toutes seules apr&egrave;s un d&eacute;branchement.
       </div>
     </div>
   </section>
@@ -1967,6 +1975,27 @@ $("#srcCharger").addEventListener("click", () => {
   sendCmd({ cmd: "play" });
 });
 $("#srcExterne").addEventListener("keydown", e => { if (e.key === "Enter") $("#srcCharger").click(); });
+/* Découverte NDI : liste les sources du réseau, choisir remplit le champ. */
+$("#ndiChercher").addEventListener("click", async () => {
+  const sel = $("#ndiListe");
+  sel.innerHTML = '<option value="">Recherche en cours…</option>';
+  try {
+    const noms = await api("/api/ndi/sources") || [];
+    sel.innerHTML = noms.length
+      ? '<option value="">' + noms.length + " source(s) — choisir…</option>"
+      : '<option value="">Aucune source NDI visible</option>';
+    noms.forEach(n => {
+      const o = document.createElement("option");
+      o.value = n; o.textContent = n;
+      sel.appendChild(o);
+    });
+  } catch (e) {
+    sel.innerHTML = '<option value="">Runtime NDI absent ?</option>';
+  }
+});
+$("#ndiListe").addEventListener("change", () => {
+  if ($("#ndiListe").value) $("#srcExterne").value = "ndi://" + $("#ndiListe").value;
+});
 
 /* ===================== Presets ===================== */
 let presets = [], pendingDeletePreset = null;

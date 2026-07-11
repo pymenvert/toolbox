@@ -3417,6 +3417,7 @@ dependencies = [
  "toolbox-artnet",
  "toolbox-core",
  "toolbox-engine",
+ "toolbox-ndi",
  "tower",
  "tracing",
 ]

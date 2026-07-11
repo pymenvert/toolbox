@@ -298,6 +298,7 @@ pub fn router(app: AppState) -> Router {
         .route("/api/luts", get(luts_list))
         .route("/api/luts/{name}", put(lut_upload).delete(lut_delete))
         .route("/api/reglages", get(reglages_get).post(reglages_set))
+        .route("/api/ndi/sources", get(ndi_sources))
         .route("/api/preview.png", get(preview_png))
         .route("/flux.mjpg", get(flux_mjpg))
         .route("/api/diagnostic.zip", get(diagnostic_zip))
@@ -941,6 +942,29 @@ async fn lut_pour_apercu(
         *cache = charge.map(|l| (nom.to_string(), std::sync::Arc::new(l)));
     }
     cache.as_ref().map(|(_, l)| l.clone())
+}
+
+/// Les sources NDI visibles sur le réseau (~1,5 s de découverte). 503 si
+/// la bibliothèque NDI n'est pas installée, avec la raison.
+async fn ndi_sources() -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let resultat = tokio::task::spawn_blocking(|| {
+        toolbox_ndi::bibliotheque_partagee(None).map(|b| b.decouvrir(2000))
+    })
+    .await;
+    match resultat {
+        Ok(Ok(noms)) => Json(noms).into_response(),
+        Ok(Err(err)) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": err })),
+        )
+            .into_response(),
+        Err(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": err.to_string() })),
+        )
+            .into_response(),
+    }
 }
 
 /// Chemin des réglages de performance (à côté de node.toml).

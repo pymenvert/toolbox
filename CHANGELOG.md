@@ -5,6 +5,10 @@
 
 ## [Non publié]
 
+- **Découverte NDI dans l'UI** : onglet Médias → Source externe →
+  bouton « ⟳ Chercher » — liste les sources NDI visibles sur le réseau
+  (OBS, caméras, autres nodes Lanterne), choisir remplit le champ.
+  API `GET /api/ndi/sources` (503 explicite si le runtime NDI manque).
 - **Entrée NDI native** : `ndi://Nom` devient une VRAIE source — le node
   se connecte par le nom réseau (« MACHINE (source) »), pousse les frames
   dans la fenêtre, gèle en pause, se déconnecte au stop, et retente tout

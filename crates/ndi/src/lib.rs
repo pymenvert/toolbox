@@ -99,6 +99,19 @@ type FnRecvCaptureV2 = unsafe extern "C" fn(
 ) -> i32;
 type FnRecvFreeVideoV2 = unsafe extern "C" fn(*mut c_void, *const VideoFrameV2);
 
+/// `NDIlib_find_create_t` (Processing.NDI.Find.h).
+#[repr(C)]
+struct FindCreate {
+    show_local_sources: bool,
+    p_groups: *const c_char,
+    p_extra_ips: *const c_char,
+}
+
+type FnFindCreateV2 = unsafe extern "C" fn(*const FindCreate) -> *mut c_void;
+type FnFindDestroy = unsafe extern "C" fn(*mut c_void);
+type FnFindWait = unsafe extern "C" fn(*mut c_void, u32) -> bool;
+type FnFindSources = unsafe extern "C" fn(*mut c_void, *mut u32) -> *const SourceNdi;
+
 /// La bibliothèque NDI chargée + les fonctions de l'envoi
 /// (`NDIlib_initialize` est appelée une fois au chargement, pas stockée).
 pub struct Bibliotheque {
@@ -111,7 +124,22 @@ pub struct Bibliotheque {
     recv_destroy: libloading::Symbol<'static, FnRecvDestroy>,
     recv_capture: libloading::Symbol<'static, FnRecvCaptureV2>,
     recv_free_video: libloading::Symbol<'static, FnRecvFreeVideoV2>,
+    find_create: libloading::Symbol<'static, FnFindCreateV2>,
+    find_destroy: libloading::Symbol<'static, FnFindDestroy>,
+    find_wait: libloading::Symbol<'static, FnFindWait>,
+    find_sources: libloading::Symbol<'static, FnFindSources>,
     _lib: &'static libloading::Library,
+}
+
+/// Bibliothèque partagée du process, chargée à la première demande et
+/// mémoïsée (succès comme échec) : l'entrée, la sortie et la découverte
+/// utilisent la même instance.
+pub fn bibliotheque_partagee(explicite: Option<&str>) -> Result<Arc<Bibliotheque>, String> {
+    static PARTAGEE: std::sync::OnceLock<Result<Arc<Bibliotheque>, String>> =
+        std::sync::OnceLock::new();
+    PARTAGEE
+        .get_or_init(|| Bibliotheque::charger(explicite).map(Arc::new))
+        .clone()
 }
 
 /// Les emplacements où chercher la bibliothèque, du plus explicite au plus
@@ -190,6 +218,10 @@ impl Bibliotheque {
         let recv_destroy = symbole!(FnRecvDestroy, b"NDIlib_recv_destroy\0");
         let recv_capture = symbole!(FnRecvCaptureV2, b"NDIlib_recv_capture_v2\0");
         let recv_free_video = symbole!(FnRecvFreeVideoV2, b"NDIlib_recv_free_video_v2\0");
+        let find_create = symbole!(FnFindCreateV2, b"NDIlib_find_create_v2\0");
+        let find_destroy = symbole!(FnFindDestroy, b"NDIlib_find_destroy\0");
+        let find_wait = symbole!(FnFindWait, b"NDIlib_find_wait_for_sources\0");
+        let find_sources = symbole!(FnFindSources, b"NDIlib_find_get_current_sources\0");
         if !unsafe { initialize() } {
             return Err("NDIlib_initialize a échoué (CPU non supporté ?)".into());
         }
@@ -202,8 +234,59 @@ impl Bibliotheque {
             recv_destroy,
             recv_capture,
             recv_free_video,
+            find_create,
+            find_destroy,
+            find_wait,
+            find_sources,
             _lib: lib,
         })
+    }
+
+    /// Découvre les sources NDI visibles sur le réseau (les locales
+    /// comprises) : attend `attente_ms` que la liste se stabilise puis
+    /// retourne les noms complets (« MACHINE (source) »), triés.
+    pub fn decouvrir(&self, attente_ms: u32) -> Vec<String> {
+        let create = FindCreate {
+            show_local_sources: true,
+            p_groups: std::ptr::null(),
+            p_extra_ips: std::ptr::null(),
+        };
+        let instance = unsafe { (self.find_create)(&create) };
+        if instance.is_null() {
+            return Vec::new();
+        }
+        // `wait_for_sources` retourne au PREMIER changement de liste : on
+        // épuise tout le budget pour laisser chaque source s'annoncer, et
+        // on lit la liste finale seulement à la fin.
+        let depart = std::time::Instant::now();
+        let budget = std::time::Duration::from_millis(u64::from(attente_ms));
+        loop {
+            let reste = budget.saturating_sub(depart.elapsed());
+            if reste.is_zero() {
+                break;
+            }
+            #[allow(clippy::cast_possible_truncation)] // reste ≤ budget u32
+            unsafe {
+                (self.find_wait)(instance, reste.as_millis() as u32)
+            };
+        }
+        let mut nombre: u32 = 0;
+        let sources = unsafe { (self.find_sources)(instance, &mut nombre) };
+        let mut noms = Vec::new();
+        if !sources.is_null() {
+            for i in 0..nombre as usize {
+                // SAFETY : le tableau appartient au finder jusqu'au destroy.
+                let source = unsafe { &*sources.add(i) };
+                if !source.p_ndi_name.is_null() {
+                    let nom = unsafe { std::ffi::CStr::from_ptr(source.p_ndi_name) };
+                    noms.push(nom.to_string_lossy().into_owned());
+                }
+            }
+        }
+        unsafe { (self.find_destroy)(instance) };
+        noms.sort();
+        noms.dedup();
+        noms
     }
 }
 
@@ -395,7 +478,7 @@ pub fn demarrer(
     state: watch::Receiver<NodeState>,
     video: watch::Receiver<Option<VideoFrame>>,
 ) -> Result<NdiHandle, String> {
-    let bibliotheque = Arc::new(Bibliotheque::charger(config.bibliotheque.as_deref())?);
+    let bibliotheque = bibliotheque_partagee(config.bibliotheque.as_deref())?;
     let (largeur, hauteur) = (
         config.largeur.clamp(64, 3840),
         config.hauteur.clamp(64, 2160),
@@ -492,8 +575,8 @@ pub mod entree {
                         connexion = None; // drop = recv_destroy
                         if let Some(nom) = &voulu {
                             if bibliotheque.is_none() && !lib_en_echec {
-                                match Bibliotheque::charger(bibliotheque_chemin.as_deref()) {
-                                    Ok(b) => bibliotheque = Some(Arc::new(b)),
+                                match bibliotheque_partagee(bibliotheque_chemin.as_deref()) {
+                                    Ok(b) => bibliotheque = Some(b),
                                     Err(err) => {
                                         // Une seule plainte : sans lib, les
                                         // ndi:// resteront noirs.
@@ -604,6 +687,30 @@ mod tests {
             v += u64::from(px[1]);
         }
         assert!(r > v * 5, "frame reçue non conforme (r={r}, v={v})");
+    }
+
+    /// La découverte voit notre propre source (annonce locale) quand la
+    /// bibliothèque est là ; sauté proprement sans SDK.
+    #[test]
+    fn la_decouverte_voit_notre_propre_source() {
+        let bibliotheque = match Bibliotheque::charger(None) {
+            Ok(b) => Arc::new(b),
+            Err(err) => {
+                eprintln!("SDK NDI absent — test sauté ({err})");
+                return;
+            }
+        };
+        let _emetteur = Emetteur::new(bibliotheque.clone(), "Lanterne (découverte)")
+            .expect("création de la source");
+        let depart = std::time::Instant::now();
+        let mut trouve = false;
+        while !trouve && depart.elapsed() < std::time::Duration::from_secs(10) {
+            trouve = bibliotheque
+                .decouvrir(1000)
+                .iter()
+                .any(|n| n.contains("Lanterne (découverte)"));
+        }
+        assert!(trouve, "notre propre source doit apparaître dans la liste");
     }
 
     #[test]

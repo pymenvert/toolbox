@@ -9,6 +9,7 @@ license.workspace = true
 toolbox-core = { path = "../core" }
 toolbox-engine = { path = "../engine" }
 toolbox-artnet = { path = "../artnet" }
+toolbox-ndi = { path = "../ndi" }
 axum = { version = "0.8", features = ["ws"] }
 futures-util = { version = "0.3", default-features = false }
 # Aperçu de la sortie : encodage PNG pur Rust.
