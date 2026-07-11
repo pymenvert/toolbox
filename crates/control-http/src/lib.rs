@@ -807,70 +807,108 @@ async fn flux_mjpg(
         .unwrap_or(15)
         .clamp(1, 30);
 
-    // Écrivain → lecteur : le corps HTTP lit ce que la tâche de rendu
-    // pousse. Le client qui raccroche fait échouer l'écriture : fin propre.
+    // Écrivain → lecteur : le corps HTTP lit ce que le thread de rendu
+    // pousse. Le client qui raccroche ferme la chaîne : fin propre.
     let (ecrivain, lecteur) = tokio::io::duplex(256 * 1024);
-    let app_flux = app.clone();
-    tokio::spawn(async move {
-        use tokio::io::AsyncWriteExt;
-        let mut ecrivain = ecrivain;
-        let mut cadence = tokio::time::interval(std::time::Duration::from_millis(u64::from(
-            1000 / fps.max(1),
-        )));
-        cadence.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        info!(width, fps, "flux MJPEG ouvert");
-        loop {
-            cadence.tick().await;
-            if !app_flux.features.borrow().preview {
-                break; // fonction coupée en cours de route : on raccroche
-            }
-            let state = app_flux.bus.snapshot();
-            let video = app_flux.output.video.borrow().clone();
-            let lut = lut_pour_apercu(&app_flux, state.lut.as_deref()).await;
-            let time = app_flux.started_at.elapsed().as_secs_f32();
-            let jpeg = tokio::task::spawn_blocking(move || {
-                let mut pixels = vec![0u32; (width * height) as usize];
+    // Un THREAD dédié par client, tampons réutilisés (pixels, rgb) et
+    // état recopié seulement quand le bus a changé — pas un spawn_blocking
+    // et trois allocations par frame. Canal borné à 2 : si le client lit
+    // lentement, on saute des frames au lieu d'empiler.
+    let (parts_tx, mut parts_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(2);
+    let mut etat_rx = app.bus.state_watch();
+    let video_rx = app.output.video.clone();
+    let features_rx = app.features.clone();
+    let depart = app.started_at;
+    let rendu = std::thread::Builder::new()
+        .name("toolbox-mjpeg".into())
+        .spawn(move || {
+            let periode = std::time::Duration::from_millis(u64::from(1000 / fps.max(1)));
+            let mut snapshot = etat_rx.borrow().clone();
+            let mut lut_cache: Option<(String, Option<std::sync::Arc<toolbox_engine::Lut3d>>)> =
+                None;
+            let mut pixels = vec![0u32; (width * height) as usize];
+            let mut rgb = vec![0u8; pixels.len() * 3];
+            info!(width, fps, "flux MJPEG ouvert");
+            loop {
+                let tic = std::time::Instant::now();
+                if !features_rx.borrow().preview {
+                    break; // fonction coupée en cours de route : on raccroche
+                }
+                if etat_rx.has_changed().unwrap_or(false) {
+                    snapshot = etat_rx.borrow_and_update().clone();
+                }
+                match (&snapshot.lut, &mut lut_cache) {
+                    (None, cache) => *cache = None,
+                    (Some(nom), Some((connu, _))) if connu == nom => {}
+                    (Some(nom), cache) => {
+                        let charge =
+                            std::fs::read_to_string(std::path::Path::new("luts").join(nom))
+                                .ok()
+                                .and_then(|t| toolbox_engine::Lut3d::depuis_texte(&t).ok());
+                        *cache = Some((nom.clone(), charge.map(std::sync::Arc::new)));
+                    }
+                }
+                let lut = lut_cache.as_ref().and_then(|(_, l)| l.as_deref());
+                let video = video_rx.borrow().clone();
                 toolbox_engine::raster::render_frame_lut(
-                    &state,
+                    &snapshot,
                     video.as_ref(),
-                    lut.as_deref(),
-                    time,
+                    lut,
+                    depart.elapsed().as_secs_f32(),
                     width,
                     height,
                     &mut pixels,
                 );
-                if state.blackout.actif {
+                if snapshot.blackout.actif {
                     toolbox_engine::appliquer_blackout(&mut pixels, 1.0);
                 }
-                let mut rgb = Vec::with_capacity(pixels.len() * 3);
-                for px in &pixels {
-                    rgb.extend_from_slice(&[(px >> 16) as u8, (px >> 8) as u8, *px as u8]);
+                for (px, dst) in pixels.iter().zip(rgb.chunks_exact_mut(3)) {
+                    dst[0] = (px >> 16) as u8;
+                    dst[1] = (px >> 8) as u8;
+                    dst[2] = *px as u8;
                 }
-                let mut sortie = Vec::new();
-                let encodeur = jpeg_encoder::Encoder::new(&mut sortie, 80);
+                // Une seule allocation par frame : l'en-tête de la partie
+                // multipart et le JPEG dans le même tampon envoyé.
+                let mut part = Vec::with_capacity(rgb.len() / 8);
+                part.extend_from_slice(b"--lanterne\r\nContent-Type: image/jpeg\r\n\r\n");
+                let encodeur = jpeg_encoder::Encoder::new(&mut part, 80);
                 #[allow(clippy::cast_possible_truncation)] // ≤ 1920
-                let encode = encodeur.encode(
-                    &rgb,
-                    width as u16,
-                    height as u16,
-                    jpeg_encoder::ColorType::Rgb,
-                );
-                encode.ok().map(|()| sortie)
-            })
-            .await;
-            let Ok(Some(jpeg)) = jpeg else { break };
-            let entete = format!(
-                "--lanterne\r\nContent-Type: image/jpeg\r\nContent-Length: {}\r\n\r\n",
-                jpeg.len()
-            );
-            if ecrivain.write_all(entete.as_bytes()).await.is_err()
-                || ecrivain.write_all(&jpeg).await.is_err()
-                || ecrivain.write_all(b"\r\n").await.is_err()
-            {
-                break; // client parti
+                if encodeur
+                    .encode(
+                        &rgb,
+                        width as u16,
+                        height as u16,
+                        jpeg_encoder::ColorType::Rgb,
+                    )
+                    .is_err()
+                {
+                    break;
+                }
+                part.extend_from_slice(b"\r\n");
+                match parts_tx.try_send(part) {
+                    Ok(()) => {}
+                    Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                        // Client lent : la frame est sautée, pas empilée.
+                    }
+                    Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => break,
+                }
+                if let Some(reste) = periode.checked_sub(tic.elapsed()) {
+                    std::thread::sleep(reste);
+                }
+            }
+            info!("flux MJPEG fermé");
+        });
+    if let Err(err) = rendu {
+        warn!(%err, "thread du flux MJPEG impossible à créer");
+    }
+    tokio::spawn(async move {
+        use tokio::io::AsyncWriteExt;
+        let mut ecrivain = ecrivain;
+        while let Some(part) = parts_rx.recv().await {
+            if ecrivain.write_all(&part).await.is_err() {
+                break; // client parti : le canal fermé arrête le thread
             }
         }
-        info!("flux MJPEG fermé");
     });
 
     (

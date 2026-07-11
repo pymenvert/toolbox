@@ -136,9 +136,11 @@ fn run_event_loop(config: WindowConfig, channels: OutputChannels) {
         shutdown,
     );
 
+    let snapshot = state.borrow().clone();
     let mut app = OutputApp {
         config,
         state,
+        snapshot,
         video,
         settings,
         monitors,
@@ -230,6 +232,10 @@ fn spawn_wake_relay(
 struct OutputApp {
     config: WindowConfig,
     state: watch::Receiver<NodeState>,
+    /// Copie locale de l'état, rafraîchie SEULEMENT quand le bus a publié
+    /// un changement — pas un clone complet (playlist, masques, mesh…)
+    /// par frame vidéo.
+    snapshot: NodeState,
     video: watch::Receiver<Option<VideoFrame>>,
     settings: watch::Receiver<OutputSettings>,
     monitors: watch::Sender<Vec<MonitorInfo>>,
@@ -409,11 +415,16 @@ impl OutputApp {
         let (Some(w), Some(h)) = (NonZeroU32::new(size.width), NonZeroU32::new(size.height)) else {
             return; // fenêtre réduite : rien à peindre
         };
-        let snapshot = self.state.borrow().clone();
-        self.sync_lut_cache(snapshot.lut.as_deref());
+        // Le clone complet de l'état (playlist, masques, mesh…) ne se fait
+        // qu'aux changements publiés par le bus — pas à chaque frame vidéo.
+        if self.state.has_changed().unwrap_or(false) {
+            self.snapshot = self.state.borrow_and_update().clone();
+        }
+        let nom_lut = self.snapshot.lut.clone();
+        self.sync_lut_cache(nom_lut.as_deref());
         // Gel d'image : la frame affichée au moment du gel est retenue tant
         // que `freeze` est posé — le transport continue en dessous.
-        let video = if snapshot.freeze {
+        let video = if self.snapshot.freeze {
             if self.frame_gelee.is_none() {
                 self.frame_gelee = self.video.borrow().clone();
             }
@@ -424,9 +435,13 @@ impl OutputApp {
         };
         // Rampe du blackout : au changement de consigne, la rampe repart du
         // niveau courant (relâcher en plein fondu redescend de là).
-        let cible = if snapshot.blackout.actif { 1.0 } else { 0.0 };
-        if snapshot.blackout.actif != self.blackout_prec {
-            self.blackout_prec = snapshot.blackout.actif;
+        let cible = if self.snapshot.blackout.actif {
+            1.0
+        } else {
+            0.0
+        };
+        if self.snapshot.blackout.actif != self.blackout_prec {
+            self.blackout_prec = self.snapshot.blackout.actif;
             self.blackout_depart = self.blackout_niveau;
             self.blackout_depuis = std::time::Instant::now();
         }
@@ -436,7 +451,7 @@ impl OutputApp {
             cible,
             self.blackout_depart,
             ecoule,
-            snapshot.blackout.fondu_ms,
+            self.snapshot.blackout.fondu_ms,
         );
         self.blackout_niveau = niveau;
         let time = self.started_at.elapsed().as_secs_f32();
@@ -451,7 +466,7 @@ impl OutputApp {
         };
         let presented = match painter {
             Painter::Gpu(gpu) => gpu.render(
-                &snapshot,
+                &self.snapshot,
                 video.as_ref(),
                 lut,
                 time,
@@ -467,7 +482,7 @@ impl OutputApp {
                 match surface.buffer_mut() {
                     Ok(mut buffer) => {
                         toolbox_engine::raster::render_frame_lut(
-                            &snapshot,
+                            &self.snapshot,
                             video.as_ref(),
                             lut.map(|(_, l)| l),
                             time,
