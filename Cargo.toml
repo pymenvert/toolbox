@@ -9,6 +9,7 @@ members = [
     "crates/control-osc",
     "crates/control-midi",
     "crates/artnet",
+    "crates/ndi",
     "crates/node",
 ]
 

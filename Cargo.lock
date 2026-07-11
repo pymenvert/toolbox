@@ -3484,6 +3484,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "toolbox-ndi"
+version = "3.0.0"
+dependencies = [
+ "libloading",
+ "tokio",
+ "toolbox-core",
+ "toolbox-engine",
+ "tracing",
+]
+
+[[package]]
 name = "toolbox-node"
 version = "3.0.0"
 dependencies = [
@@ -3500,6 +3511,7 @@ dependencies = [
  "toolbox-core",
  "toolbox-engine",
  "toolbox-gst",
+ "toolbox-ndi",
  "toolbox-render",
  "tracing",
  "tracing-appender",

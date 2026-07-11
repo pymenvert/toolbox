@@ -1,0 +1,18 @@
+[package]
+name = "toolbox-ndi"
+description = "Sortie NDI du node : la sortie composée annoncée sur le réseau (SDK chargé dynamiquement)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+toolbox-core = { path = "../core" }
+toolbox-engine = { path = "../engine" }
+# Chargement DYNAMIQUE de Processing.NDI.Lib : le binaire compile partout
+# sans le SDK propriétaire ; la bibliothèque n'est cherchée qu'à l'exécution.
+libloading = "0.8"
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+[lints]
+workspace = true

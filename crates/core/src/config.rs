@@ -287,6 +287,37 @@ impl Default for RtspSettings {
     }
 }
 
+/// Sortie NDI : la sortie composée annoncée comme source NDI sur le
+/// réseau (OBS, vMix, moniteurs NDI). Le SDK NDI n'est pas embarqué :
+/// la bibliothèque est chargée à l'exécution si elle est installée.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NdiSettings {
+    /// Active la sortie NDI au démarrage.
+    pub sortie: bool,
+    /// Nom de la source sur le réseau (absent : « <node> (Lanterne) »).
+    pub nom: Option<String>,
+    pub largeur: u32,
+    pub hauteur: u32,
+    pub fps: u32,
+    /// Chemin explicite de la bibliothèque NDI (absent : emplacements
+    /// standards — variable NDI_RUNTIME_DIR_V6, Program Files, /usr/lib…).
+    pub bibliotheque: Option<String>,
+}
+
+impl Default for NdiSettings {
+    fn default() -> Self {
+        Self {
+            sortie: false,
+            nom: None,
+            largeur: 1280,
+            hauteur: 720,
+            fps: 25,
+            bibliotheque: None,
+        }
+    }
+}
+
 /// Télémétrie d'incidents — STRICTEMENT opt-in. Sans URL configurée, rien
 /// ne sort jamais de la machine. Avec une URL : au démarrage suivant un
 /// crash, le rapport (`crash.txt` du dossier de logs) est envoyé en POST
@@ -368,6 +399,7 @@ pub struct NodeConfig {
     pub midi: MidiSettings,
     pub telemetrie: Telemetrie,
     pub rtsp: RtspSettings,
+    pub ndi: NdiSettings,
 }
 
 impl NodeConfig {
@@ -467,6 +499,22 @@ mod tests {
         assert_eq!(cfg.midi.bindings[1].cc, Some(7));
         assert_eq!(cfg.midi.bindings[1].scale, Some(ScaleTarget::Volume));
         assert_eq!(cfg.midi.bindings[2].channel, Some(10));
+    }
+
+    #[test]
+    fn ndi_desactive_par_defaut() {
+        let cfg: NodeConfig = toml::from_str("").expect("parse");
+        assert!(!cfg.ndi.sortie);
+        assert_eq!(
+            (cfg.ndi.largeur, cfg.ndi.hauteur, cfg.ndi.fps),
+            (1280, 720, 25)
+        );
+
+        let cfg: NodeConfig =
+            toml::from_str("[ndi]\nsortie = true\nnom = \"Scène\"\nfps = 30").expect("parse");
+        assert!(cfg.ndi.sortie);
+        assert_eq!(cfg.ndi.nom.as_deref(), Some("Scène"));
+        assert_eq!(cfg.ndi.fps, 30);
     }
 
     #[test]

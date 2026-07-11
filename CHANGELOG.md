@@ -5,6 +5,14 @@
 
 ## [Non publié]
 
+- **Sortie NDI** : `[ndi] sortie = true` — la sortie composée annoncée
+  comme source NDI sur le réseau (OBS, vMix, moniteurs NDI), nom
+  configurable. Le SDK propriétaire n'est PAS embarqué ni versionné :
+  la bibliothèque (`Processing.NDI.Lib.x64.dll` / `libndi.so.6`) est
+  chargée dynamiquement à l'exécution (chemins standards ou
+  `[ndi] bibliotheque`), avec un message clair si elle manque. Libs Pi
+  fournies par le SDK (aarch64 + armhf) : copier `libndi.so.6` dans
+  `/usr/local/lib` sur le Pi.
 - **Installateur intelligent** : `install.sh` reconnaît le modèle de
   Raspberry Pi (3/4/5, via `/proc/device-tree/model`) et affiche ce qui
   est conseillé/déconseillé pour la machine, propose le bon profil par

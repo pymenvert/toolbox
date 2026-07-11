@@ -107,6 +107,20 @@ log_buffer = 1000      # entrées gardées par la page de logs
 #hauteur = 720
 #fps = 25
 
+[ndi]
+# Sortie NDI : la sortie composée (mapping, couleur, LUT, blackout) devient
+# une source NDI sur le réseau — visible dans OBS, vMix, les moniteurs NDI.
+# Le SDK NDI n'est PAS embarqué : installer le runtime NDI (gratuit) ou le
+# SDK, la bibliothèque est chargée automatiquement au lancement.
+# Raspberry Pi : copier libndi.so.6 (du SDK Linux, dossier lib/aarch64-...)
+# dans /usr/local/lib.
+#sortie = true
+#nom = "Scène jardin"        # absent : « <nom du node> (Lanterne) »
+#largeur = 1280
+#hauteur = 720
+#fps = 25
+#bibliotheque = "C:/chemin/vers/Processing.NDI.Lib.x64.dll"  # si emplacement inhabituel
+
 [telemetrie]
 # Envoi des rapports de crash — STRICTEMENT opt-in : sans URL (défaut), rien
 # ne sort jamais de la machine. Avec une URL : au démarrage qui suit un

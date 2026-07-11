@@ -15,8 +15,8 @@ use gstreamer::prelude::*;
 use tokio::sync::watch;
 use tracing::{error, info, warn};
 
-use crate::composite::Compositeur;
 use toolbox_core::NodeState;
+use toolbox_engine::composite::Compositeur;
 use toolbox_engine::VideoFrame;
 
 /// Réglages de la sortie KMS.

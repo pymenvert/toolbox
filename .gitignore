@@ -21,3 +21,6 @@ sequences.json
 # Etat de demarrage enregistre depuis l'UI.
 demarrage.json
 reglages.json
+# SDK NDI proprietaire (licence NewTek/Vizrt) : JAMAIS versionne.
+"NDI sdk/"
+NDI?sdk/

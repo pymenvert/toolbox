@@ -11,6 +11,7 @@
 //! Les shaders GLSL vivent dans `shaders/` à la racine du crate et sont
 //! embarqués dans le binaire via `include_str!` (voir [`shaders`]).
 
+pub mod composite;
 pub mod homography;
 pub mod lut;
 pub mod player;

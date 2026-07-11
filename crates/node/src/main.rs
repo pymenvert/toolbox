@@ -437,6 +437,35 @@ async fn run(mut config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std:
         warn!("[rtsp] activé mais ce binaire est compilé sans la feature `gstreamer`");
     }
 
+    // Sortie NDI : la sortie composée annoncée sur le réseau. Compilée
+    // partout (la bibliothèque NDI est chargée à l'exécution) ; sans SDK
+    // installé, message clair et le node continue.
+    let ndi_handle = if config.ndi.sortie {
+        match toolbox_ndi::demarrer(
+            toolbox_ndi::NdiConfig {
+                nom: config
+                    .ndi
+                    .nom
+                    .clone()
+                    .unwrap_or_else(|| format!("{node_name} (Lanterne)")),
+                largeur: config.ndi.largeur,
+                hauteur: config.ndi.hauteur,
+                fps: config.ndi.fps,
+                bibliotheque: config.ndi.bibliotheque.clone(),
+            },
+            handle.state_watch(),
+            video_rx.clone(),
+        ) {
+            Ok(h) => Some(h),
+            Err(err) => {
+                error!(%err, "sortie NDI indisponible — le node continue sans");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     // Sortie DRM/KMS (plein écran console, Pi Lite) : remplace la fenêtre
     // quand `[output] mode = "kms"` et que le binaire embarque GStreamer.
     let mode_kms = config.output.mode == toolbox_core::SortieMode::Kms;
@@ -636,6 +665,15 @@ async fn run(mut config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std:
             .is_err()
         {
             warn!("la sortie RTSP ne s'est pas arrêtée en 5 s");
+        }
+    }
+    if let Some(ndi) = ndi_handle {
+        let join = tokio::task::spawn_blocking(move || ndi.arreter());
+        if tokio::time::timeout(Duration::from_secs(5), join)
+            .await
+            .is_err()
+        {
+            warn!("la sortie NDI ne s'est pas arrêtée en 5 s");
         }
     }
     #[cfg(feature = "gstreamer")]

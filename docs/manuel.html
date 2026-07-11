@@ -243,6 +243,7 @@ footer { margin-top: 60px; padding-top: 24px; border-top: 1px solid var(--lisere
     <li><b>Synchro à la frame</b> — maître/suiveurs, dérive mesurée &lt; 2 ms, resync dur au-delà du seuil.</li>
     <li><b>Flux MJPEG</b> — <code>/flux.mjpg</code> : la sortie composée en direct dans VLC, OBS ou un navigateur.</li>
     <li><b>Sortie RTSP</b> — <code>rtsp://node:8554/sortie</code> (H.264, pipeline partagé) via <code>[rtsp]</code>, binaires GStreamer.</li>
+    <li><b>Sortie NDI</b> — la sortie composée devient une source NDI (OBS, vMix) via <code>[ndi]</code> ; le runtime NDI se charge tout seul s'il est installé.</li>
   </ul>
   <p><b>Exploitation</b></p>
   <ul>

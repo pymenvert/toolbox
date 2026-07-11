@@ -192,7 +192,7 @@ fn pousser_frames(
             // Rendu composé partagé avec la sortie KMS : tampons réutilisés,
             // état recopié seulement quand le bus a changé, cache de LUT.
             let mut compositeur =
-                crate::composite::Compositeur::new(state, video, largeur, hauteur);
+                toolbox_engine::composite::Compositeur::new(state, video, largeur, hauteur);
             loop {
                 if arret.load(Ordering::Relaxed) {
                     break;
