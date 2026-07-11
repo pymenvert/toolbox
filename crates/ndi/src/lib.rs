@@ -59,10 +59,45 @@ const PROGRESSIF: i32 = 1;
 /// `NDIlib_send_timecode_synthesize` : le SDK fabrique le timecode.
 const TIMECODE_AUTO: i64 = i64::MAX;
 
+/// `NDIlib_source_t` (Processing.NDI.structs.h) — l'union d'adressage se
+/// réduit à un seul pointeur.
+#[repr(C)]
+struct SourceNdi {
+    p_ndi_name: *const c_char,
+    p_url_address: *const c_char,
+}
+
+/// `NDIlib_recv_create_v3_t` (Processing.NDI.Recv.h).
+#[repr(C)]
+struct RecvCreateV3 {
+    source_to_connect_to: SourceNdi,
+    color_format: i32,
+    bandwidth: i32,
+    allow_video_fields: bool,
+    p_ndi_recv_name: *const c_char,
+}
+
+/// `NDIlib_recv_color_format_RGBX_RGBA` : le SDK convertit tout en RGBA/X.
+const COULEUR_RGBX_RGBA: i32 = 2;
+/// `NDIlib_recv_bandwidth_highest` : pleine résolution.
+const BANDE_MAX: i32 = 100;
+/// `NDIlib_frame_type_video` (retour de capture_v2).
+const FRAME_VIDEO: i32 = 1;
+
 type FnInitialize = unsafe extern "C" fn() -> bool;
 type FnSendCreate = unsafe extern "C" fn(*const SendCreate) -> *mut c_void;
 type FnSendDestroy = unsafe extern "C" fn(*mut c_void);
 type FnSendVideoV2 = unsafe extern "C" fn(*mut c_void, *const VideoFrameV2);
+type FnRecvCreateV3 = unsafe extern "C" fn(*const RecvCreateV3) -> *mut c_void;
+type FnRecvDestroy = unsafe extern "C" fn(*mut c_void);
+type FnRecvCaptureV2 = unsafe extern "C" fn(
+    *mut c_void,
+    *mut VideoFrameV2,
+    *mut c_void, // audio ignoré
+    *mut c_void, // métadonnées ignorées
+    u32,
+) -> i32;
+type FnRecvFreeVideoV2 = unsafe extern "C" fn(*mut c_void, *const VideoFrameV2);
 
 /// La bibliothèque NDI chargée + les fonctions de l'envoi
 /// (`NDIlib_initialize` est appelée une fois au chargement, pas stockée).
@@ -72,6 +107,10 @@ pub struct Bibliotheque {
     send_create: libloading::Symbol<'static, FnSendCreate>,
     send_destroy: libloading::Symbol<'static, FnSendDestroy>,
     send_video: libloading::Symbol<'static, FnSendVideoV2>,
+    recv_create: libloading::Symbol<'static, FnRecvCreateV3>,
+    recv_destroy: libloading::Symbol<'static, FnRecvDestroy>,
+    recv_capture: libloading::Symbol<'static, FnRecvCaptureV2>,
+    recv_free_video: libloading::Symbol<'static, FnRecvFreeVideoV2>,
     _lib: &'static libloading::Library,
 }
 
@@ -135,18 +174,22 @@ impl Bibliotheque {
         // La bibliothèque vit pour toute la durée du process : les symboles
         // 'static sont sûrs. Elle n'est jamais déchargée (Box::leak).
         let lib: &'static libloading::Library = Box::leak(Box::new(lib));
-        let (initialize, send_create, send_destroy, send_video) = unsafe {
-            (
-                lib.get::<FnInitialize>(b"NDIlib_initialize\0")
-                    .map_err(|e| format!("NDIlib_initialize : {e}"))?,
-                lib.get::<FnSendCreate>(b"NDIlib_send_create\0")
-                    .map_err(|e| format!("NDIlib_send_create : {e}"))?,
-                lib.get::<FnSendDestroy>(b"NDIlib_send_destroy\0")
-                    .map_err(|e| format!("NDIlib_send_destroy : {e}"))?,
-                lib.get::<FnSendVideoV2>(b"NDIlib_send_send_video_v2\0")
-                    .map_err(|e| format!("NDIlib_send_send_video_v2 : {e}"))?,
-            )
-        };
+        // Un raccourci local : résoudre un symbole ou remonter son nom.
+        macro_rules! symbole {
+            ($type:ty, $nom:literal) => {
+                unsafe { lib.get::<$type>($nom) }.map_err(|e| {
+                    format!("{} : {e}", String::from_utf8_lossy(&$nom[..$nom.len() - 1]))
+                })?
+            };
+        }
+        let initialize = symbole!(FnInitialize, b"NDIlib_initialize\0");
+        let send_create = symbole!(FnSendCreate, b"NDIlib_send_create\0");
+        let send_destroy = symbole!(FnSendDestroy, b"NDIlib_send_destroy\0");
+        let send_video = symbole!(FnSendVideoV2, b"NDIlib_send_send_video_v2\0");
+        let recv_create = symbole!(FnRecvCreateV3, b"NDIlib_recv_create_v3\0");
+        let recv_destroy = symbole!(FnRecvDestroy, b"NDIlib_recv_destroy\0");
+        let recv_capture = symbole!(FnRecvCaptureV2, b"NDIlib_recv_capture_v2\0");
+        let recv_free_video = symbole!(FnRecvFreeVideoV2, b"NDIlib_recv_free_video_v2\0");
         if !unsafe { initialize() } {
             return Err("NDIlib_initialize a échoué (CPU non supporté ?)".into());
         }
@@ -155,6 +198,10 @@ impl Bibliotheque {
             send_create,
             send_destroy,
             send_video,
+            recv_create,
+            recv_destroy,
+            recv_capture,
+            recv_free_video,
             _lib: lib,
         })
     }
@@ -222,6 +269,95 @@ impl Emetteur {
 impl Drop for Emetteur {
     fn drop(&mut self) {
         unsafe { (self.bibliotheque.send_destroy)(self.instance) };
+    }
+}
+
+/// Un récepteur NDI : connecté à une source par son NOM (le SDK découvre
+/// l'adresse tout seul, même si la source n'existe pas encore).
+pub struct Recepteur {
+    bibliotheque: Arc<Bibliotheque>,
+    instance: *mut c_void,
+    _nom: CString,
+}
+
+// SAFETY : même contrat que l'émetteur — l'instance vit dans l'unique
+// thread du service d'entrée.
+unsafe impl Send for Recepteur {}
+
+impl Recepteur {
+    pub fn connecter(bibliotheque: Arc<Bibliotheque>, nom: &str) -> Result<Self, String> {
+        let nom_c =
+            CString::new(nom).map_err(|_| "nom de source NDI invalide (NUL)".to_string())?;
+        let recv_nom = CString::new("Lanterne (entrée)").unwrap_or_default();
+        let create = RecvCreateV3 {
+            source_to_connect_to: SourceNdi {
+                p_ndi_name: nom_c.as_ptr(),
+                p_url_address: std::ptr::null(),
+            },
+            color_format: COULEUR_RGBX_RGBA,
+            bandwidth: BANDE_MAX,
+            allow_video_fields: false, // toujours progressif côté node
+            p_ndi_recv_name: recv_nom.as_ptr(),
+        };
+        let instance = unsafe { (bibliotheque.recv_create)(&create) };
+        if instance.is_null() {
+            return Err("NDIlib_recv_create_v3 a retourné NULL".into());
+        }
+        Ok(Self {
+            bibliotheque,
+            instance,
+            _nom: nom_c,
+        })
+    }
+
+    /// Attend une frame vidéo (au plus `timeout_ms`) et la copie en RGBA
+    /// serré (stride retiré). `None` : rien reçu dans le délai.
+    pub fn capturer(&self, timeout_ms: u32) -> Option<VideoFrame> {
+        let mut brute: VideoFrameV2 = unsafe { std::mem::zeroed() };
+        let genre = unsafe {
+            (self.bibliotheque.recv_capture)(
+                self.instance,
+                &mut brute,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                timeout_ms,
+            )
+        };
+        if genre != FRAME_VIDEO {
+            return None;
+        }
+        let frame = (|| {
+            let (largeur, hauteur) = (
+                u32::try_from(brute.xres).ok()?,
+                u32::try_from(brute.yres).ok()?,
+            );
+            let stride = usize::try_from(brute.line_stride_in_bytes).ok()?;
+            if brute.p_data.is_null() || largeur == 0 || hauteur == 0 {
+                return None;
+            }
+            let ligne_utile = largeur as usize * 4;
+            if stride < ligne_utile {
+                return None; // format compressé inattendu : ignoré
+            }
+            let mut rgba = vec![0u8; ligne_utile * hauteur as usize];
+            for y in 0..hauteur as usize {
+                // SAFETY : p_data + stride décrivent un tampon du SDK valide
+                // jusqu'au free_video ci-dessous ; on copie ligne par ligne.
+                let src = unsafe {
+                    std::slice::from_raw_parts(brute.p_data.add(y * stride), ligne_utile)
+                };
+                rgba[y * ligne_utile..(y + 1) * ligne_utile].copy_from_slice(src);
+            }
+            VideoFrame::new(largeur, hauteur, rgba.into())
+        })();
+        unsafe { (self.bibliotheque.recv_free_video)(self.instance, &brute) };
+        frame
+    }
+}
+
+impl Drop for Recepteur {
+    fn drop(&mut self) {
+        unsafe { (self.bibliotheque.recv_destroy)(self.instance) };
     }
 }
 
@@ -294,6 +430,111 @@ pub fn demarrer(
     })
 }
 
+/// Entrée NDI : fait de `ndi://Nom` une vraie source du player. Le service
+/// surveille l'état du bus ; dès qu'un média `ndi://` est chargé (et tant
+/// que le transport n'est pas à l'arrêt), il se connecte à la source par
+/// son nom et pousse ses frames dans le canal vidéo de la fenêtre — pause
+/// = image gelée, stop/changement de média = déconnexion.
+pub mod entree {
+    use super::*;
+    use toolbox_core::Transport;
+
+    /// La source NDI à jouer selon l'état (`None` = rien à recevoir).
+    fn cible(state: &NodeState) -> Option<String> {
+        if state.player.transport == Transport::Stopped {
+            return None;
+        }
+        state
+            .player
+            .media
+            .as_deref()?
+            .strip_prefix("ndi://")
+            .map(str::to_string)
+    }
+
+    pub struct EntreeHandle {
+        arret: Arc<AtomicBool>,
+        thread: Option<std::thread::JoinHandle<()>>,
+    }
+
+    impl EntreeHandle {
+        pub fn arreter(mut self) {
+            self.arret.store(true, Ordering::Relaxed);
+            if let Some(thread) = self.thread.take() {
+                if thread.join().is_err() {
+                    warn!("thread d'entrée NDI terminé en panique");
+                }
+            }
+        }
+    }
+
+    /// Démarre le service (thread dédié). La bibliothèque NDI n'est
+    /// chargée qu'à la PREMIÈRE source `ndi://` demandée : un node qui
+    /// n'en joue jamais ne paie rien.
+    pub fn demarrer(
+        state: watch::Receiver<NodeState>,
+        video_tx: watch::Sender<Option<VideoFrame>>,
+        bibliotheque_chemin: Option<String>,
+    ) -> Result<EntreeHandle, String> {
+        let arret = Arc::new(AtomicBool::new(false));
+        let arret_thread = arret.clone();
+        let thread = std::thread::Builder::new()
+            .name("toolbox-ndi-entree".into())
+            .spawn(move || {
+                let mut bibliotheque: Option<Arc<Bibliotheque>> = None;
+                let mut lib_en_echec = false;
+                let mut connexion: Option<(String, Recepteur)> = None;
+                while !arret_thread.load(Ordering::Relaxed) {
+                    let etat = state.borrow().clone();
+                    let voulu = cible(&etat);
+                    // (Dé)connexion quand la cible change.
+                    if connexion.as_ref().map(|(nom, _)| nom.as_str()) != voulu.as_deref() {
+                        connexion = None; // drop = recv_destroy
+                        if let Some(nom) = &voulu {
+                            if bibliotheque.is_none() && !lib_en_echec {
+                                match Bibliotheque::charger(bibliotheque_chemin.as_deref()) {
+                                    Ok(b) => bibliotheque = Some(Arc::new(b)),
+                                    Err(err) => {
+                                        // Une seule plainte : sans lib, les
+                                        // ndi:// resteront noirs.
+                                        warn!(%err, "entrée NDI indisponible");
+                                        lib_en_echec = true;
+                                    }
+                                }
+                            }
+                            if let Some(b) = &bibliotheque {
+                                match Recepteur::connecter(b.clone(), nom) {
+                                    Ok(r) => {
+                                        info!(nom, "entrée NDI connectée");
+                                        connexion = Some((nom.clone(), r));
+                                    }
+                                    Err(err) => warn!(nom, %err, "connexion NDI impossible"),
+                                }
+                            }
+                        }
+                    }
+                    match (&connexion, etat.player.transport) {
+                        (Some((_, recepteur)), Transport::Playing) => {
+                            // Bloque au plus 100 ms : la boucle reste
+                            // réactive aux changements d'état.
+                            if let Some(frame) = recepteur.capturer(100) {
+                                let _ = video_tx.send(Some(frame));
+                            }
+                        }
+                        // Connecté mais en pause : frame gelée, on attend.
+                        (Some(_), _) => std::thread::sleep(std::time::Duration::from_millis(50)),
+                        (None, _) => std::thread::sleep(std::time::Duration::from_millis(200)),
+                    }
+                }
+            })
+            .map_err(|e| format!("thread d'entrée NDI : {e}"))?;
+        Ok(EntreeHandle {
+            arret,
+            thread: Some(thread),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -316,6 +557,53 @@ mod tests {
         let rgba = vec![128u8; 64 * 36 * 4];
         emetteur.envoyer_rgba(&rgba, 64, 36, 10);
         // Pas de panique ni de fuite : l'émetteur se détruit proprement.
+    }
+
+    /// Boucle locale RÉELLE émetteur → récepteur quand la bibliothèque est
+    /// là : la frame envoyée revient par le réseau local (même machine).
+    /// Sans SDK (CI) : sauté proprement.
+    #[test]
+    fn la_boucle_emetteur_recepteur_fonctionne() {
+        let bibliotheque = match Bibliotheque::charger(None) {
+            Ok(b) => Arc::new(b),
+            Err(err) => {
+                eprintln!("SDK NDI absent — test sauté ({err})");
+                return;
+            }
+        };
+        let emetteur = Emetteur::new(bibliotheque.clone(), "Lanterne (autotest)")
+            .expect("création de l'émetteur");
+        // Le nom réseau complet est « MACHINE (nom) » : on le reconstruit.
+        let machine = std::env::var("COMPUTERNAME")
+            .or_else(|_| std::env::var("HOSTNAME"))
+            .unwrap_or_default()
+            .to_uppercase();
+        let nom_complet = format!("{machine} (Lanterne (autotest))");
+        let recepteur =
+            Recepteur::connecter(bibliotheque, &nom_complet).expect("création du récepteur");
+
+        // Motif reconnaissable : rouge plein.
+        let mut rgba = vec![0u8; 64 * 36 * 4];
+        for px in rgba.chunks_exact_mut(4) {
+            px.copy_from_slice(&[200, 10, 10, 255]);
+        }
+        // La découverte + connexion locale prend un peu de temps : on
+        // pousse pendant qu'on attend, jusqu'à 10 s.
+        let depart = std::time::Instant::now();
+        let mut recue = None;
+        while recue.is_none() && depart.elapsed() < std::time::Duration::from_secs(10) {
+            emetteur.envoyer_rgba(&rgba, 64, 36, 30);
+            recue = recepteur.capturer(200);
+        }
+        let frame = recue.expect("aucune frame reçue en 10 s (pare-feu ?)");
+        assert_eq!((frame.width, frame.height), (64, 36));
+        // Le rouge domine nettement (le SDK peut recompresser légèrement).
+        let (mut r, mut v) = (0u64, 0u64);
+        for px in frame.rgba.chunks_exact(4) {
+            r += u64::from(px[0]);
+            v += u64::from(px[1]);
+        }
+        assert!(r > v * 5, "frame reçue non conforme (r={r}, v={v})");
     }
 
     #[test]

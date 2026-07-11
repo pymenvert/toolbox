@@ -3,6 +3,17 @@
 Évolutions notables du node Toolbox. Format inspiré de
 [Keep a Changelog](https://keepachangelog.com/fr/), versionnage SemVer.
 
+## [Non publié]
+
+- **Entrée NDI native** : `ndi://Nom` devient une VRAIE source — le node
+  se connecte par le nom réseau (« MACHINE (source) »), pousse les frames
+  dans la fenêtre, gèle en pause, se déconnecte au stop, et retente tout
+  seul si la source disparaît (source « branchable », comme capture://).
+  Aucun plugin GStreamer requis : même bibliothèque NDI chargée à
+  l'exécution que la sortie. Vérifié de bout en bout : un node émet son
+  damier en NDI, un second le charge en source et l'affiche (aperçu au
+  pixel près, compression NDI comprise).
+
 ## [3.1.0] — 2026-07-11
 
 - **Sortie NDI** : `[ndi] sortie = true` — la sortie composée annoncée

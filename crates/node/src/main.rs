@@ -204,6 +204,20 @@ async fn run(mut config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std:
     // réglages à chaud (API web → fenêtre, initialisés depuis [output]) et
     // écrans détectés (fenêtre → API web).
     let (video_tx, video_rx) = watch::channel::<Option<toolbox_engine::VideoFrame>>(None);
+    // Entrée NDI : fait de `ndi://Nom` une vraie source — le service dort
+    // tant qu'aucun média ndi:// n'est demandé (la bibliothèque NDI n'est
+    // chargée qu'à la première demande).
+    let entree_ndi = match toolbox_ndi::entree::demarrer(
+        handle.state_watch(),
+        video_tx.clone(),
+        config.ndi.bibliotheque.clone(),
+    ) {
+        Ok(h) => Some(h),
+        Err(err) => {
+            error!(%err, "entrée NDI indisponible — les sources ndi:// resteront noires");
+            None
+        }
+    };
     // Réglages de sortie : les changements faits dans l'UI sont persistés
     // dans sortie.json (à côté de node.toml) et repris au démarrage —
     // sinon défauts de la section [output].
@@ -674,6 +688,15 @@ async fn run(mut config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std:
             .is_err()
         {
             warn!("la sortie NDI ne s'est pas arrêtée en 5 s");
+        }
+    }
+    if let Some(entree) = entree_ndi {
+        let join = tokio::task::spawn_blocking(move || entree.arreter());
+        if tokio::time::timeout(Duration::from_secs(5), join)
+            .await
+            .is_err()
+        {
+            warn!("l'entrée NDI ne s'est pas arrêtée en 5 s");
         }
     }
     #[cfg(feature = "gstreamer")]
