@@ -146,6 +146,13 @@ pub struct AppState {
     /// Dérive de synchro (ms, médiane) publiée par le rôle suiveur —
     /// affichée dans la carte Santé. `None` = pas suiveur / pas de mesure.
     sync_derive: watch::Receiver<Option<f64>>,
+    /// Clients MJPEG actifs : chaque client coûte un rendu CPU complet,
+    /// on plafonne pour qu'une salle de dashboards ne couche pas un Pi.
+    mjpeg_clients: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    /// Identification en cours : un second clic pendant les 4 s ne doit
+    /// pas mémoriser la mire « coins » comme état « d'avant » à restaurer
+    /// (la sortie resterait bloquée sur la mire).
+    identification: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl AppState {
@@ -188,6 +195,8 @@ impl AppState {
             lumieres: None,
             sequenceur: None,
             sync_derive: watch::channel(None).1,
+            mjpeg_clients: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            identification: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 
@@ -484,7 +493,12 @@ async fn media_upload(
 ) -> Result<(StatusCode, Json<MediaInfo>), ApiError> {
     validate_upload_name(&name)?;
     let root = app.media.root().to_path_buf();
-    let tmp_path = root.join(format!(".{name}.upload.tmp"));
+    // Suffixe unique : deux uploads simultanés du même nom n'écrivent pas
+    // dans le même temporaire (l'échec de l'un supprimerait le fichier en
+    // cours de l'autre) — le dernier rename gagne, comme partout.
+    static UPLOAD_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = UPLOAD_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp_path = root.join(format!(".{name}.upload.{seq}.tmp"));
     let final_path = root.join(&name);
     let max = app.media.max_upload_bytes();
 
@@ -566,7 +580,17 @@ async fn logs_snapshot(State(app): State<AppState>) -> Json<Vec<toolbox_core::Lo
 }
 
 async fn system_stats(State(app): State<AppState>) -> Json<serde_json::Value> {
-    let stats = monitor::collect(app.started_at);
+    // Lecture de /proc et appels système : sur un thread bloquant, pas sur
+    // le runtime (un /proc lent — NFS, cgroup chargé — gèlerait TOUTES les
+    // requêtes en cours, WebSocket compris).
+    let started_at = app.started_at;
+    let stats = match tokio::task::spawn_blocking(move || monitor::collect(started_at)).await {
+        Ok(stats) => stats,
+        Err(err) => {
+            warn!(%err, "collecte système interrompue");
+            return Json(serde_json::json!({}));
+        }
+    };
     let mut json = serde_json::to_value(&stats).unwrap_or_else(|_| serde_json::json!({}));
     if let Some(objet) = json.as_object_mut() {
         // Santé : erreurs récentes (ring buffer), dérive de synchro,
@@ -669,24 +693,30 @@ struct PreviewEntry {
 
 impl PreviewCache {
     /// Ressert le rendu précédent si rien n'a changé (taille, état, frame)
-    /// depuis moins de [`PREVIEW_TTL`] ; sinon appelle `render`.
-    fn get_or_render(
+    /// depuis moins de [`PREVIEW_TTL`].
+    fn get(
+        &self,
+        width: u32,
+        state: &toolbox_core::NodeState,
+        frame: Option<usize>,
+    ) -> Option<std::sync::Arc<Vec<u8>>> {
+        let entry = self.entry.as_ref()?;
+        (entry.width == width
+            && entry.frame == frame
+            && entry.rendered_at.elapsed() < PREVIEW_TTL
+            && entry.state == *state)
+            .then(|| entry.png.clone())
+    }
+
+    /// Mémorise un rendu frais et le retourne partagé.
+    fn insert(
         &mut self,
         width: u32,
         state: &toolbox_core::NodeState,
         frame: Option<usize>,
-        render: impl FnOnce() -> Option<Vec<u8>>,
-    ) -> Option<std::sync::Arc<Vec<u8>>> {
-        if let Some(entry) = &self.entry {
-            if entry.width == width
-                && entry.frame == frame
-                && entry.rendered_at.elapsed() < PREVIEW_TTL
-                && entry.state == *state
-            {
-                return Some(entry.png.clone());
-            }
-        }
-        let png = std::sync::Arc::new(render()?);
+        png: Vec<u8>,
+    ) -> std::sync::Arc<Vec<u8>> {
+        let png = std::sync::Arc::new(png);
         self.entry = Some(PreviewEntry {
             width,
             state: state.clone(),
@@ -694,7 +724,7 @@ impl PreviewCache {
             rendered_at: Instant::now(),
             png: png.clone(),
         });
-        Some(png)
+        png
     }
 }
 
@@ -729,41 +759,56 @@ async fn preview_png(
 
     let lut = lut_pour_apercu(&app, state.lut.as_deref()).await;
     let mut cache = app.preview.lock().await;
-    let png = cache.get_or_render(width, &state, frame_key, || {
-        let mut pixels = vec![0u32; (width * height) as usize];
-        toolbox_engine::raster::render_frame_lut(
-            &state,
-            video.as_ref(),
-            lut.as_deref(),
-            time,
-            width,
-            height,
-            &mut pixels,
-        );
-        // L'aperçu reflète le blackout de régie (niveau final, sans la
-        // rampe animée — elle vit dans la fenêtre de sortie).
-        if state.blackout.actif {
-            toolbox_engine::appliquer_blackout(&mut pixels, 1.0);
+    // Cache frais : réponse immédiate. Sinon, le rendu CPU + l'encodage
+    // PNG (des dizaines de ms sur Pi) partent sur un thread bloquant pour
+    // ne pas geler le runtime — le verrou reste tenu pendant ce temps :
+    // les requêtes concurrentes attendent LE MÊME rendu au lieu d'en
+    // relancer chacune un.
+    let png = match cache.get(width, &state, frame_key) {
+        Some(png) => Some(png),
+        None => {
+            let etat_rendu = state.clone();
+            let rendu = tokio::task::spawn_blocking(move || {
+                let mut pixels = vec![0u32; (width * height) as usize];
+                toolbox_engine::raster::render_frame_lut(
+                    &etat_rendu,
+                    video.as_ref(),
+                    lut.as_deref(),
+                    time,
+                    width,
+                    height,
+                    &mut pixels,
+                );
+                // L'aperçu reflète le blackout de régie (niveau final, sans
+                // la rampe animée — elle vit dans la fenêtre de sortie).
+                if etat_rendu.blackout.actif {
+                    toolbox_engine::appliquer_blackout(&mut pixels, 1.0);
+                }
+                let mut rgb = Vec::with_capacity(pixels.len() * 3);
+                for px in &pixels {
+                    rgb.extend_from_slice(&[(px >> 16) as u8, (px >> 8) as u8, *px as u8]);
+                }
+                let mut out = Vec::new();
+                let mut encoder = png::Encoder::new(&mut out, width, height);
+                encoder.set_color(png::ColorType::Rgb);
+                encoder.set_depth(png::BitDepth::Eight);
+                let encoded = encoder
+                    .write_header()
+                    .and_then(|mut writer| writer.write_image_data(&rgb));
+                match encoded {
+                    Ok(()) => Some(out),
+                    Err(err) => {
+                        warn!(%err, "aperçu PNG non encodé");
+                        None
+                    }
+                }
+            })
+            .await
+            .ok()
+            .flatten();
+            rendu.map(|png| cache.insert(width, &state, frame_key, png))
         }
-        let mut rgb = Vec::with_capacity(pixels.len() * 3);
-        for px in &pixels {
-            rgb.extend_from_slice(&[(px >> 16) as u8, (px >> 8) as u8, *px as u8]);
-        }
-        let mut out = Vec::new();
-        let mut encoder = png::Encoder::new(&mut out, width, height);
-        encoder.set_color(png::ColorType::Rgb);
-        encoder.set_depth(png::BitDepth::Eight);
-        let encoded = encoder
-            .write_header()
-            .and_then(|mut writer| writer.write_image_data(&rgb));
-        match encoded {
-            Ok(()) => Some(out),
-            Err(err) => {
-                warn!(%err, "aperçu PNG non encodé");
-                None
-            }
-        }
-    });
+    };
     drop(cache);
 
     match png {
@@ -794,6 +839,23 @@ async fn flux_mjpg(
         return (
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({ "error": "aperçu désactivé (onglet Fonctions)" })),
+        )
+            .into_response();
+    }
+    // Plafond de clients : chaque flux coûte un rendu CPU complet — au
+    // 5ᵉ spectateur on refuse net (503) au lieu de coucher la machine.
+    // Le multi-client lourd, c'est la sortie RTSP (pipeline partagé).
+    const MJPEG_MAX_CLIENTS: usize = 4;
+    let compteur = app.mjpeg_clients.clone();
+    if compteur.fetch_add(1, std::sync::atomic::Ordering::SeqCst) >= MJPEG_MAX_CLIENTS {
+        compteur.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "error": format!(
+                    "trop de flux MJPEG ouverts ({MJPEG_MAX_CLIENTS} max) — utilisez la sortie RTSP pour plus de spectateurs"
+                )
+            })),
         )
             .into_response();
     }
@@ -911,6 +973,9 @@ async fn flux_mjpg(
                 break; // client parti : le canal fermé arrête le thread
             }
         }
+        // Tous les chemins de sortie passent ici (client parti, fonction
+        // coupée, thread mort-né) : le siège MJPEG est rendu.
+        compteur.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
     });
 
     (
@@ -1246,6 +1311,15 @@ async fn envoyer_media(
 /// savoir quel projecteur appartient à quel node. La mire précédente est
 /// restaurée ensuite.
 async fn identify(State(app): State<AppState>) -> StatusCode {
+    // Anti-double : un second clic pendant les 4 s capturerait la mire
+    // « coins » comme état « d'avant » et la restaurerait… pour toujours.
+    // La mire est déjà affichée : on ne fait rien de plus.
+    if app
+        .identification
+        .swap(true, std::sync::atomic::Ordering::SeqCst)
+    {
+        return StatusCode::NO_CONTENT;
+    }
     let before = app.bus.snapshot().test_pattern;
     let _ = app
         .bus
@@ -1257,11 +1331,13 @@ async fn identify(State(app): State<AppState>) -> StatusCode {
         )
         .await;
     let bus = app.bus.clone();
+    let identification = app.identification.clone();
     tokio::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_secs(4)).await;
         let _ = bus
             .send(Source::Http, Command::SetTestPattern { pattern: before })
             .await;
+        identification.store(false, std::sync::atomic::Ordering::SeqCst);
     });
     info!("identification demandée : mire coins pendant 4 s");
     StatusCode::NO_CONTENT
@@ -1275,7 +1351,10 @@ async fn diagnostic_zip(State(app): State<AppState>) -> Result<Response, ApiErro
         serde_json::to_vec_pretty(value).map_err(|e| ApiError::from(CoreError::from(e)))
     }
 
-    let stats = monitor::collect(app.started_at);
+    let started_at = app.started_at;
+    let stats = tokio::task::spawn_blocking(move || monitor::collect(started_at))
+        .await
+        .map_err(|e| ApiError::from(CoreError::InvalidCommand(e.to_string())))?;
     let rapport = format!(
         "Diagnostic du node Toolbox\n\
          ==========================\n\
@@ -1533,7 +1612,10 @@ async fn output_set(
 // ---------------------------------------------------------------------------
 
 async fn ws_events_upgrade(ws: WebSocketUpgrade, State(app): State<AppState>) -> Response {
-    ws.on_upgrade(move |socket| ws_events(socket, app))
+    // 64 Ko max par message entrant : aucune commande légitime n'approche
+    // cette taille, et un client hostile ne peut plus faire allouer des Go.
+    ws.max_message_size(64 * 1024)
+        .on_upgrade(move |socket| ws_events(socket, app))
 }
 
 /// Période du ping serveur : détecte les clients disparus sans FIN (tablette
@@ -1634,7 +1716,9 @@ async fn ws_events(mut socket: WebSocket, app: AppState) {
 }
 
 async fn ws_logs_upgrade(ws: WebSocketUpgrade, State(app): State<AppState>) -> Response {
-    ws.on_upgrade(move |socket| ws_logs(socket, app))
+    // Ce canal ne reçoit jamais de gros messages (il ne fait qu'émettre).
+    ws.max_message_size(16 * 1024)
+        .on_upgrade(move |socket| ws_logs(socket, app))
 }
 
 /// Page de logs : l'historique du ring buffer, puis le direct.
@@ -2297,51 +2381,25 @@ mod tests {
     fn preview_cache_shares_renders_within_the_window() {
         let mut cache = PreviewCache::default();
         let state = toolbox_core::NodeState::default();
-        let mut renders = 0;
 
-        let a = cache
-            .get_or_render(480, &state, None, || {
-                renders += 1;
-                Some(vec![1])
-            })
-            .expect("a");
-        let b = cache
-            .get_or_render(480, &state, None, || {
-                renders += 1;
-                Some(vec![2])
-            })
-            .expect("b");
-        assert_eq!(renders, 1, "le deuxième appel ressert le cache");
-        assert_eq!(*a, *b);
+        assert!(cache.get(480, &state, None).is_none(), "cache vide");
+        let a = cache.insert(480, &state, None, vec![1]);
+        let b = cache.get(480, &state, None).expect("cache frais");
+        assert_eq!(*a, *b, "le deuxième appel ressert le cache");
 
-        // Autre taille → nouveau rendu.
-        cache
-            .get_or_render(960, &state, None, || {
-                renders += 1;
-                Some(vec![3])
-            })
-            .expect("c");
-        assert_eq!(renders, 2);
+        // Autre taille → pas de cache.
+        assert!(cache.get(960, &state, None).is_none());
 
-        // État changé → nouveau rendu, même taille.
+        // État changé → pas de cache, même taille.
         let mut autre = toolbox_core::NodeState::default();
         autre.player.volume = 0.5;
-        cache
-            .get_or_render(960, &autre, None, || {
-                renders += 1;
-                Some(vec![4])
-            })
-            .expect("d");
-        assert_eq!(renders, 3);
+        cache.insert(960, &state, None, vec![3]);
+        assert!(cache.get(960, &autre, None).is_none());
 
-        // Nouvelle frame vidéo → nouveau rendu.
-        cache
-            .get_or_render(960, &autre, Some(42), || {
-                renders += 1;
-                Some(vec![5])
-            })
-            .expect("e");
-        assert_eq!(renders, 4);
+        // Nouvelle frame vidéo → pas de cache.
+        cache.insert(960, &autre, None, vec![4]);
+        assert!(cache.get(960, &autre, Some(42)).is_none());
+        assert!(cache.get(960, &autre, None).is_some());
     }
 
     /// L'aperçu de la sortie est un vrai PNG aux dimensions demandées.

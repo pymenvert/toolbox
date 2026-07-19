@@ -38,3 +38,24 @@ pub use state::{
     valider_mesh, valider_nom_lut, BlendingState, Event, LoopMode, MappingState, Masque, MeshState,
     NodeState, Rotation, Transport,
 };
+
+/// Écriture atomique ET durable d'un fichier d'état : temporaire à côté,
+/// `sync_all` (flush disque — un Pi peut perdre le courant à tout instant,
+/// et un rename sans flush peut laisser un fichier VIDE au reboot sur
+/// ext4/FAT), puis rename par-dessus l'ancien. À utiliser pour tous les
+/// `*.json` de configuration.
+pub fn ecrire_atomique(path: &std::path::Path, bytes: &[u8]) -> Result<(), CoreError> {
+    use std::io::Write as _;
+    let tmp = path.with_extension("json.tmp");
+    {
+        let mut fichier =
+            std::fs::File::create(&tmp).map_err(|e| CoreError::io(tmp.display().to_string(), e))?;
+        fichier
+            .write_all(bytes)
+            .map_err(|e| CoreError::io(tmp.display().to_string(), e))?;
+        fichier
+            .sync_all()
+            .map_err(|e| CoreError::io(tmp.display().to_string(), e))?;
+    }
+    std::fs::rename(&tmp, path).map_err(|e| CoreError::io(path.display().to_string(), e))
+}

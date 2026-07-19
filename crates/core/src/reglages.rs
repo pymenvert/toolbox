@@ -53,13 +53,11 @@ impl Reglages {
         Some(reglages)
     }
 
-    /// Persiste (écriture atomique, comme sortie.json).
+    /// Persiste (écriture atomique + flush disque, comme sortie.json).
     pub fn save(&self, path: &std::path::Path) -> Result<(), CoreError> {
         self.validate()?;
         let json = serde_json::to_vec_pretty(self)?;
-        let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, &json).map_err(|e| CoreError::io(tmp.display().to_string(), e))?;
-        std::fs::rename(&tmp, path).map_err(|e| CoreError::io(path.display().to_string(), e))
+        crate::ecrire_atomique(path, &json)
     }
 
     pub fn validate(&self) -> Result<(), CoreError> {

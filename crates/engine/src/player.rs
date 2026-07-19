@@ -204,6 +204,14 @@ impl<B: PlayerBackend> Player<B> {
                     if let Err(err) = self.backend.play() {
                         error!(%err, "lecture non relancée après chargement");
                     }
+                } else if self.transport == Transport::Paused {
+                    // Parité backend/bus : charger pendant une pause laisse
+                    // le backend EN PAUSE sur le nouveau média (GStreamer
+                    // préroule ainsi la première image — la fenêtre la
+                    // montre au lieu de rester noire jusqu'au play).
+                    if let Err(err) = self.backend.pause() {
+                        warn!(%err, "pause non appliquée après chargement");
+                    }
                 }
             }
             Event::PlaylistPositionChanged { .. } => {

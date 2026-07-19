@@ -126,24 +126,28 @@ impl LogBuffer {
             .duration_since(UNIX_EPOCH)
             .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
             .unwrap_or(0);
-        let entry = LogEntry {
-            seq: self.inner.seq.fetch_add(1, Ordering::Relaxed),
-            ts_ms,
-            level: level.to_string(),
-            target: target.to_string(),
-            message,
-        };
-        {
+        let entry = {
             let mut ring = self
                 .inner
                 .ring
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner);
+            // Le seq est tiré SOUS le verrou d'insertion : deux threads ne
+            // peuvent plus insérer dans le désordre (l'UI lit les seq comme
+            // strictement croissants pour détecter les trous).
+            let entry = LogEntry {
+                seq: self.inner.seq.fetch_add(1, Ordering::Relaxed),
+                ts_ms,
+                level: level.to_string(),
+                target: target.to_string(),
+                message,
+            };
             if ring.entries.len() >= self.inner.capacity {
                 ring.entries.pop_front();
             }
             ring.entries.push_back(entry.clone());
-        }
+            entry
+        };
         // Échoue seulement s'il n'y a aucun abonné en direct : pas une erreur.
         let _ = self.inner.live.send(entry);
     }

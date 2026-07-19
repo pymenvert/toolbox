@@ -161,9 +161,25 @@ pub fn demarrer(
         .map_err(|e| format!("thread RTSP : {e}"))?;
 
     // Le démarrage est court : 5 s couvrent largement un attach.
-    let port = port_rx
-        .recv_timeout(std::time::Duration::from_secs(5))
-        .map_err(|_| "le serveur RTSP n'a pas démarré à temps".to_string())??;
+    let port = match port_rx.recv_timeout(std::time::Duration::from_secs(5)) {
+        Ok(Ok(port)) => port,
+        Ok(Err(err)) => {
+            // Le thread s'est terminé de lui-même juste après l'envoi :
+            // le joindre est immédiat et ne laisse rien derrière.
+            let _ = thread.join();
+            return Err(err);
+        }
+        Err(_) => {
+            // Thread bloqué avant l'écoute (GLib souffrant) : on demande
+            // l'arrêt sans le joindre — un join ici bloquerait l'appelant
+            // aussi longtemps que le thread. Marqué, il se terminera s'il
+            // se débloque, et le warn rend la fuite visible dans les logs.
+            arret.store(true, Ordering::Relaxed);
+            main_loop.quit();
+            warn!("serveur RTSP bloqué au démarrage — thread abandonné (voir logs GStreamer)");
+            return Err("le serveur RTSP n'a pas démarré à temps".into());
+        }
+    };
 
     Ok(RtspHandle {
         main_loop,

@@ -38,15 +38,12 @@ impl OutputSettings {
         serde_json::from_slice(&bytes).ok()
     }
 
-    /// Persiste les réglages (écriture atomique : un crash ne corrompt pas
-    /// le fichier existant). Les changements faits dans l'UI web survivent
-    /// ainsi au redémarrage du node.
+    /// Persiste les réglages (écriture atomique + flush disque : ni un
+    /// crash ni une coupure de courant ne corrompent le fichier existant).
+    /// Les changements faits dans l'UI web survivent au redémarrage.
     pub fn save(&self, path: &std::path::Path) -> Result<(), crate::CoreError> {
         let json = serde_json::to_vec_pretty(self)?;
-        let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, &json)
-            .map_err(|e| crate::CoreError::io(tmp.display().to_string(), e))?;
-        std::fs::rename(&tmp, path).map_err(|e| crate::CoreError::io(path.display().to_string(), e))
+        crate::ecrire_atomique(path, &json)
     }
 }
 

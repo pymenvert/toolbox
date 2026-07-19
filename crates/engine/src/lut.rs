@@ -64,6 +64,15 @@ impl Lut3d {
                         .next()
                         .and_then(|m| m.parse().ok())
                         .ok_or_else(|| format!("ligne {} : triplet incomplet", num + 1))?;
+                    // « nan » et « inf » parsent comme des f32 valides mais
+                    // rendraient des pixels indéfinis (CPU) et divergents
+                    // (GPU) : refusés net, avec la ligne fautive.
+                    if !(r.is_finite() && g.is_finite() && b.is_finite()) {
+                        return Err(format!(
+                            "ligne {} : valeur non finie (nan/inf) dans la LUT",
+                            num + 1
+                        ));
+                    }
                     data.push([r, g, b]);
                 }
             }

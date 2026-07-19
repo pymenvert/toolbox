@@ -559,12 +559,23 @@ impl ApplicationHandler<Wake> for OutputApp {
         };
         self.window = Some(window.clone());
         if enabled {
-            let Some(painter) = self.creer_peintre(&window) else {
-                event_loop.exit();
-                return;
-            };
-            self.painter = Some(painter);
-            info!("fenêtre de sortie ouverte (F11 : plein écran)");
+            // Échec du peintre au boot (pilote pas prêt — un Pi démarre
+            // parfois plus vite que sa pile graphique) : on reste DORMANT
+            // au lieu de tuer la boucle — la bascule off/on de l'onglet
+            // Fonctions retentera avec la pile prête.
+            match self.creer_peintre(&window) {
+                Some(painter) => {
+                    self.painter = Some(painter);
+                    info!("fenêtre de sortie ouverte (F11 : plein écran)");
+                }
+                None => {
+                    window.set_visible(false);
+                    error!(
+                        "aucun contexte d'affichage au démarrage — fenêtre dormante \
+                         (onglet Fonctions : sortie off/on pour réessayer)"
+                    );
+                }
+            }
         } else {
             info!(
                 "fenêtre de sortie dormante (fonction coupée — onglet Fonctions pour la réveiller)"

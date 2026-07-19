@@ -156,11 +156,7 @@ impl EtatLumieres {
 
     pub fn save(&self, path: &std::path::Path) -> Result<(), toolbox_core::CoreError> {
         let json = serde_json::to_vec_pretty(self)?;
-        let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, &json)
-            .map_err(|e| toolbox_core::CoreError::io(tmp.display().to_string(), e))?;
-        std::fs::rename(&tmp, path)
-            .map_err(|e| toolbox_core::CoreError::io(path.display().to_string(), e))
+        toolbox_core::ecrire_atomique(path, &json)
     }
 }
 

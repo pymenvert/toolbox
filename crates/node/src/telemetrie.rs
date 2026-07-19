@@ -28,18 +28,31 @@ pub fn rapport(version: &str, nom: &str, panic: &str) -> String {
     format!("epoch={epoch}\nversion={version}\nnode={nom}\n---\n{panic}\n")
 }
 
-/// Écrit (en ajout) un rapport de crash. Appelée depuis le hook de panic :
-/// ne doit JAMAIS paniquer elle-même, toute erreur est silencieusement
-/// ignorée (le panic d'origine est déjà journalisé par ailleurs).
+/// Plafond de `crash.txt` : un node kiosque qui panique en boucle (relancé
+/// par systemd) ne doit pas remplir la carte SD. Au-delà, on repart du
+/// rapport le plus récent — c'est le plus utile au diagnostic.
+const CRASH_MAX_OCTETS: u64 = 256 * 1024;
+
+/// Écrit (en ajout, plafonné) un rapport de crash. Appelée depuis le hook
+/// de panic : ne doit JAMAIS paniquer elle-même, toute erreur est
+/// silencieusement ignorée (le panic d'origine est déjà journalisé).
 pub fn ecrire_rapport(chemin: &Path, contenu: &str) {
     if let Some(parent) = chemin.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    if let Ok(mut fichier) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(chemin)
-    {
+    let deborde = std::fs::metadata(chemin).is_ok_and(|m| m.len() > CRASH_MAX_OCTETS);
+    let mut options = std::fs::OpenOptions::new();
+    options.create(true);
+    if deborde {
+        options.write(true).truncate(true);
+    } else {
+        options.append(true);
+    }
+    if let Ok(mut fichier) = options.open(chemin) {
+        if deborde {
+            let _ = fichier
+                .write_all(b"(rapports precedents purges : fichier au-dela du plafond)\n---\n");
+        }
         let _ = fichier.write_all(contenu.as_bytes());
     }
 }

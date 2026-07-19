@@ -96,10 +96,15 @@ pub fn demarrer(
     };
 
     // Playing AVANT de pousser : si /dev/dri manque, on échoue ici avec une
-    // erreur claire plutôt qu'en silence.
-    pipeline
-        .set_state(gstreamer::State::Playing)
-        .map_err(|e| format!("sortie KMS impossible (pas de /dev/dri ? console requise) : {e}"))?;
+    // erreur claire plutôt qu'en silence. En cas d'échec, le pipeline est
+    // remis à Null — sinon ses éléments (dont le fd DRM éventuellement
+    // ouvert) resteraient vivants sans poignée pour les libérer.
+    if let Err(err) = pipeline.set_state(gstreamer::State::Playing) {
+        let _ = pipeline.set_state(gstreamer::State::Null);
+        return Err(format!(
+            "sortie KMS impossible (pas de /dev/dri ? console requise) : {err}"
+        ));
+    }
 
     let arret = Arc::new(AtomicBool::new(false));
     let arret_pousseur = arret.clone();
@@ -137,15 +142,22 @@ pub fn demarrer(
         .map_err(|e| format!("thread KMS : {e}"))?;
 
     // Les erreurs du pipeline (câble débranché, permission DRM…) sont
-    // tracées : la page Logs de l'UI les montre.
+    // tracées : la page Logs de l'UI les montre. Itération PAR TRANCHES
+    // de 500 ms avec vérification du drapeau d'arrêt : le thread se
+    // termine à l'arrêt de la sortie au lieu de rester bloqué à vie sur
+    // un bus silencieux (fuite de thread à chaque bascule on/off).
     if let Some(bus) = pipeline.bus() {
+        let arret_bus = arret.clone();
         std::thread::Builder::new()
             .name("toolbox-kms-bus".into())
             .spawn(move || {
-                for message in bus.iter_timed(gstreamer::ClockTime::NONE) {
-                    if let gstreamer::MessageView::Error(err) = message.view() {
-                        error!(erreur = %err.error(), "erreur de la sortie KMS");
-                        break;
+                while !arret_bus.load(Ordering::Relaxed) {
+                    let message = bus.timed_pop(gstreamer::ClockTime::from_mseconds(500));
+                    if let Some(message) = message {
+                        if let gstreamer::MessageView::Error(err) = message.view() {
+                            error!(erreur = %err.error(), "erreur de la sortie KMS");
+                            break;
+                        }
                     }
                 }
             })

@@ -104,9 +104,7 @@ impl Startup {
 
     pub fn save(&self, path: &std::path::Path) -> Result<(), CoreError> {
         let json = serde_json::to_vec_pretty(self)?;
-        let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, &json).map_err(|e| CoreError::io(tmp.display().to_string(), e))?;
-        std::fs::rename(&tmp, path).map_err(|e| CoreError::io(path.display().to_string(), e))
+        crate::ecrire_atomique(path, &json)
     }
 }
 
@@ -411,7 +409,16 @@ impl NodeConfig {
         }
         let text = std::fs::read_to_string(path)
             .map_err(|e| CoreError::io(path.display().to_string(), e))?;
-        toml::from_str(&text).map_err(|e| CoreError::Config(e.to_string()))
+        let mut config: Self =
+            toml::from_str(&text).map_err(|e| CoreError::Config(e.to_string()))?;
+        // Résolution fixe bornée 64..=8192 : au-delà, les buffers de rendu
+        // (largeur × hauteur × 4) demanderaient des Go — une faute de
+        // frappe dans node.toml ne doit pas coucher la machine.
+        if let Resolution::Fixed { width, height } = &mut config.resolution {
+            *width = (*width).clamp(64, 8192);
+            *height = (*height).clamp(64, 8192);
+        }
+        Ok(config)
     }
 }
 

@@ -83,14 +83,11 @@ impl FeatureFlags {
         serde_json::from_slice(&bytes).ok()
     }
 
-    /// Persiste les interrupteurs (écriture atomique, comme `sortie.json`) :
+    /// Persiste les interrupteurs (écriture atomique + flush disque) :
     /// les bascules faites dans l'UI survivent au redémarrage du node.
     pub fn save(&self, path: &std::path::Path) -> Result<(), crate::CoreError> {
         let json = serde_json::to_vec_pretty(self)?;
-        let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, &json)
-            .map_err(|e| crate::CoreError::io(tmp.display().to_string(), e))?;
-        std::fs::rename(&tmp, path).map_err(|e| crate::CoreError::io(path.display().to_string(), e))
+        crate::ecrire_atomique(path, &json)
     }
 
     /// Les défauts au premier démarrage : ce que dit la config (`[modules]`,

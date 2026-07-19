@@ -361,6 +361,10 @@ pub struct Recepteur {
     bibliotheque: Arc<Bibliotheque>,
     instance: *mut c_void,
     _nom: CString,
+    /// Le nom du récepteur passé au SDK : conservé aussi longtemps que
+    /// l'instance — rien ne garantit que le SDK copie la chaîne plutôt
+    /// que de garder le pointeur (use-after-free sinon).
+    _recv_nom: CString,
 }
 
 // SAFETY : même contrat que l'émetteur — l'instance vit dans l'unique
@@ -390,6 +394,7 @@ impl Recepteur {
             bibliotheque,
             instance,
             _nom: nom_c,
+            _recv_nom: recv_nom,
         })
     }
 
