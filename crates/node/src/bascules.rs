@@ -47,9 +47,6 @@ enum Actif {
         arret: watch::Sender<bool>,
         tache: JoinHandle<()>,
     },
-    /// Connexion MIDI : le drop ferme le port.
-    #[cfg(feature = "midi")]
-    Midi(toolbox_control_midi::MidiService),
     /// Daemon mDNS : l'arrêt retire les annonces du réseau.
     Fleet(crate::fleet::FleetHandle),
 }
@@ -65,8 +62,6 @@ async fn arreter(nom: &'static str, actif: Actif) {
                 warn!(service = nom, "arrêt forcé après 5 s");
             }
         }
-        #[cfg(feature = "midi")]
-        Actif::Midi(service) => drop(service),
         Actif::Fleet(handle) => handle.arreter(),
     }
     info!(service = nom, "fonction désactivée (service arrêté)");
@@ -283,14 +278,59 @@ fn demarrer_fleet(ctx: &Contexte, oscquery_actif: bool) -> Option<Actif> {
 
 #[cfg(feature = "midi")]
 fn demarrer_midi(ctx: &Contexte) -> Option<Actif> {
-    match toolbox_control_midi::connect(&ctx.config.midi, ctx.handle.clone()) {
-        Ok(service) => {
-            info!(port = %service.port_name, "module MIDI actif");
-            Some(Actif::Midi(service))
+    let (arret, rx) = canal_arret();
+    let config = ctx.config.midi.clone();
+    let bus = ctx.handle.clone();
+    let stop = rx.clone();
+    let tache = spawn_service("midi", rx, superviser_midi(config, bus, stop));
+    Some(Actif::Service { arret, tache })
+}
+
+/// Superviseur MIDI : (re)connecte le port en boucle. Résout deux pièges de
+/// terrain d'un seul mécanisme :
+/// - au boot, si le contrôleur n'est pas encore énuméré (Pi qui démarre,
+///   périphérique branché après), on retente au lieu de rester « actif mais
+///   muet » sans reprise possible ;
+/// - en spectacle, un débranchement USB rend le callback midir silencieux
+///   SANS erreur : on le détecte en ré-énumérant les ports, on relâche la
+///   connexion morte et on se reconnecte dès le retour du périphérique.
+#[cfg(feature = "midi")]
+async fn superviser_midi(
+    config: toolbox_core::config::MidiSettings,
+    bus: BusHandle,
+    mut stop: watch::Receiver<bool>,
+) {
+    loop {
+        match toolbox_control_midi::connect(&config, bus.clone()) {
+            Ok(service) => {
+                let nom = service.port_name.clone();
+                info!(port = %nom, "contrôleur MIDI connecté");
+                loop {
+                    tokio::select! {
+                        _ = stop.changed() => return,
+                        () = tokio::time::sleep(Duration::from_secs(3)) => {
+                            match toolbox_control_midi::noms_ports() {
+                                Ok(noms) if !noms.iter().any(|n| n == &nom) => {
+                                    error!(port = %nom, "contrôleur MIDI débranché — reconnexion en cours");
+                                    break;
+                                }
+                                // Présent, ou énumération transitoirement KO :
+                                // on garde la connexion en place.
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                // La connexion morte est relâchée ici avant de retenter.
+                drop(service);
+            }
+            Err(err) => {
+                warn!(%err, "MIDI : port introuvable, nouvelle tentative dans 3 s");
+            }
         }
-        Err(err) => {
-            error!(%err, "MIDI indisponible — le node continue sans");
-            None
+        tokio::select! {
+            _ = stop.changed() => return,
+            () = tokio::time::sleep(Duration::from_secs(3)) => {}
         }
     }
 }

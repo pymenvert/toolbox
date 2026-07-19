@@ -145,9 +145,57 @@ pub struct MidiBinding {
     /// Canal MIDI 1..=16 (absent = tous les canaux).
     pub channel: Option<u8>,
     /// Commande envoyée telle quelle (pour `note`, ou `cc` en tout-ou-rien).
+    /// Désérialisation TOLÉRANTE : une commande inconnue (faute de frappe)
+    /// est ignorée avec un ERROR au lieu de faire échouer tout le node.toml.
+    #[serde(default, deserialize_with = "commande_tolerante")]
     pub command: Option<Command>,
     /// Paramètre continu piloté par la valeur du CC.
     pub scale: Option<ScaleTarget>,
+}
+
+/// Désérialise le `command` d'un binding MIDI de façon TOLÉRANTE : la valeur
+/// est lue en brut, puis convertie en [`Command`]. Une commande inconnue
+/// (`cmd = "paly"` au lieu de `"play"`) devient `None` avec un ERROR explicite
+/// — au lieu de faire échouer le parse de TOUT le node.toml et d'empêcher le
+/// node de démarrer (écran noir garanti sur une install kiosque, pour une
+/// simple coquille dans une fonctionnalité de confort).
+fn commande_tolerante<'de, D>(deserializer: D) -> Result<Option<Command>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let brut = toml::Value::deserialize(deserializer)?;
+    match brut.clone().try_into::<Command>() {
+        Ok(command) => Ok(Some(command)),
+        Err(err) => {
+            tracing::error!(%err, valeur = %brut, "binding MIDI ignoré : commande inconnue");
+            Ok(None)
+        }
+    }
+}
+
+/// Signale (sans bloquer) les bindings MIDI structurellement inertes : canal
+/// hors 1..=16 (les manuels de contrôleurs comptent souvent 0..15), binding
+/// sans note ni cc, binding sans command ni scale. Pur diagnostic pour éviter
+/// le « j'appuie et rien ne se passe » sans aucune piste.
+fn valider_bindings(bindings: &[MidiBinding]) {
+    for (i, b) in bindings.iter().enumerate() {
+        let n = i + 1;
+        if let Some(ch) = b.channel {
+            if !(1..=16).contains(&ch) {
+                tracing::warn!(
+                    binding = n,
+                    canal = ch,
+                    "binding MIDI : canal hors 1..=16, ne déclenchera jamais rien"
+                );
+            }
+        }
+        if b.note.is_none() && b.cc.is_none() {
+            tracing::warn!(binding = n, "binding MIDI sans note ni cc : inerte");
+        }
+        if b.command.is_none() && b.scale.is_none() {
+            tracing::warn!(binding = n, "binding MIDI sans command ni scale : inerte");
+        }
+    }
 }
 
 /// Réglages MIDI.
@@ -418,6 +466,7 @@ impl NodeConfig {
             *width = (*width).clamp(64, 8192);
             *height = (*height).clamp(64, 8192);
         }
+        valider_bindings(&config.midi.bindings);
         Ok(config)
     }
 }
@@ -461,6 +510,32 @@ mod tests {
         assert!(cfg.modules.midi);
         assert!(cfg.modules.player);
         assert_eq!(cfg.ports.osc, 9000);
+    }
+
+    #[test]
+    fn une_commande_de_binding_inconnue_ne_bloque_pas_le_node() {
+        // Une faute de frappe dans la commande d'un binding MIDI (« paly »)
+        // ne doit PAS faire échouer tout le node.toml : le binding fautif est
+        // ignoré (command = None), les valides passent, le node démarre.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("node.toml");
+        std::fs::write(
+            &path,
+            r#"
+            [[midi.bindings]]
+            note = 60
+            command = { cmd = "paly" }
+
+            [[midi.bindings]]
+            note = 62
+            command = { cmd = "stop" }
+            "#,
+        )
+        .expect("write");
+        let cfg = NodeConfig::load(&path).expect("le node démarre malgré la coquille");
+        assert_eq!(cfg.midi.bindings.len(), 2);
+        assert!(cfg.midi.bindings[0].command.is_none(), "coquille ignorée");
+        assert_eq!(cfg.midi.bindings[1].command, Some(Command::Stop));
     }
 
     #[test]

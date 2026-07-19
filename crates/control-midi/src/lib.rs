@@ -149,6 +149,41 @@ pub struct MidiService {
     pub port_name: String,
 }
 
+/// Vrai si le nom désigne un port MIDI VIRTUEL de bouclage (le « Midi
+/// Through » d'ALSA, présent sur tout Linux/Pi). À éviter comme choix par
+/// défaut : il est énuméré AVANT les contrôleurs USB mais ne reçoit jamais
+/// rien d'un périphérique physique — le node semblerait « connecté » et muet.
+fn est_port_virtuel(nom: &str) -> bool {
+    let n = nom.to_ascii_lowercase();
+    n.contains("midi through") || n.contains("through port")
+}
+
+/// Choisit l'index du port d'entrée à ouvrir parmi `noms`.
+///
+/// - avec un `filtre`, le premier port dont le nom le contient ;
+/// - sans filtre, le premier port NON virtuel (on saute le « Midi Through »
+///   d'ALSA), et seulement s'il n'en existe aucun autre, le premier port.
+pub fn choisir_port(noms: &[String], filtre: Option<&str>) -> Option<usize> {
+    match filtre {
+        Some(f) => noms.iter().position(|n| n.contains(f)),
+        None => noms
+            .iter()
+            .position(|n| !est_port_virtuel(n))
+            .or(if noms.is_empty() { None } else { Some(0) }),
+    }
+}
+
+/// Énumère les noms des ports MIDI d'entrée actuellement présents. Sert au
+/// superviseur du node pour détecter un contrôleur débranché à chaud.
+pub fn noms_ports() -> Result<Vec<String>, MidiError> {
+    let input = MidiInput::new("toolbox-scan").map_err(|e| MidiError::Init(e.to_string()))?;
+    Ok(input
+        .ports()
+        .iter()
+        .map(|p| input.port_name(p).unwrap_or_default())
+        .collect())
+}
+
 /// Ouvre le port d'entrée (filtré par `settings.port` si présent) et branche
 /// les bindings sur le bus. Le callback tourne sur le thread MIDI : il
 /// utilise `try_send` (jamais bloquant).
@@ -157,25 +192,25 @@ pub fn connect(settings: &MidiSettings, bus: BusHandle) -> Result<MidiService, M
     input.ignore(Ignore::None);
 
     let ports = input.ports();
-    let port = match &settings.port {
-        Some(filter) => ports
-            .iter()
-            .find(|p| {
-                input
-                    .port_name(p)
-                    .map(|name| name.contains(filter.as_str()))
-                    .unwrap_or(false)
-            })
-            .ok_or_else(|| MidiError::NoPort(format!(" correspondant à {filter:?}")))?,
-        None => ports
-            .first()
-            .ok_or_else(|| MidiError::NoPort(String::new()))?,
-    }
-    .clone();
+    let noms: Vec<String> = ports
+        .iter()
+        .map(|p| input.port_name(p).unwrap_or_default())
+        .collect();
+    // Journalise ce qui existe : sur site, ça montre d'un coup d'œil quel
+    // contrôleur brancher dans [midi] port.
+    tracing::info!(ports = ?noms, "ports MIDI d'entrée détectés");
+    let index =
+        choisir_port(&noms, settings.port.as_deref()).ok_or_else(|| match &settings.port {
+            Some(filter) => MidiError::NoPort(format!(" correspondant à {filter:?}")),
+            None => MidiError::NoPort(String::new()),
+        })?;
+    let port = ports[index].clone();
 
-    let port_name = input
-        .port_name(&port)
-        .unwrap_or_else(|_| "port inconnu".to_string());
+    let port_name = noms
+        .get(index)
+        .filter(|s| !s.is_empty())
+        .cloned()
+        .unwrap_or_else(|| "port inconnu".to_string());
     let bindings = settings.bindings.clone();
 
     let connection = input
@@ -216,6 +251,24 @@ mod tests {
             command: Some(command),
             ..MidiBinding::default()
         }
+    }
+
+    #[test]
+    fn choisir_port_saute_le_midi_through() {
+        // Cas Linux/Pi typique : le Through est énuméré en premier.
+        let noms = vec![
+            "Midi Through:Midi Through Port-0 14:0".to_string(),
+            "APC mini mk2:APC mini mk2 MIDI 1 20:0".to_string(),
+        ];
+        assert_eq!(choisir_port(&noms, None), Some(1), "on saute le Through");
+        // Un filtre explicite prime, même s'il vise le Through.
+        assert_eq!(choisir_port(&noms, Some("APC")), Some(1));
+        assert_eq!(choisir_port(&noms, Some("introuvable")), None);
+        // Si le Through est le SEUL port, on le prend faute de mieux.
+        let seul = vec!["Midi Through Port-0".to_string()];
+        assert_eq!(choisir_port(&seul, None), Some(0));
+        // Aucun port du tout.
+        assert_eq!(choisir_port(&[], None), None);
     }
 
     #[test]
