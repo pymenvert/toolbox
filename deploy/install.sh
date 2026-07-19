@@ -19,6 +19,9 @@ PREFIX="/opt/toolbox"
 BINARY=""
 PROFIL=""
 NEED_SUDO=false
+# Utilisateur qui fera tourner le node (défini si un service systemd est
+# installé) — sert à lui donner la propriété du préfixe en fin d'install.
+SERVICE_USER=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -247,6 +250,7 @@ if command -v systemctl > /dev/null 2>&1; then
         RUN_USER="${SUDO_USER:-$(id -un)}"
         read -r -p "  utilisateur du service [$RUN_USER] " answer
         RUN_USER="${answer:-$RUN_USER}"
+        SERVICE_USER="$RUN_USER"
         UNIT_SRC="$(dirname "$0")/systemd/toolbox-node.service"
         if [ ! -f "$UNIT_SRC" ]; then
             fail "fichier unité introuvable : $UNIT_SRC"
@@ -257,6 +261,20 @@ if command -v systemctl > /dev/null 2>&1; then
         sudo systemctl enable toolbox-node.service
         say "Service installé. Démarrage : sudo systemctl start toolbox-node"
         say "Logs : journalctl -u toolbox-node -f  (ou la page Logs de la web UI)"
+    fi
+fi
+
+# --- propriété du préfixe -------------------------------------------------------
+# Créé en root (sudo), le préfixe ne serait PAS inscriptible par le node qui
+# tourne en simple utilisateur : plus aucun preset, réglage, LUT, log ni
+# bascule de l'UI ne pourrait être enregistré. On en donne la propriété à
+# l'utilisateur qui fera tourner le node (service systemd, ou à défaut celui
+# qui a lancé sudo). Root pur (pas de sudo) : rien à faire, root écrit partout.
+if [ "$NEED_SUDO" = true ]; then
+    OWNER="${SERVICE_USER:-${SUDO_USER:-}}"
+    if [ -n "$OWNER" ] && [ "$OWNER" != root ]; then
+        run chown -R "$OWNER" "$PREFIX"
+        say "Propriété de $PREFIX donnée à « $OWNER » (écriture presets/réglages/logs)."
     fi
 fi
 

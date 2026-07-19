@@ -124,6 +124,15 @@ pub fn demarrer(
                     error!("élément « source » n'est pas un appsrc");
                     return;
                 };
+                // Contre-pression : sans borne, si l'encodeur (x264 sur un Pi
+                // un peu juste) ne tient pas la cadence, chaque frame poussée
+                // s'empile dans l'appsrc et la mémoire monte jusqu'à l'OOM
+                // (crash du node). On borne la file interne à quelques frames
+                // et on met l'appsrc en mode bloquant : le pousseur ralentit
+                // alors à la vitesse réelle de l'encodeur, mémoire bornée.
+                let max_octets = u64::from(largeur) * u64::from(hauteur) * 4 * 4;
+                appsrc.set_property("max-bytes", max_octets);
+                appsrc.set_property("block", true);
                 pousser_frames(
                     appsrc,
                     etat_pousseur.clone(),
