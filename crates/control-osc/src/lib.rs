@@ -72,15 +72,29 @@ pub async fn serve(
             received = socket.recv_from(&mut buf) => {
                 match received {
                     Ok((len, from)) => {
-                        match rosc::decoder::decode_udp(&buf[..len]) {
-                            Ok((_rest, packet)) => {
-                                let mut messages = Vec::new();
-                                flatten(packet, &mut messages);
-                                for message in messages {
-                                    dispatch(&bus, message, &from.to_string()).await;
+                        let datagramme = &buf[..len];
+                        // Garde anti-débordement de pile : rosc décode les
+                        // bundles imbriqués par RÉCURSION, sans limite de
+                        // profondeur. Un datagramme forgé bourré de bundles
+                        // emboîtés (~20 octets par niveau) atteindrait des
+                        // milliers de niveaux et ferait déborder la pile du
+                        // worker tokio → abort de TOUT le node (OSC n'est pas
+                        // authentifié : n'importe qui sur le LAN). Un marqueur
+                        // « #bundle » par niveau : on refuse au-delà d'une
+                        // imbrication qu'aucun contrôleur légitime n'atteint.
+                        if compter_bundles(datagramme) > MAX_BUNDLES {
+                            warn!(%from, "paquet OSC rejeté : bundles trop imbriqués (possible attaque)");
+                        } else {
+                            match rosc::decoder::decode_udp(datagramme) {
+                                Ok((_rest, packet)) => {
+                                    let mut messages = Vec::new();
+                                    flatten(packet, &mut messages);
+                                    for message in messages {
+                                        dispatch(&bus, message, &from.to_string()).await;
+                                    }
                                 }
+                                Err(err) => warn!(%from, ?err, "paquet OSC illisible"),
                             }
-                            Err(err) => warn!(%from, ?err, "paquet OSC illisible"),
                         }
                     }
                     Err(err) => {
@@ -112,12 +126,25 @@ pub async fn feedback(
         })?;
     info!(%target, "retour d'état OSC actif");
     let mut events = bus.subscribe();
+    // Dernière valeur envoyée par adresse : anti-boucle de feedback. Si deux
+    // nodes se « mirrorent » (feedback de A → entrée OSC de B et l'inverse),
+    // réémettre chaque valeur INCHANGÉE entretiendrait une tempête de
+    // commandes infinie — le bus émet l'événement même quand la valeur ne
+    // bouge pas (ex. VolumeChanged sur un SetVolume à valeur identique). On
+    // ne réémet donc une adresse que lorsque sa valeur a réellement changé,
+    // ce qui casse la boucle après un seul aller-retour.
+    let mut derniers: std::collections::HashMap<String, Vec<OscType>> =
+        std::collections::HashMap::new();
     loop {
         tokio::select! {
             _ = shutdown.changed() => break,
             received = events.recv() => match received {
                 Ok(event) => {
                     let Some(message) = event_to_osc(&event) else { continue };
+                    if derniers.get(&message.addr) == Some(&message.args) {
+                        continue; // valeur inchangée : ne pas entretenir de boucle
+                    }
+                    derniers.insert(message.addr.clone(), message.args.clone());
                     match rosc::encoder::encode(&OscPacket::Message(message)) {
                         Ok(bytes) => {
                             if let Err(err) = socket.send_to(&bytes, &target).await {
@@ -289,6 +316,19 @@ pub fn event_to_osc(event: &toolbox_core::Event) -> Option<OscMessage> {
         // OSC utile — Chataigne relira les valeurs via OSCQuery.
         _ => None,
     }
+}
+
+/// Imbrication de bundles OSC maximale acceptée dans un seul datagramme.
+/// Un contrôleur légitime (Chataigne, TouchOSC…) reste à 1-2 niveaux ;
+/// au-delà c'est une entrée forgée qui vise le débordement de pile.
+const MAX_BUNDLES: usize = 16;
+
+/// Nombre de bundles (imbriqués ou frères) dans un datagramme brut : un
+/// marqueur « #bundle\0 » par bundle. La profondeur d'imbrication est
+/// forcément ≤ ce compte, ce qui en fait une borne sûre AVANT le décodage
+/// récursif de rosc (qui, lui, n'a aucun garde-fou de profondeur).
+fn compter_bundles(datagramme: &[u8]) -> usize {
+    datagramme.windows(8).filter(|f| *f == b"#bundle\0").count()
 }
 
 /// Aplati les bundles (récursifs) en liste de messages.
@@ -612,6 +652,41 @@ fn string_arg(args: &[OscType], index: usize) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compter_bundles_borne_l_imbrication() {
+        // Un message simple : aucun bundle.
+        let msg = rosc::encoder::encode(&OscPacket::Message(OscMessage {
+            addr: "/volume".into(),
+            args: vec![OscType::Float(0.5)],
+        }))
+        .expect("encode message");
+        assert_eq!(compter_bundles(&msg), 0);
+
+        // Un datagramme forgé de N bundles emboîtés : le compteur les voit
+        // tous, donc la garde MAX_BUNDLES le rejette avant tout décodage
+        // récursif (celui qui ferait déborder la pile).
+        let mut forge = Vec::new();
+        for _ in 0..64 {
+            forge.extend_from_slice(b"#bundle\0");
+            forge.extend_from_slice(&[0u8; 8]); // timetag
+        }
+        assert!(compter_bundles(&forge) > MAX_BUNDLES);
+
+        // Un bundle légitime peu profond passe la garde.
+        let bundle = rosc::encoder::encode(&OscPacket::Bundle(rosc::OscBundle {
+            timetag: rosc::OscTime {
+                seconds: 0,
+                fractional: 0,
+            },
+            content: vec![OscPacket::Message(OscMessage {
+                addr: "/volume".into(),
+                args: vec![OscType::Float(0.5)],
+            })],
+        }))
+        .expect("encode bundle");
+        assert!(compter_bundles(&bundle) <= MAX_BUNDLES);
+    }
 
     #[test]
     fn transport_addresses_map() {
