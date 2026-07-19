@@ -1033,6 +1033,15 @@ impl NodeState {
         if let Some(media) = &self.player.media {
             validate_media_path(media)?;
         }
+        // Cohérence transport/média : « en lecture » ou « en pause » sans
+        // aucun média est incohérent (preset trafiqué ou corrompu). On
+        // refuse, plutôt que de laisser le node se croire en lecture sans
+        // rien à lire.
+        if self.player.media.is_none() && self.player.transport != Transport::Stopped {
+            return Err(CoreError::InvalidCommand(
+                "transport en lecture/pause sans média chargé".into(),
+            ));
+        }
         for item in &self.player.playlist {
             validate_media_path(item)?;
         }

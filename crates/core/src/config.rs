@@ -474,7 +474,25 @@ impl NodeConfig {
             *height = (*height).clamp(64, 8192);
         }
         valider_bindings(&config.midi.bindings);
+        valider_ports(&config.ports);
         Ok(config)
+    }
+}
+
+/// Signale (sans bloquer) les incohérences de ports : un port à 0 rend le
+/// service injoignable à une adresse fixe, et l'UI web (http) et l'OSCQuery
+/// partagent la pile TCP — le même port empêcherait l'un des deux de démarrer.
+fn valider_ports(ports: &Ports) {
+    if ports.http == 0 {
+        tracing::warn!(
+            "[ports] http = 0 : l'interface web sera sur un port éphémère, injoignable à une adresse fixe"
+        );
+    }
+    if ports.http == ports.oscquery {
+        tracing::warn!(
+            port = ports.http,
+            "[ports] http et oscquery partagent le même port TCP : l'un des deux ne démarrera pas"
+        );
     }
 }
 

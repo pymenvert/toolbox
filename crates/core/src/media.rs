@@ -97,9 +97,23 @@ impl MediaLibrary {
         if depth > 3 {
             return Ok(());
         }
-        let entries = fs::read_dir(dir).map_err(|e| CoreError::io(dir.display().to_string(), e))?;
+        let entries = match fs::read_dir(dir) {
+            Ok(entries) => entries,
+            // La racine DOIT être lisible (erreur franche). Mais un
+            // SOUS-dossier illisible — « System Volume Information » sur une
+            // clé USB Windows, « lost+found » (root, 700) sur ext4 — ne doit
+            // pas faire échouer TOUTE la liste : la page Médias paraîtrait
+            // vide alors que les fichiers sont là et lisibles.
+            Err(e) if depth == 0 => return Err(CoreError::io(dir.display().to_string(), e)),
+            Err(e) => {
+                tracing::warn!(dossier = %dir.display(), %e, "sous-dossier de médias illisible : ignoré");
+                return Ok(());
+            }
+        };
         for entry in entries {
-            let entry = entry.map_err(|e| CoreError::io(dir.display().to_string(), e))?;
+            let Ok(entry) = entry else {
+                continue; // entrée en erreur (course, permission) : ignorée
+            };
             let path = entry.path();
             let name = entry.file_name();
             let Some(name) = name.to_str() else {
@@ -138,14 +152,19 @@ impl MediaLibrary {
         let tmp_path = self.root.join(format!(".{name}.upload.tmp"));
 
         match write_capped(&tmp_path, &mut reader, self.max_upload_bytes, name) {
-            Ok(written) => {
-                fs::rename(&tmp_path, &final_path)
-                    .map_err(|e| CoreError::io(final_path.display().to_string(), e))?;
-                Ok(MediaInfo {
+            Ok(written) => match fs::rename(&tmp_path, &final_path) {
+                Ok(()) => Ok(MediaInfo {
                     path: name.to_string(),
                     bytes: written,
-                })
-            }
+                }),
+                // Rename final en échec (disque plein, cible verrouillée…) :
+                // on retire le .tmp COMPLET, sinon il resterait orphelin sur
+                // le disque, invisible et jamais nettoyé.
+                Err(e) => {
+                    let _ = fs::remove_file(&tmp_path);
+                    Err(CoreError::io(final_path.display().to_string(), e))
+                }
+            },
             Err(err) => {
                 let _ = fs::remove_file(&tmp_path); // nettoyage best-effort
                 Err(err)

@@ -166,6 +166,42 @@ pub fn plan(from: &NodeState, to: &NodeState, t: f32) -> Vec<Command> {
                 pattern: to.test_pattern,
             });
         }
+        // Bascules discrètes ajoutées après coup (masques v2, mesh/LUT v3) :
+        // sans elles, un fondu « réussi » laissait l'ancien mesh, les anciens
+        // masques et l'ancienne LUT en place — l'image finale ne
+        // correspondait PAS au preset cible, silencieusement.
+        if from.mapping.mesh != to.mapping.mesh {
+            match &to.mapping.mesh {
+                Some(mesh) => commands.push(Command::MeshSet {
+                    colonnes: mesh.colonnes,
+                    lignes: mesh.lignes,
+                    offsets: mesh.offsets.clone(),
+                }),
+                None => commands.push(Command::MeshReset),
+            }
+        }
+        if from.lut != to.lut {
+            commands.push(Command::LutSet {
+                name: to.lut.clone(),
+            });
+        }
+        if from.masques != to.masques {
+            // Resynchronise index par index, puis retire les excédents (du
+            // plus haut index au plus bas pour garder les index valides).
+            for (index, masque) in to.masques.iter().enumerate() {
+                if let Ok(index) = u8::try_from(index) {
+                    commands.push(Command::MasqueSet {
+                        index,
+                        corners: masque.corners,
+                    });
+                }
+            }
+            for index in (to.masques.len()..from.masques.len()).rev() {
+                if let Ok(index) = u8::try_from(index) {
+                    commands.push(Command::MasqueSupprime { index });
+                }
+            }
+        }
     }
 
     commands
@@ -230,6 +266,20 @@ pub async fn run(
                     }
                     Err(err) => warn!(%name, %err, "fondu abandonné : mapping illisible"),
                 },
+                // Reprise en main directe pendant un fondu : charger un preset
+                // ou un mapping (ou réinitialiser) DOIT annuler le fondu en
+                // cours, sinon les pas suivants (valeurs absolues figées au
+                // départ) écrasent l'état fraîchement chargé et l'image repart
+                // vers l'ancienne cible. Ces événements ne sont jamais émis
+                // par les pas du fader : pas d'auto-annulation.
+                Ok(Event::PresetLoaded { .. })
+                | Ok(Event::StateReplaced { .. })
+                | Ok(Event::MappingLoaded { .. })
+                | Ok(Event::MappingReset) => {
+                    if current.take().is_some() {
+                        info!("fondu annulé par un chargement direct");
+                    }
+                }
                 Ok(_) => {}
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(missed)) => {
                     warn!(missed, "fader en retard : événements sautés");
@@ -319,6 +369,117 @@ mod tests {
         assert!(at_end.contains(&Command::SetTestPattern {
             pattern: Some(crate::command::TestPattern::Grid)
         }));
+    }
+
+    #[test]
+    fn plan_applies_mesh_lut_masques_at_the_end() {
+        let from = NodeState::default();
+        let mut to = NodeState::default();
+        to.mapping.mesh = Some(crate::state::MeshState {
+            colonnes: 2,
+            lignes: 2,
+            offsets: vec![Corner { x: 0.0, y: 0.0 }; 4],
+        });
+        to.lut = Some("scene.cube".into());
+        to.masques = vec![crate::state::Masque {
+            corners: [Corner { x: 0.0, y: 0.0 }; 4],
+        }];
+
+        // Rien de tout ça avant la toute fin.
+        assert!(plan(&from, &to, 0.99).is_empty());
+        let fin = plan(&from, &to, 1.0);
+        assert!(fin.iter().any(|c| matches!(
+            c,
+            Command::MeshSet {
+                colonnes: 2,
+                lignes: 2,
+                ..
+            }
+        )));
+        assert!(fin.contains(&Command::LutSet {
+            name: Some("scene.cube".into())
+        }));
+        assert!(fin
+            .iter()
+            .any(|c| matches!(c, Command::MasqueSet { index: 0, .. })));
+
+        // Sens inverse : mesh retiré, LUT retirée, masque excédentaire ôté.
+        let retour = plan(&to, &from, 1.0);
+        assert!(retour.contains(&Command::MeshReset));
+        assert!(retour.contains(&Command::LutSet { name: None }));
+        assert!(retour.contains(&Command::MasqueSupprime { index: 0 }));
+    }
+
+    /// Charger un preset PENDANT un fondu annule ce fondu : le chargement
+    /// direct l'emporte, il n'est pas ré-écrasé pas à pas vers l'ancienne
+    /// cible.
+    #[tokio::test]
+    async fn direct_load_cancels_an_ongoing_fade() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = PresetStore::open(dir.path().join("presets")).expect("open");
+        let mappings =
+            MappingStore::open(dir.path().join("presets").join("mapping")).expect("open");
+        let bus = Bus::new(256, 1024)
+            .with_presets(store.clone())
+            .with_mapping_presets(mappings.clone());
+        let handle = bus.handle();
+        tokio::spawn(bus.run());
+        let (_shutdown_tx, shutdown_rx) = watch::channel(false);
+        tokio::spawn(run(handle.clone(), store, mappings, shutdown_rx));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let poser_coin = |x: f32| Command::CornerSet {
+            index: 0,
+            x,
+            y: 0.0,
+        };
+        // Preset « lent » : coin 0 à 0.5. Preset « coupe » : coin 0 à 0.9.
+        handle.send(Source::Http, poser_coin(0.5)).await;
+        handle
+            .send(
+                Source::Http,
+                Command::PresetSave {
+                    name: "lent".into(),
+                },
+            )
+            .await;
+        handle.send(Source::Http, poser_coin(0.9)).await;
+        handle
+            .send(
+                Source::Http,
+                Command::PresetSave {
+                    name: "coupe".into(),
+                },
+            )
+            .await;
+        // Départ à 0.0, fondu LONG vers « lent ».
+        handle.send(Source::Http, poser_coin(0.0)).await;
+        handle
+            .send(
+                Source::Http,
+                Command::PresetFade {
+                    name: "lent".into(),
+                    seconds: 2.0,
+                },
+            )
+            .await;
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        // En plein fondu, on charge « coupe » directement.
+        handle
+            .send(
+                Source::Http,
+                Command::PresetLoad {
+                    name: "coupe".into(),
+                },
+            )
+            .await;
+        // Laisser le temps au fondu de re-écraser s'il n'était pas annulé.
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let x = handle.snapshot().mapping.corners[0].x;
+        assert!(
+            x > 0.85,
+            "le chargement direct doit tenir (coin à 0.9), pas être ramené vers 0.5 ; obtenu {x}"
+        );
     }
 
     /// De bout en bout : le fondu amène l'état au preset cible sans toucher
