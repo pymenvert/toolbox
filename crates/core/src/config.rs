@@ -385,6 +385,13 @@ pub struct Security {
     /// accepté). Absent = pas d'authentification. L'OSC (UDP) et l'OSCQuery
     /// restent ouverts : à réserver au réseau local ou à Tailscale.
     pub password: Option<String>,
+    /// Jeton PARTAGÉ entre les nodes d'un même parc pour les échanges
+    /// serveur-à-serveur (liste et envoi de médias). Configuré identique sur
+    /// tous les nodes du parc, il authentifie les opérations de parc SANS
+    /// jamais exposer le mot de passe de l'UI à un node inconnu annoncé en
+    /// mDNS (non authentifié). Absent = les opérations de parc ne visent que
+    /// des nodes ouverts (sans mot de passe).
+    pub fleet_token: Option<String>,
 }
 
 /// Bornes de ressources — un node de spectacle ne doit jamais saturer.

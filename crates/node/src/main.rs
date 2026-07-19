@@ -384,12 +384,23 @@ async fn run(mut config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std:
             env!("CARGO_PKG_VERSION").to_string(),
         )
         .with_password(config.security.password.clone())
+        .with_fleet_token(config.security.fleet_token.clone())
         .with_features(features_tx.clone(), features_rx.clone())
         .with_lumieres(lumieres_handle.clone())
         .with_sequenceur(sequenceur_handle.clone())
         .with_sync_derive(sync_derive_rx.clone());
         if config.security.password.is_some() {
             info!("interface web protégée par mot de passe ([security])");
+            // Honnêteté envers l'opérateur : l'OSCQuery (port 8081, pour
+            // Chataigne) reste ouvert même avec un mot de passe — il expose
+            // les VALEURS courantes en lecture seule. Isoler par le réseau
+            // (Tailscale) si le LAN n'est pas de confiance.
+            if config.modules.osc {
+                warn!(
+                    "note sécurité : l'OSCQuery (port {}) reste en accès libre malgré le mot de passe (lecture seule)",
+                    config.ports.oscquery
+                );
+            }
         }
         let http_config = toolbox_control_http::HttpConfig {
             bind: config.ports.bind.clone(),

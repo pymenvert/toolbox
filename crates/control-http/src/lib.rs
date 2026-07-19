@@ -122,6 +122,10 @@ pub struct AppState {
     /// Mot de passe de l'UI/API (`[security] password`). `None` = ouvert
     /// (réseau local de confiance, comportement historique).
     password: Option<String>,
+    /// Jeton de parc partagé (`[security] fleet_token`) : authentifie les
+    /// échanges de médias entre nodes sans exposer le mot de passe de l'UI à
+    /// un node mDNS inconnu. `None` = échanges de parc vers nodes ouverts.
+    fleet_token: Option<String>,
     started_at: Instant,
     node_name: String,
     version: String,
@@ -182,6 +186,7 @@ impl AppState {
             output,
             fleet,
             password: None,
+            fleet_token: None,
             started_at: Instant::now(),
             node_name,
             version,
@@ -231,6 +236,13 @@ impl AppState {
     ) -> Self {
         self.features = rx;
         self.features_tx = tx;
+        self
+    }
+
+    /// Jeton de parc partagé (échanges de médias serveur-à-serveur).
+    #[must_use]
+    pub fn with_fleet_token(mut self, token: Option<String>) -> Self {
+        self.fleet_token = token.filter(|t| !t.is_empty());
         self
     }
 
@@ -329,7 +341,64 @@ pub fn router(app: AppState) -> Router {
             app.clone(),
             require_password,
         ))
+        // Couche la PLUS externe (s'exécute en premier) : rejette les
+        // requêtes mutatrices d'origine étrangère (anti-CSRF) avant tout.
+        .layer(axum::middleware::from_fn(verifier_origine))
         .with_state(app)
+}
+
+/// En-tête portant le jeton de parc (échanges serveur-à-serveur).
+const ENTETE_JETON_PARC: &str = "x-lanterne-parc";
+
+/// Défense anti-CSRF : rejette toute requête MUTATRICE (POST/PUT/DELETE/PATCH)
+/// dont l'origine annoncée (Origin, sinon Referer) désigne un autre hôte que
+/// le node. Sans cela, une page web piégée ouverte sur la tablette du
+/// régisseur pourrait déclencher reboot/shutdown/OTA/… à son insu (un POST
+/// vide est une « simple request » : le navigateur l'envoie sans pré-vol
+/// CORS, mais il y JOINT toujours l'en-tête Origin en cross-site). Les
+/// clients non-navigateur (curl, outils OSC, nodes du parc) n'envoient pas
+/// d'Origin : ils passent — le mot de passe/jeton reste leur barrière.
+async fn verifier_origine(request: Request, next: axum::middleware::Next) -> Response {
+    let mutateur = matches!(
+        *request.method(),
+        axum::http::Method::POST
+            | axum::http::Method::PUT
+            | axum::http::Method::DELETE
+            | axum::http::Method::PATCH
+    );
+    if mutateur {
+        let headers = request.headers();
+        let origine = headers
+            .get(axum::http::header::ORIGIN)
+            .or_else(|| headers.get(axum::http::header::REFERER))
+            .and_then(|v| v.to_str().ok());
+        if let Some(origine) = origine {
+            let hote = headers
+                .get(axum::http::header::HOST)
+                .and_then(|v| v.to_str().ok());
+            if !origine_correspond(origine, hote) {
+                warn!(%origine, "requête mutatrice rejetée : origine étrangère (anti-CSRF)");
+                return (
+                    StatusCode::FORBIDDEN,
+                    "origine non autorisée (protection anti-CSRF)",
+                )
+                    .into_response();
+            }
+        }
+    }
+    next.run(request).await
+}
+
+/// L'origine annoncée (`http://hôte:port`, ou une URL complète pour un
+/// Referer) désigne-t-elle le même hôte que l'en-tête Host de la requête ?
+/// Sans Host exploitable, on refuse (prudence).
+fn origine_correspond(origine: &str, hote: Option<&str>) -> bool {
+    let Some(hote) = hote else { return false };
+    let sans_schema = origine
+        .split_once("://")
+        .map_or(origine, |(_, reste)| reste);
+    let autorite = sans_schema.split('/').next().unwrap_or("");
+    autorite.eq_ignore_ascii_case(hote)
 }
 
 /// Mot de passe optionnel (HTTP Basic, tout identifiant accepté). Le
@@ -341,6 +410,17 @@ async fn require_password(
     request: Request,
     next: axum::middleware::Next,
 ) -> Response {
+    // Un node du parc présentant le bon jeton partagé est authentifié sans
+    // le mot de passe de l'UI (échanges de médias serveur-à-serveur).
+    if let Some(attendu) = &app.fleet_token {
+        let porteur = request
+            .headers()
+            .get(ENTETE_JETON_PARC)
+            .and_then(|v| v.to_str().ok());
+        if porteur == Some(attendu.as_str()) {
+            return next.run(request).await;
+        }
+    }
     let Some(expected) = &app.password else {
         return next.run(request).await;
     };
@@ -1163,7 +1243,6 @@ fn urls_du_parc(app: &AppState) -> Vec<String> {
 async fn fleet_media(
     State(app): State<AppState>,
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
-    headers: axum::http::HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let url = params
         .get("url")
@@ -1172,9 +1251,10 @@ async fn fleet_media(
         return Err(CoreError::InvalidCommand(format!("node inconnu du parc : {url}")).into());
     }
     let mut requete = client_http()?.get(format!("{url}api/media"));
-    // Le mot de passe du parc (supposé commun) suit la requête d'origine.
-    if let Some(auth) = headers.get(axum::http::header::AUTHORIZATION) {
-        requete = requete.header(axum::http::header::AUTHORIZATION, auth.clone());
+    // Jeton de parc partagé (JAMAIS le mot de passe de l'UI : la cible vient
+    // du mDNS non authentifié, un node pirate le capterait).
+    if let Some(jeton) = &app.fleet_token {
+        requete = requete.header(ENTETE_JETON_PARC, jeton.clone());
     }
     let reponse = requete
         .send()
@@ -1209,7 +1289,6 @@ struct PushResult {
 /// entier en RAM). Cibles vides = tout le parc découvert, sauf ce node.
 async fn fleet_push(
     State(app): State<AppState>,
-    headers: axum::http::HeaderMap,
     Json(demande): Json<PushRequest>,
 ) -> Result<Json<Vec<PushResult>>, ApiError> {
     validate_upload_name(&demande.name)?;
@@ -1255,7 +1334,14 @@ async fn fleet_push(
     let client = client_http()?;
     let mut resultats = Vec::new();
     for url in cibles {
-        let resultat = envoyer_media(&client, &url, &demande.name, &chemin, &headers).await;
+        let resultat = envoyer_media(
+            &client,
+            &url,
+            &demande.name,
+            &chemin,
+            app.fleet_token.as_deref(),
+        )
+        .await;
         let (ok, detail) = match resultat {
             Ok(()) => (true, "envoyé".to_string()),
             Err(err) => (false, err),
@@ -1271,6 +1357,11 @@ async fn fleet_push(
 fn client_http() -> Result<reqwest::Client, ApiError> {
     reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(5))
+        // Aucune redirection suivie : la liste blanche du parc ne valide que
+        // l'URL INITIALE. Sans ça, un node (pirate mDNS ou compromis) répond
+        // 302 vers http://127.0.0.1:… ou une ressource interne, et le node
+        // relaierait le corps — SSRF contournant la liste blanche.
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|e| ApiError::from(CoreError::InvalidCommand(format!("client HTTP : {e}"))))
 }
@@ -1280,7 +1371,7 @@ async fn envoyer_media(
     url: &str,
     name: &str,
     chemin: &std::path::Path,
-    headers: &axum::http::HeaderMap,
+    jeton_parc: Option<&str>,
 ) -> Result<(), String> {
     let fichier = tokio::fs::File::open(chemin)
         .await
@@ -1295,8 +1386,10 @@ async fn envoyer_media(
         .put(format!("{url}api/media/{name}"))
         .header(axum::http::header::CONTENT_LENGTH, taille)
         .body(reqwest::Body::wrap_stream(flux));
-    if let Some(auth) = headers.get(axum::http::header::AUTHORIZATION) {
-        requete = requete.header(axum::http::header::AUTHORIZATION, auth.clone());
+    // Jeton de parc partagé (jamais le mot de passe de l'UI vers une cible
+    // mDNS non authentifiée).
+    if let Some(jeton) = jeton_parc {
+        requete = requete.header(ENTETE_JETON_PARC, jeton);
     }
     let reponse = requete.send().await.map_err(|e| format!("envoi : {e}"))?;
     if reponse.status().is_success() {
@@ -1787,6 +1880,64 @@ mod tests {
     use http_body_util::BodyExt;
     use toolbox_core::Bus;
     use tower::ServiceExt;
+
+    #[test]
+    fn origine_correspond_bloque_le_cross_site() {
+        // Même origine (l'UI elle-même) : accepté.
+        assert!(origine_correspond(
+            "http://192.168.1.50:8080",
+            Some("192.168.1.50:8080")
+        ));
+        assert!(origine_correspond(
+            "http://lanterne.local:8080/page",
+            Some("lanterne.local:8080")
+        ));
+        // Site tiers piégé : refusé.
+        assert!(!origine_correspond(
+            "http://pirate.example",
+            Some("192.168.1.50:8080")
+        ));
+        // Port différent = origine différente.
+        assert!(!origine_correspond(
+            "http://192.168.1.50:9999",
+            Some("192.168.1.50:8080")
+        ));
+        // Sans Host exploitable : refus prudent.
+        assert!(!origine_correspond("http://192.168.1.50:8080", None));
+    }
+
+    /// Un POST cross-site (Origin étranger) sur une route mutatrice est
+    /// rejeté 403 ; le même POST same-origin passe.
+    #[tokio::test]
+    async fn csrf_rejette_l_origine_etrangere() {
+        let bed = testbed();
+        let piege = bed
+            .router
+            .clone()
+            .oneshot(
+                HttpRequest::post("/api/identify")
+                    .header("origin", "http://pirate.example")
+                    .header("host", "192.168.1.50:8080")
+                    .body(Body::empty())
+                    .expect("req"),
+            )
+            .await
+            .expect("resp");
+        assert_eq!(piege.status(), StatusCode::FORBIDDEN);
+
+        let legitime = bed
+            .router
+            .oneshot(
+                HttpRequest::post("/api/identify")
+                    .header("origin", "http://192.168.1.50:8080")
+                    .header("host", "192.168.1.50:8080")
+                    .body(Body::empty())
+                    .expect("req"),
+            )
+            .await
+            .expect("resp");
+        assert_eq!(legitime.status(), StatusCode::NO_CONTENT);
+    }
 
     struct TestBed {
         router: Router,
