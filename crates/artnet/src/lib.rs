@@ -117,11 +117,41 @@ impl Default for EtatLumieres {
 }
 
 impl EtatLumieres {
+    /// Relit l'état. Fichier ABSENT = `None` silencieux (premier
+    /// démarrage). Fichier PRÉSENT mais illisible/corrompu = tracé en ERROR
+    /// et mis de côté en `.corrompu` — on ne l'écrase pas en silence à la
+    /// première sauvegarde (la configuration lumières du client survivrait
+    /// ainsi pour récupération). Les faders sont bornés (canal 1..=512,
+    /// univers ≤ 32767) : un canal 0 ferait paniquer l'émission.
     pub fn load(path: &std::path::Path) -> Option<Self> {
-        let bytes = std::fs::read(path).ok()?;
-        let mut etat: Self = serde_json::from_slice(&bytes).ok()?;
-        etat.chaser_actif = None; // un chaser ne survit pas au redémarrage
-        Some(etat)
+        let bytes = match std::fs::read(path) {
+            Ok(bytes) => bytes,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return None,
+            Err(err) => {
+                tracing::error!(%err, chemin = %path.display(), "lumieres.json illisible");
+                return None;
+            }
+        };
+        match serde_json::from_slice::<Self>(&bytes) {
+            Ok(mut etat) => {
+                etat.chaser_actif = None; // un chaser ne survit pas au redémarrage
+                for fader in &mut etat.faders {
+                    fader.canal = fader.canal.clamp(1, 512);
+                    fader.univers = fader.univers.min(32_767);
+                }
+                Some(etat)
+            }
+            Err(err) => {
+                let corrompu = path.with_extension("json.corrompu");
+                let _ = std::fs::rename(path, &corrompu);
+                tracing::error!(
+                    %err,
+                    sauvegarde = %corrompu.display(),
+                    "lumieres.json corrompu — mis de côté, console repartie à vide"
+                );
+                None
+            }
+        }
     }
 
     pub fn save(&self, path: &std::path::Path) -> Result<(), toolbox_core::CoreError> {
@@ -271,6 +301,9 @@ pub fn appliquer(etat: &mut EtatLumieres, commande: CommandeLumieres) -> bool {
             couleur,
         } => {
             let canal = canal.clamp(1, 512);
+            // L'univers Art-Net tient sur 15 bits (Port-Address) : au-delà,
+            // le bit 15 déborderait et le node lumière ignorerait la trame.
+            let univers = univers.min(32_767);
             // Id monotone par console (l'horloge seule collisionne quand deux
             // faders naissent dans la même milliseconde).
             let suivant = etat
@@ -379,6 +412,11 @@ pub fn trames_de_sortie(etat: &EtatLumieres, t_chaser_ms: u64) -> BTreeMap<u16, 
             .as_ref()
             .and_then(|v| v.get(&fader.id).copied())
             .unwrap_or(fader.valeur);
+        // Garde-fou anti-panique : un canal hors 1..=512 (fichier corrompu
+        // ou d'une autre version) est ignoré au lieu de déborder la trame.
+        if !(1..=512).contains(&fader.canal) {
+            continue;
+        }
         #[allow(clippy::cast_possible_truncation)] // ≤ 255 par construction
         let finale = ((u16::from(brute) * master) / 255) as u8;
         let trame = univers.entry(fader.univers).or_insert([0u8; 512]);
@@ -499,6 +537,72 @@ pub async fn service(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Un fader au canal hors bornes (0 ou > 512) venu d'un fichier
+    /// corrompu ne fait PAS paniquer l'émission — il est ignoré.
+    #[test]
+    fn trames_de_sortie_ignore_les_canaux_hors_bornes() {
+        let mut etat = EtatLumieres::default();
+        etat.faders.push(Fader {
+            id: "f1".into(),
+            nom: "piégé".into(),
+            univers: 0,
+            canal: 0, // ferait canal-1 = 65535 sur un [u8;512]
+            valeur: 200,
+            couleur: String::new(),
+        });
+        etat.faders.push(Fader {
+            id: "f2".into(),
+            nom: "trop haut".into(),
+            univers: 0,
+            canal: 600,
+            valeur: 200,
+            couleur: String::new(),
+        });
+        etat.faders.push(Fader {
+            id: "f3".into(),
+            nom: "ok".into(),
+            univers: 0,
+            canal: 5,
+            valeur: 200,
+            couleur: String::new(),
+        });
+        // Ne panique pas, et seul le fader valide écrit sa valeur.
+        let univers = trames_de_sortie(&etat, 0);
+        assert_eq!(univers[&0][4], 200, "le fader canal 5 émet");
+    }
+
+    /// Un lumieres.json corrompu est mis de côté en .corrompu au lieu
+    /// d'être écrasé ; les canaux hors bornes sont bornés au chargement.
+    #[test]
+    fn load_met_de_cote_un_fichier_corrompu() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let chemin = dir.path().join("lumieres.json");
+
+        assert!(EtatLumieres::load(&chemin).is_none(), "absent = None");
+
+        std::fs::write(&chemin, b"{ pas du json").expect("write");
+        assert!(EtatLumieres::load(&chemin).is_none());
+        assert!(
+            chemin.with_extension("json.corrompu").exists(),
+            "le fichier corrompu est préservé pour récupération"
+        );
+
+        // Un fader canal 0 relu est borné à 1 (pas de panique ensuite).
+        let mut etat = EtatLumieres::default();
+        etat.faders.push(Fader {
+            id: "f1".into(),
+            nom: "x".into(),
+            univers: 60_000,
+            canal: 0,
+            valeur: 10,
+            couleur: String::new(),
+        });
+        etat.save(&chemin).expect("save");
+        let relu = EtatLumieres::load(&chemin).expect("load");
+        assert_eq!(relu.faders[0].canal, 1);
+        assert_eq!(relu.faders[0].univers, 32_767);
+    }
 
     #[test]
     fn la_trame_artdmx_est_conforme() {

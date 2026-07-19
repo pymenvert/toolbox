@@ -1470,6 +1470,9 @@ async fn cues_commande(
         .sequenceur
         .as_ref()
         .ok_or_else(|| CoreError::InvalidCommand("séquenceur non monté".into()))?;
+    // Valider AVANT d'envoyer : une cue au délai/à l'heure impossible ou
+    // auto-référente est refusée (400) au lieu d'empoisonner le service.
+    toolbox_core::sequenceur::valider_commande(&commande).map_err(CoreError::InvalidCommand)?;
     handle
         .commandes
         .send(commande)

@@ -172,6 +172,16 @@ pub async fn suiveur(
         }
     };
     info!(%maitre, "synchro suiveur active");
+    // IP(s) attendues du maître : on n'accepte l'horloge QUE de lui — sinon
+    // n'importe quel hôte du LAN pourrait piloter la lecture du suiveur.
+    // Résolution vide (nom introuvable) = filtrage désactivé, tracé.
+    let ips_maitre: std::collections::HashSet<std::net::IpAddr> = tokio::net::lookup_host(&maitre)
+        .await
+        .map(|addrs| addrs.map(|a| a.ip()).collect())
+        .unwrap_or_default();
+    if ips_maitre.is_empty() {
+        warn!(%maitre, "adresse du maître non résolue — filtrage de source désactivé");
+    }
     let tolerance_s = settings.tolerance_ms.max(20) as f64 / 1000.0;
     let bonjour = serde_json::to_vec(&Bonjour {
         node: "suiveur".into(),
@@ -179,6 +189,9 @@ pub async fn suiveur(
     .unwrap_or_default();
     let mut annonce = tokio::time::interval(Duration::from_secs(2));
     annonce.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    // Chien de garde : sans horloge depuis 5 s, le maître est réputé perdu.
+    let mut chien = tokio::time::interval(Duration::from_secs(1));
+    chien.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut buf = [0u8; 1024];
     // Fenêtre de dérives récentes (médiane = robuste aux paquets retardés).
     let mut derives: std::collections::VecDeque<f64> = std::collections::VecDeque::new();
@@ -186,6 +199,11 @@ pub async fn suiveur(
     let mut grace_jusqua = tokio::time::Instant::now();
     // Dernière vitesse envoyée (évite de spammer le bus avec la même).
     let mut derniere_vitesse: f32 = 1.0;
+    // Dernière horloge reçue (pour détecter un maître silencieux) + garde
+    // anti-spam sur l'avertissement de source usurpée.
+    let mut derniere_horloge = tokio::time::Instant::now();
+    let mut maitre_perdu = false;
+    let mut dernier_warn_source = tokio::time::Instant::now() - Duration::from_secs(60);
 
     loop {
         tokio::select! {
@@ -195,9 +213,39 @@ pub async fn suiveur(
                     warn!(%err, "annonce au maître non envoyée");
                 }
             }
+            _ = chien.tick() => {
+                // Maître silencieux depuis 5 s : on cesse toute correction
+                // (retour vitesse normale) et on signale la dérive comme
+                // inconnue, au lieu de rester bloqué à ±3 % avec une dérive
+                // « verte » périmée à la page Santé.
+                if derniere_horloge.elapsed() > Duration::from_secs(5) && !maitre_perdu {
+                    maitre_perdu = true;
+                    if (derniere_vitesse - 1.0).abs() > f32::EPSILON {
+                        bus.send(Source::Internal, Command::SetRate { rate: 1.0 }).await;
+                        derniere_vitesse = 1.0;
+                    }
+                    derives.clear();
+                    let _ = derive_tx.send(None);
+                    warn!(%maitre, "maître silencieux depuis 5 s — synchro suspendue, lecture à vitesse normale");
+                }
+            }
             received = socket.recv_from(&mut buf) => {
-                let Ok((len, _)) = received else { continue };
+                let Ok((len, from)) = received else { continue };
+                // Filtrage de source : on ignore tout datagramme qui ne
+                // vient pas du maître configuré.
+                if !ips_maitre.is_empty() && !ips_maitre.contains(&from.ip()) {
+                    if dernier_warn_source.elapsed() > Duration::from_secs(10) {
+                        warn!(%from, %maitre, "horloge de synchro ignorée (source ≠ maître)");
+                        dernier_warn_source = tokio::time::Instant::now();
+                    }
+                    continue;
+                }
                 let Ok(horloge) = serde_json::from_slice::<Horloge>(&buf[..len]) else { continue };
+                if maitre_perdu {
+                    info!(%maitre, "maître de retour — synchro reprise");
+                }
+                derniere_horloge = tokio::time::Instant::now();
+                maitre_perdu = false;
                 appliquer_horloge(
                     &bus,
                     &position,

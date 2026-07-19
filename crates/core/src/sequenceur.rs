@@ -40,6 +40,53 @@ pub fn jour_vise(jours: &[u8], jour_semaine: u8) -> bool {
     jours.is_empty() || jours.contains(&jour_semaine)
 }
 
+/// Délai maximal d'un enchaînement « après » (24 h) : au-delà, la valeur
+/// ferait paniquer `Duration::from_secs_f64` — et personne ne programme un
+/// enchaînement de plus d'une journée.
+const APRES_MAX_SECONDES: f64 = 86_400.0;
+
+/// Valide une commande d'édition AVANT de l'accepter (retour d'erreur HTTP).
+/// Rejette : un délai « après » non fini ou hors 0..=24 h (anti-panique),
+/// une heure/minute/jour impossibles (la cue ne partirait jamais), et une
+/// action `cue_go` qui pointe la cue elle-même (boucle infinie évidente).
+pub fn valider_commande(commande: &CommandeSequenceur) -> Result<(), String> {
+    if let CommandeSequenceur::CueEnregistre {
+        nom,
+        declencheur,
+        actions,
+    } = commande
+    {
+        match declencheur {
+            Declencheur::Apres { secondes } => {
+                if !secondes.is_finite() || *secondes < 0.0 || *secondes > APRES_MAX_SECONDES {
+                    return Err(format!(
+                        "délai « après » invalide : {secondes} s (attendu 0..={APRES_MAX_SECONDES})"
+                    ));
+                }
+            }
+            Declencheur::Heure { hh, mm, jours } => {
+                if *hh > 23 || *mm > 59 {
+                    return Err(format!("heure impossible : {hh:02}:{mm:02}"));
+                }
+                if jours.iter().any(|j| *j > 6) {
+                    return Err("jour de semaine invalide (0 = lundi … 6 = dimanche)".into());
+                }
+            }
+            Declencheur::Manuel => {}
+        }
+        for action in actions {
+            if let Command::CueGo { name } = action {
+                if name == nom {
+                    return Err(format!(
+                        "la cue « {nom} » se déclenche elle-même (cue_go récursif)"
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Cue {
     pub nom: String,
@@ -115,6 +162,7 @@ pub struct SequenceurHandle {
 
 /// Applique une commande d'édition. `true` = configuration changée
 /// (persistance). Pure, testée. (Go/Stop sont gérés par le service.)
+/// L'appelant a déjà passé [`valider_commande`] : les valeurs sont saines.
 pub fn appliquer(etat: &mut EtatSequenceur, commande: &CommandeSequenceur) -> bool {
     match commande {
         CommandeSequenceur::CueEnregistre {
@@ -240,8 +288,10 @@ pub async fn service(
 ) {
     let mut etat = EtatSequenceur::load(&chemin).unwrap_or_default();
     etat_tx.send_replace(etat.clone());
-    // Enchaînement en attente : (index de cue à jouer, échéance).
-    let mut chaine: Option<(usize, tokio::time::Instant)> = None;
+    // Enchaînement en attente : (NOM de la cue à jouer, échéance). Le nom
+    // (pas l'index) survit à une édition/suppression/déplacement pendant
+    // l'attente — sinon on jouerait la cue qui a glissé à cette position.
+    let mut chaine: Option<(String, tokio::time::Instant)> = None;
     // Garde horaire : (nom, jour local) déjà déclenchés.
     let mut lancees_du_jour: std::collections::HashSet<(String, i64)> =
         std::collections::HashSet::new();
@@ -249,21 +299,36 @@ pub async fn service(
     horaire.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     // Les cues sont aussi déclenchables par le bus (OSC /cue/go, MIDI).
     let mut evenements = bus.subscribe();
+    // Garde anti-réentrance : instant de la dernière lecture par cue. Une
+    // cue re-déclenchée par le BUS (CueDemandee) moins de 250 ms après son
+    // dernier départ est ignorée — casse toute boucle cue_go → CueDemandee
+    // → cue_go… tout en laissant le GO manuel de l'opérateur passer.
+    let mut derniere_lecture: std::collections::HashMap<String, tokio::time::Instant> =
+        std::collections::HashMap::new();
+    const ANTI_REENTREE: std::time::Duration = std::time::Duration::from_millis(250);
     info!("séquenceur prêt");
     loop {
         // Échéance de l'enchaînement (ou très loin s'il n'y en a pas).
-        let echeance = chaine
-            .map(|(_, quand)| quand)
-            .unwrap_or_else(|| tokio::time::Instant::now() + std::time::Duration::from_secs(3600));
+        let echeance = chaine.as_ref().map_or_else(
+            || tokio::time::Instant::now() + std::time::Duration::from_secs(3600),
+            |(_, quand)| *quand,
+        );
         tokio::select! {
             _ = shutdown.changed() => break,
             () = tokio::time::sleep_until(echeance), if chaine.is_some() => {
-                if let Some((index, _)) = chaine.take() {
-                    if let Some(cue) = etat.cues.get(index).cloned() {
+                if let Some((nom, _)) = chaine.take() {
+                    // La cue attendue est retrouvée PAR SON NOM (elle a pu
+                    // bouger dans la liste) ; disparue = enchaînement caduc.
+                    if let Some(index) = etat.cues.iter().position(|c| c.nom == nom) {
+                        let cue = etat.cues[index].clone();
                         jouer(&bus, &cue).await;
+                        derniere_lecture.insert(cue.nom.clone(), tokio::time::Instant::now());
                         etat.derniere = Some(cue.nom.clone());
                         chaine = prochaine_chaine(&etat, index);
                         publier(&etat_tx, &etat, chaine.as_ref());
+                    } else {
+                        warn!(%nom, "enchaînement caduc : la cue a été supprimée");
+                        publier(&etat_tx, &etat, None);
                     }
                 }
             }
@@ -290,6 +355,7 @@ pub async fn service(
                     let cue = etat.cues[index].clone();
                     lancees_du_jour.insert((cue.nom.clone(), jour));
                     jouer(&bus, &cue).await;
+                    derniere_lecture.insert(cue.nom.clone(), tokio::time::Instant::now());
                     etat.derniere = Some(cue.nom.clone());
                     chaine = prochaine_chaine(&etat, index);
                 }
@@ -298,10 +364,19 @@ pub async fn service(
             recu = evenements.recv() => {
                 match recu {
                     Ok(crate::Event::CueDemandee { name }) => {
-                        if let Some(index) = etat.cues.iter().position(|c| c.nom == name) {
+                        // Garde anti-boucle : une cue re-déclenchée par le
+                        // bus juste après son départ (cue_go récursif direct
+                        // ou cycle a→b→a) est ignorée.
+                        let trop_tot = derniere_lecture
+                            .get(&name)
+                            .is_some_and(|t| t.elapsed() < ANTI_REENTREE);
+                        if trop_tot {
+                            warn!(%name, "cue ignorée (re-déclenchement trop rapproché — boucle ?)");
+                        } else if let Some(index) = etat.cues.iter().position(|c| c.nom == name) {
                             // Le déclenchement externe remplace l'enchaînement.
                             let cue = etat.cues[index].clone();
                             jouer(&bus, &cue).await;
+                            derniere_lecture.insert(cue.nom.clone(), tokio::time::Instant::now());
                             etat.derniere = Some(cue.nom.clone());
                             chaine = prochaine_chaine(&etat, index);
                             publier(&etat_tx, &etat, chaine.as_ref());
@@ -310,7 +385,9 @@ pub async fn service(
                         }
                     }
                     Ok(_) => {}
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(perdus)) => {
+                        warn!(perdus, "séquenceur en retard : événements perdus (GO possibles)");
+                    }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
             }
@@ -320,9 +397,11 @@ pub async fn service(
                     CommandeSequenceur::Go { nom } => {
                         if let Some(index) = etat.cues.iter().position(|c| &c.nom == nom) {
                             // Un GO manuel reprend la main : l'enchaînement
-                            // en attente est remplacé par le nouveau.
+                            // en attente est remplacé par le nouveau. Jamais
+                            // débouncé — l'action explicite de l'opérateur.
                             let cue = etat.cues[index].clone();
                             jouer(&bus, &cue).await;
+                            derniere_lecture.insert(cue.nom.clone(), tokio::time::Instant::now());
                             etat.derniere = Some(cue.nom.clone());
                             chaine = prochaine_chaine(&etat, index);
                         } else {
@@ -335,7 +414,12 @@ pub async fn service(
                         }
                     }
                     autre => {
-                        if appliquer(&mut etat, autre) {
+                        // Défense en profondeur : l'API a déjà validé, mais
+                        // une commande arrivant par un autre chemin est
+                        // re-vérifiée avant d'être appliquée.
+                        if let Err(err) = valider_commande(autre) {
+                            warn!(%err, "commande de séquenceur refusée");
+                        } else if appliquer(&mut etat, autre) {
                             if let Err(err) = etat.save(&chemin) {
                                 warn!(%err, "séquences non persistées");
                             }
@@ -349,12 +433,19 @@ pub async fn service(
     info!("séquenceur arrêté");
 }
 
-/// Si la cue APRÈS `index` s'enchaîne (`Apres`), calcule son échéance.
-fn prochaine_chaine(etat: &EtatSequenceur, index: usize) -> Option<(usize, tokio::time::Instant)> {
+/// Si la cue APRÈS `index` s'enchaîne (`Apres`), retourne son NOM et son
+/// échéance. Le délai est borné (fini, 0..=24 h) même si `sequences.json`
+/// a été corrompu — `from_secs_f64` ne doit jamais paniquer ici.
+fn prochaine_chaine(etat: &EtatSequenceur, index: usize) -> Option<(String, tokio::time::Instant)> {
     let suivante = etat.cues.get(index + 1)?;
     if let Declencheur::Apres { secondes } = suivante.declencheur {
-        let delai = std::time::Duration::from_secs_f64(secondes.max(0.0));
-        Some((index + 1, tokio::time::Instant::now() + delai))
+        let secondes = if secondes.is_finite() {
+            secondes.clamp(0.0, APRES_MAX_SECONDES)
+        } else {
+            0.0
+        };
+        let delai = std::time::Duration::from_secs_f64(secondes);
+        Some((suivante.nom.clone(), tokio::time::Instant::now() + delai))
     } else {
         None
     }
@@ -363,17 +454,15 @@ fn prochaine_chaine(etat: &EtatSequenceur, index: usize) -> Option<(usize, tokio
 fn publier(
     etat_tx: &watch::Sender<EtatSequenceur>,
     etat: &EtatSequenceur,
-    chaine: Option<&(usize, tokio::time::Instant)>,
+    chaine: Option<&(String, tokio::time::Instant)>,
 ) {
     let mut publie = etat.clone();
-    publie.en_attente = chaine.and_then(|(index, quand)| {
-        etat.cues.get(*index).map(|cue| {
-            #[allow(clippy::cast_possible_truncation)]
-            let dans_ms = quand
-                .saturating_duration_since(tokio::time::Instant::now())
-                .as_millis() as u64;
-            (cue.nom.clone(), dans_ms)
-        })
+    publie.en_attente = chaine.map(|(nom, quand)| {
+        #[allow(clippy::cast_possible_truncation)]
+        let dans_ms = quand
+            .saturating_duration_since(tokio::time::Instant::now())
+            .as_millis() as u64;
+        (nom.clone(), dans_ms)
     });
     etat_tx.send_replace(publie);
 }
@@ -393,6 +482,150 @@ mod tests {
         assert!(!jour_vise(&[4, 5], 0));
         // OSC/MIDI : une cue est déclenchable par le bus (commande cue_go),
         // vérifié par le test de bout en bout ci-dessous via CueDemandee.
+    }
+
+    #[test]
+    fn valider_commande_rejette_les_pieges() {
+        let cue = |decl: Declencheur, actions: Vec<Command>| CommandeSequenceur::CueEnregistre {
+            nom: "x".into(),
+            declencheur: decl,
+            actions,
+        };
+        // Délai « après » qui ferait paniquer Duration::from_secs_f64.
+        assert!(valider_commande(&cue(Declencheur::Apres { secondes: 1e300 }, vec![])).is_err());
+        assert!(valider_commande(&cue(Declencheur::Apres { secondes: f64::NAN }, vec![])).is_err());
+        assert!(valider_commande(&cue(Declencheur::Apres { secondes: -1.0 }, vec![])).is_err());
+        assert!(valider_commande(&cue(Declencheur::Apres { secondes: 300.0 }, vec![])).is_ok());
+        // Heure/jour impossibles.
+        assert!(valider_commande(&cue(
+            Declencheur::Heure {
+                hh: 24,
+                mm: 0,
+                jours: vec![]
+            },
+            vec![]
+        ))
+        .is_err());
+        assert!(valider_commande(&cue(
+            Declencheur::Heure {
+                hh: 20,
+                mm: 0,
+                jours: vec![7]
+            },
+            vec![]
+        ))
+        .is_err());
+        // Cue qui se déclenche elle-même.
+        assert!(valider_commande(&cue(
+            Declencheur::Manuel,
+            vec![Command::CueGo { name: "x".into() }]
+        ))
+        .is_err());
+        // Une cue_go vers une AUTRE cue reste permise.
+        assert!(valider_commande(&cue(
+            Declencheur::Manuel,
+            vec![Command::CueGo { name: "y".into() }]
+        ))
+        .is_ok());
+    }
+
+    /// Supprimer la cue A pendant que B(après) attend ne doit PAS faire
+    /// jouer C à la place : l'enchaînement suit le NOM, pas l'index.
+    #[tokio::test]
+    async fn l_enchainement_suit_le_nom_pas_l_index() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let bus = Bus::new(64, 256);
+        let handle = bus.handle();
+        tokio::spawn(bus.run());
+        let (cmd_tx, cmd_rx) = mpsc::channel(16);
+        let (etat_tx, etat_rx) = watch::channel(EtatSequenceur::default());
+        let (_stop_tx, stop_rx) = watch::channel(false);
+        tokio::spawn(service(
+            dir.path().join("sequences.json"),
+            handle.clone(),
+            cmd_rx,
+            etat_tx,
+            stop_rx,
+        ));
+        let enreg = |nom: &str, decl: Declencheur, vol: f32| CommandeSequenceur::CueEnregistre {
+            nom: nom.into(),
+            declencheur: decl,
+            actions: vec![Command::SetVolume { volume: vol }],
+        };
+        for c in [
+            enreg("A", Declencheur::Manuel, 0.1),
+            enreg("B", Declencheur::Apres { secondes: 0.3 }, 0.5),
+            enreg("C", Declencheur::Manuel, 0.9),
+        ] {
+            cmd_tx.send(c).await.expect("enreg");
+        }
+        cmd_tx
+            .send(CommandeSequenceur::Go { nom: "A".into() })
+            .await
+            .expect("go");
+        tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+        // Pendant l'attente de B, on supprime A : les index glissent.
+        cmd_tx
+            .send(CommandeSequenceur::CueSupprime { nom: "A".into() })
+            .await
+            .expect("suppr");
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        // B (0.5) doit avoir joué, PAS C (0.9).
+        assert!(
+            (handle.snapshot().player.volume - 0.5).abs() < 1e-6,
+            "c'est B qui doit s'enchaîner, pas la cue à l'ancien index"
+        );
+        assert_eq!(etat_rx.borrow().derniere.as_deref(), Some("B"));
+    }
+
+    /// Une cue dont l'action est cue_go vers elle-même via le bus ne boucle
+    /// pas : la garde anti-réentrance coupe après le premier rebond.
+    #[tokio::test]
+    async fn la_cue_recursive_ne_boucle_pas() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let bus = Bus::new(64, 256);
+        let handle = bus.handle();
+        tokio::spawn(bus.run());
+        let (cmd_tx, cmd_rx) = mpsc::channel(16);
+        let (etat_tx, _etat_rx) = watch::channel(EtatSequenceur::default());
+        let (_stop_tx, stop_rx) = watch::channel(false);
+        tokio::spawn(service(
+            dir.path().join("sequences.json"),
+            handle.clone(),
+            cmd_rx,
+            etat_tx,
+            stop_rx,
+        ));
+        // valider_commande refuse le cue_go DIRECT auto-référent ; pour
+        // tester la garde d'exécution, on passe par un cycle a→b→a que la
+        // validation d'enregistrement ne détecte pas.
+        cmd_tx
+            .send(CommandeSequenceur::CueEnregistre {
+                nom: "a".into(),
+                declencheur: Declencheur::Manuel,
+                actions: vec![Command::CueGo { name: "b".into() }],
+            })
+            .await
+            .expect("a");
+        cmd_tx
+            .send(CommandeSequenceur::CueEnregistre {
+                nom: "b".into(),
+                declencheur: Declencheur::Manuel,
+                actions: vec![Command::CueGo { name: "a".into() }],
+            })
+            .await
+            .expect("b");
+        cmd_tx
+            .send(CommandeSequenceur::Go { nom: "a".into() })
+            .await
+            .expect("go");
+        // Si ça bouclait, le bus serait saturé ; on laisse tourner et on
+        // vérifie que le service répond encore à une commande après coup.
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        cmd_tx
+            .send(CommandeSequenceur::CueSupprime { nom: "a".into() })
+            .await
+            .expect("le service répond toujours (pas de boucle qui monopolise)");
     }
 
     #[test]
