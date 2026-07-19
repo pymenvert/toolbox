@@ -95,6 +95,9 @@
   button.primary { background: var(--accent); border-color: var(--accent); font-weight: 600; }
   button.danger { color: #ffb0b0; }
   button.danger:hover { border-color: var(--critical); }
+  /* Bouton « armé » : premier clic fait, il attend la confirmation. */
+  button.armed { background: var(--critical); border-color: var(--critical); color: #fff; font-weight: 700; }
+  button:disabled { opacity: .45; cursor: wait; }
   /* Boutons de régie (blackout / freeze) : gros, francs, état visible. */
   button.regie {
     flex: 1; min-height: 44px; font-weight: 700; letter-spacing: 1px;
@@ -317,7 +320,7 @@
   <a data-page="features" title="Activer/d&eacute;sactiver chaque fonction &mdash; d&eacute;sactiv&eacute;e = vraiment arr&ecirc;t&eacute;e, z&eacute;ro ressource"><span class="ic">&#9211;</span><span>Fonctions</span></a>
   <a data-page="system" title="Sant&eacute;, r&eacute;seau, r&eacute;glages de performance, mise &agrave; jour, red&eacute;marrage"><span class="ic">&#9881;</span><span>Syst&egrave;me</span></a>
   <div class="spacer"></div>
-  <div class="nodecard" id="nodecard">Toolbox</div>
+  <div class="nodecard" id="nodecard">Lanterne</div>
 </nav>
 
 <main>
@@ -328,8 +331,32 @@
     <span class="pill" id="connPill"><span class="dot" id="connDot" style="background:var(--critical)"></span><span class="txt" id="connTxt">Connexion&hellip;</span></span>
   </header>
 
+  <!-- Bandeau de perte de liaison : impossible à rater pendant un show. -->
+  <div id="offlineBanner" style="display:none;margin:0 0 14px;padding:10px 16px;border-radius:10px;
+       background:color-mix(in srgb, var(--critical) 14%, transparent);border:1px solid var(--critical);
+       color:var(--ink);font-weight:600;font-size:13px">
+    &#9888;&#65039; Liaison avec le node perdue &mdash; reconnexion automatique en cours&hellip;
+    Les commandes ne partent plus tant que ce bandeau est affich&eacute;.
+  </div>
+
   <!-- ================= DASHBOARD ================= -->
   <section class="page visible" id="page-dashboard">
+    <!-- Accueil premier lancement : 3 étapes, refermable, mémorisé. -->
+    <div class="card" id="accueilCard" style="display:none;margin-bottom:14px;border-color:var(--accent)">
+      <div style="display:flex;align-items:flex-start;gap:12px">
+        <div style="flex:1">
+          <h3 style="margin-top:0">Bienvenue dans Lanterne &#127982;</h3>
+          <div style="font-size:13px;line-height:1.7;color:var(--muted)">
+            Trois &eacute;tapes pour projeter votre premi&egrave;re image :<br>
+            <b style="color:var(--ink)">1.</b> Onglet <b>M&eacute;dias</b> &mdash; d&eacute;posez une vid&eacute;o ou une image (glisser-d&eacute;poser).<br>
+            <b style="color:var(--ink)">2.</b> Ici, sur le <b>Dashboard</b> &mdash; cliquez sur votre m&eacute;dia puis sur &#9654; pour lancer la lecture.<br>
+            <b style="color:var(--ink)">3.</b> Onglet <b>Mapping</b> &mdash; attrapez les 4 coins pour caler l'image sur votre surface.<br>
+            <span style="font-size:12px">Astuce : survolez n'importe quel &eacute;l&eacute;ment de l'interface, une infobulle explique &agrave; quoi il sert.</span>
+          </div>
+        </div>
+        <button id="accueilFerme" class="mini" title="Ne plus afficher ce guide">Compris, masquer</button>
+      </div>
+    </div>
     <div class="grid cols2">
       <div class="card">
         <h3>Lecture</h3>
@@ -783,7 +810,7 @@
   <section class="page" id="page-system">
     <div class="grid tiles" id="sysGrid"></div>
     <div class="card" style="margin-top:14px;max-width:720px">
-      <h3>R&eacute;seau &mdash; nodes Toolbox d&eacute;couverts</h3>
+      <h3>R&eacute;seau &mdash; nodes Lanterne d&eacute;couverts</h3>
       <ul class="plist" id="fleetList"><li class="empty" style="border:none">Recherche en cours&hellip;</li></ul>
       <div class="hint">Chaque node du r&eacute;seau s'annonce automatiquement (mDNS).
       &laquo; Identifier &raquo; affiche la mire coins 4 secondes sur SA sortie &mdash;
@@ -954,7 +981,7 @@ function renderFps(fps) {
   b.style.display = "";
   b.textContent = Math.round(fps) + " img/s";
 }
-let ws = null, wsOpen = false, wsDelay = 500, wsTimer = null;
+let ws = null, wsOpen = false, wsDelay = 500, wsTimer = null, wsWasOpen = false;
 
 function sendCmd(cmd) {
   if (wsOpen && ws && ws.readyState === 1) {
@@ -967,10 +994,16 @@ function sendCmd(cmd) {
 }
 
 function setConn(st) {
-  const dot = $("#connDot"), txt = $("#connTxt");
+  const dot = $("#connDot"), txt = $("#connTxt"), banner = $("#offlineBanner");
   if (st === true) { dot.style.background = "var(--good)"; txt.textContent = "Connecté"; }
   else if (st === "connecting") { dot.style.background = "var(--warning)"; txt.textContent = "Connexion…"; }
   else { dot.style.background = "var(--critical)"; txt.textContent = "Déconnecté"; }
+  // Le bandeau n'apparaît qu'après une VRAIE coupure (pas au premier
+  // chargement ni pendant les reconnexions silencieuses réussies).
+  if (banner) {
+    if (st === false && wsWasOpen) banner.style.display = "";
+    else if (st === true) { banner.style.display = "none"; wsWasOpen = true; }
+  }
 }
 
 function connectWS() {
@@ -1103,6 +1136,11 @@ $("#btnPrev").addEventListener("click", () => sendCmd({ cmd: "playlist_prev" }))
 $("#btnNext").addEventListener("click", () => sendCmd({ cmd: "playlist_next" }));
 $$(".loopbtn").forEach(b => b.addEventListener("click", () => sendCmd({ cmd: "set_loop", mode: b.dataset.mode })));
 bindSlider($("#vol"), v => sendCmd({ cmd: "set_volume", volume: clamp(v, 0, 1) }));
+/* L'infobulle promet « double-clic : 100 % » — on tient la promesse. */
+$("#vol").addEventListener("dblclick", () => {
+  $("#vol").value = 1; sliderOut($("#vol"));
+  sendCmd({ cmd: "set_volume", volume: 1 });
+});
 /* Boutons de régie : bascule immédiate, l'état revient par le WebSocket. */
 $("#btnBlackout").addEventListener("click", () =>
   sendCmd({ cmd: "blackout_set", actif: !(state && state.blackout && state.blackout.actif) }));
@@ -1264,7 +1302,7 @@ function patDefault() {
   c.beginPath(); c.moveTo(PW/2,0); c.lineTo(PW/2,PH); c.moveTo(0,PH/2); c.lineTo(PW,PH/2); c.stroke();
   c.beginPath(); c.arc(PW/2, PH/2, 80, 0, Math.PI*2); c.stroke();
   c.fillStyle = "#fff"; c.font = "700 26px system-ui"; c.textAlign = "center";
-  c.fillText("TOOLBOX · SORTIE", PW/2, PH/2 - 100);
+  c.fillText("LANTERNE · SORTIE", PW/2, PH/2 - 100);
   return cv;
 }
 function patGrid() {
@@ -1465,6 +1503,9 @@ function renderBlending() {
 function renderMasques() {
   const ul = $("#masqueList");
   if (!ul || !state) return;
+  // Saisie en cours dans un des champs : on ne reconstruit pas la liste
+  // (le focus et la frappe seraient perdus à chaque événement WebSocket).
+  if (ul.contains(document.activeElement)) return;
   const masques = state.masques || [];
   ul.innerHTML = "";
   if (!masques.length) ul.innerHTML = '<li class="empty" style="border:none">Aucun masque.</li>';
@@ -1744,7 +1785,7 @@ $("#lutFile").addEventListener("change", async () => {
       await loadLuts();
       sendCmd({ cmd: "lut_set", name: f.name });
     }
-  } catch (e) { toast("Dépôt impossible", "err"); }
+  } catch (e) { /* api() a déjà montré l'erreur précise */ }
   $("#lutFile").value = "";
 });
 
@@ -2054,7 +2095,9 @@ async function loadStartup() {
   try {
     const s = await api("/api/startup");
     $("#startAutoplay").checked = !!s.autoplay;
-    if (s.source) $("#startSource").value = s.source;
+    // Reflète TOUJOURS le serveur (champ vidé après « Oublier ») — sauf
+    // pendant une saisie en cours.
+    if (document.activeElement !== $("#startSource")) $("#startSource").value = s.source || "";
     $("#startEtat").textContent = s.preset ? "Un état de démarrage est enregistré." : "Aucun état enregistré (node.toml s'applique).";
   } catch (e) {}
 }
@@ -2065,7 +2108,7 @@ $("#startSave").addEventListener("click", async () => {
       body: JSON.stringify({ autoplay: $("#startAutoplay").checked, source: source || null }) });
     toast("État de démarrage enregistré");
     loadStartup();
-  } catch (e) { toast("Source invalide ou erreur d'écriture", "err"); }
+  } catch (e) { /* api() a déjà montré l'erreur précise */ }
 });
 $("#startClear").addEventListener("click", async () => {
   try { await api("/api/startup", { method: "DELETE" }); toast("État de démarrage oublié"); loadStartup(); } catch (e) {}
@@ -2075,10 +2118,13 @@ loadStartup();
 /* ===================== Séquences (cues) ===================== */
 let cuesEtat = null, cueActionsBuilder = [];
 async function cueCmd(c) {
+  // api() affiche déjà le message d'erreur précis du serveur (« délai
+  // invalide », « heure impossible »…) — pas de second toast générique.
   try {
     await api("/api/cues", { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(c) });
-  } catch (e) { toast("Séquenceur indisponible", "err"); }
+    return true;
+  } catch (e) { return false; }
 }
 async function loadCues() {
   try { cuesEtat = await api("/api/cues"); } catch (e) { return; }
@@ -2222,19 +2268,27 @@ $("#cueSave").addEventListener("click", async () => {
   if (!cueActionsBuilder.length) { toast("Ajoute au moins une action", "err"); return; }
   let declencheur = { type: "manuel" };
   if ($("#cueDecl").value === "heure") {
+    // Champ vide = refus explicite (sinon la cue partirait à 00:00 en
+    // silence — mauvaise surprise à minuit).
+    if (!$("#cueHeure").value) { toast("Choisis l'heure de déclenchement", "err"); return; }
     const [hh, mm] = $("#cueHeure").value.split(":").map(Number);
     const jours = [...$$("#cueJours input[data-jour]")].filter(c => c.checked).map(c => +c.dataset.jour);
     declencheur = { type: "heure", hh: hh || 0, mm: mm || 0, jours: jours };
   } else if ($("#cueDecl").value === "apres") {
     declencheur = { type: "apres", secondes: Math.max(0, +$("#cueApres").value || 0) };
   }
-  await cueCmd({ cmd: "cue_enregistre", nom: nom, declencheur: declencheur, actions: cueActionsBuilder });
-  cueActionsBuilder = []; renderCueActionsBuilder(); $("#cueNom").value = "";
+  // La cue n'est vidée du bâtisseur QUE si le serveur l'a acceptée —
+  // sinon l'utilisateur corrigerait pour retrouver un formulaire vide.
+  const ok = await cueCmd({ cmd: "cue_enregistre", nom: nom, declencheur: declencheur, actions: cueActionsBuilder });
+  if (ok) {
+    cueActionsBuilder = []; renderCueActionsBuilder(); $("#cueNom").value = "";
+    toast("Cue « " + nom + " » enregistrée");
+  }
   loadCues();
 });
 $("#cueStop").addEventListener("click", async () => { await cueCmd({ cmd: "stop" }); loadCues(); });
 majChampsAction();
-setInterval(() => { if ($("#page-cues").classList.contains("visible")) loadCues(); }, 2000);
+setInterval(() => { if (!document.hidden && $("#page-cues").classList.contains("visible")) loadCues(); }, 2000);
 
 /* ===================== Lumières (Art-Net) ===================== */
 let dmx = null, dmxDragging = false;
@@ -2242,7 +2296,7 @@ async function dmxCmd(c) {
   try {
     await api("/api/dmx", { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(c) });
-  } catch (e) { toast("Console lumières indisponible", "err"); }
+  } catch (e) { /* api() a déjà montré l'erreur précise */ }
 }
 async function loadDmx() {
   if (dmxDragging) return;
@@ -2367,6 +2421,10 @@ $("#dmxChaserSave").addEventListener("click", async () => {
 });
 {
   let dernierMaster = 0;
+  // Sans ce garde, le rafraîchissement périodique réécrit la valeur du
+  // master PENDANT le glissement : le curseur saute sous la souris.
+  $("#dmxMaster").addEventListener("pointerdown", () => { dmxDragging = true; });
+  $("#dmxMaster").addEventListener("pointerup", () => { dmxDragging = false; });
   $("#dmxMaster").addEventListener("input", () => {
     $("#dmxMasterVal").textContent = $("#dmxMaster").value;
     const t = Date.now();
@@ -2375,7 +2433,7 @@ $("#dmxChaserSave").addEventListener("click", async () => {
   $("#dmxMaster").addEventListener("change", () => dmxCmd({ cmd: "master", valeur: +$("#dmxMaster").value }));
 }
 $("#dmxCible").addEventListener("change", () => dmxCmd({ cmd: "cible", adresse: $("#dmxCible").value.trim() }));
-setInterval(() => { if ($("#page-lights").classList.contains("visible")) loadDmx(); }, 2500);
+setInterval(() => { if (!document.hidden && $("#page-lights").classList.contains("visible")) loadDmx(); }, 2500);
 
 /* ===================== Fonctions (interrupteurs) ===================== */
 const featureDefs = [
@@ -2500,17 +2558,47 @@ function tile(k, v, unit, sub, warn) {
 /* Aperçu de la sortie : rafraîchi seulement quand le Dashboard est visible. */
 setInterval(() => {
   const img = $("#apercu");
-  if (!img || !$("#page-dashboard").classList.contains("visible")) return;
+  if (document.hidden || !img || !$("#page-dashboard").classList.contains("visible")) return;
   img.src = "/api/preview.png?w=480&t=" + Date.now();
 }, 1500);
 
-/* Alimentation machine : double confirmation native. */
-function powerAction(url, label) {
-  if (!confirm(label + " — la machine, pas seulement le logiciel. Continuer ?")) return;
-  api(url, { method: "POST" }).then(() => toast(label + " dans 5 secondes")).catch(() => {});
+/* Confirmation en deux temps : le premier clic ARME le bouton 4 s
+   (« Confirmer ? » en rouge), le second exécute. Pas de dialog bloquant :
+   sur un kiosque ou une tablette de régie, confirm() gèle tout. */
+function confirmerPuis(btn, action) {
+  if (btn.dataset.arme === "1") {
+    delete btn.dataset.arme;
+    btn.textContent = btn.dataset.libelle;
+    btn.classList.remove("armed");
+    action();
+    return;
+  }
+  btn.dataset.libelle = btn.textContent;
+  btn.dataset.arme = "1";
+  btn.textContent = "Confirmer ?";
+  btn.classList.add("armed");
+  setTimeout(() => {
+    if (btn.dataset.arme === "1") {
+      delete btn.dataset.arme;
+      btn.textContent = btn.dataset.libelle;
+      btn.classList.remove("armed");
+    }
+  }, 4000);
 }
-$("#sysReboot").addEventListener("click", () => powerAction("/api/system/reboot", "Redémarrage"));
-$("#sysShutdown").addEventListener("click", () => powerAction("/api/system/shutdown", "Extinction"));
+
+/* Alimentation machine : armement puis confirmation, bouton verrouillé
+   pendant l'appel. */
+function powerAction(btn, url, label) {
+  confirmerPuis(btn, () => {
+    btn.disabled = true;
+    api(url, { method: "POST" })
+      .then(() => toast(label + " dans 5 secondes"))
+      .catch(() => {})
+      .finally(() => { btn.disabled = false; });
+  });
+}
+$("#sysReboot").addEventListener("click", e => powerAction(e.currentTarget, "/api/system/reboot", "Redémarrage"));
+$("#sysShutdown").addEventListener("click", e => powerAction(e.currentTarget, "/api/system/shutdown", "Extinction"));
 
 /* Mise à jour OTA : vérifier → télécharger → appliquer. */
 $("#majVerifie").addEventListener("click", async () => {
@@ -2527,21 +2615,28 @@ $("#majVerifie").addEventListener("click", async () => {
     }
   } catch (e) { $("#majEtat").textContent = "Vérification impossible (réseau ?)"; }
 });
-$("#majTelecharge").addEventListener("click", async () => {
+$("#majTelecharge").addEventListener("click", async e => {
+  const btn = e.currentTarget;
+  btn.disabled = true; // un double-clic ne lance pas deux téléchargements
   $("#majEtat").textContent = "Téléchargement… (peut prendre une minute)";
   try {
     const r = await api("/api/update/download", { method: "POST" });
     $("#majEtat").textContent = r.message;
     $("#majApplique").style.display = "inline-block";
-  } catch (e) { $("#majEtat").textContent = "Téléchargement impossible."; }
+  } catch (e2) { $("#majEtat").textContent = "Téléchargement impossible."; }
+  btn.disabled = false;
 });
-$("#majApplique").addEventListener("click", async () => {
-  if (!confirm("Appliquer la mise à jour ? Le node redémarre — la lecture en cours s'arrête.")) return;
+$("#majApplique").addEventListener("click", e => confirmerPuis(e.currentTarget, async () => {
+  const btn = $("#majApplique");
+  btn.disabled = true;
   try {
     const r = await api("/api/update/apply", { method: "POST" });
     $("#majEtat").textContent = r.message + " Reconnexion automatique…";
-  } catch (e) { $("#majEtat").textContent = "Bascule impossible : rien n'a changé."; }
-});
+  } catch (e2) {
+    $("#majEtat").textContent = "Bascule impossible : rien n'a changé.";
+    btn.disabled = false;
+  }
+}));
 
 /* Réglages de performance : profils conseillés par matériel, appliqués au
    prochain lancement (reglages.json). */
@@ -2584,7 +2679,7 @@ $("#regSave").addEventListener("click", async () => {
   try {
     await api("/api/reglages", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corps) });
     toast("Réglages enregistrés — appliqués au prochain lancement");
-  } catch (e) { toast("Réglages refusés (valeurs hors bornes ?)", "err"); }
+  } catch (e) { /* api() a déjà montré l'erreur précise */ }
 });
 
 /* Chataigne : détection à l'ouverture, lancement à la demande. */
@@ -2607,7 +2702,7 @@ $("#chataigneLance").addEventListener("click", async () => {
   try {
     await api("/api/chataigne/lancer", { method: "POST" });
     toast("Chataigne lancé sur la machine du node");
-  } catch (e) { toast("Lancement impossible", "err"); loadChataigne(); }
+  } catch (e) { loadChataigne(); /* api() a déjà montré l'erreur précise */ }
 });
 
 /* Parc de nodes (mDNS). */
@@ -2656,7 +2751,7 @@ async function loadSystem() {
     $("#brandVer").textContent = (healthInfo.name || "node") +
       (healthInfo.version ? " · v" + healthInfo.version : "");
     document.title = "Lanterne — " + (healthInfo.name || "node");
-    $("#nodecard").innerHTML = "<b style='color:var(--ink)'>" + esc(healthInfo.name || "Toolbox") + "</b><br>" +
+    $("#nodecard").innerHTML = "<b style='color:var(--ink)'>" + esc(healthInfo.name || "Lanterne") + "</b><br>" +
       (healthInfo.version ? "v" + esc(healthInfo.version) + " · " : "") + "up " + fmtUptime(healthInfo.uptime_s);
   }
   const g = $("#sysGrid");
@@ -2680,7 +2775,7 @@ async function loadSystem() {
       sys.disk_free_gb < 5 ? "espace faible" : "", sys.disk_free_gb < 5);
   if (sys.tailscale != null) html += tile("Tailscale", sys.tailscale, "", "");
   html += tile("Plateforme", (sys.os || "?") + " / " + (sys.arch || "?"), "", "");
-  if (healthInfo) html += tile("Node", healthInfo.name || "Toolbox", "", (healthInfo.version ? "v" + healthInfo.version : "") + " · " + (healthInfo.status || ""));
+  if (healthInfo) html += tile("Node", healthInfo.name || "Lanterne", "", (healthInfo.version ? "v" + healthInfo.version : "") + " · " + (healthInfo.status || ""));
   // Santé d'un coup d'œil : erreurs récentes et dérive de synchro.
   html += tile("Erreurs récentes", String(sys.erreurs_recentes ?? 0), "",
     (sys.erreurs_recentes ?? 0) > 0 ? "voir l'onglet Logs" : "aucune dans le journal",
@@ -2723,11 +2818,26 @@ function renderSante(sys) {
   loadChataigne();
   loadLuts();
   loadReglages();
-  setInterval(loadSystem, 5000);
-  setInterval(loadFleet, 7000);
+  // Onglet caché : les sondages se taisent (rien à montrer, et un parc de
+  // 10 nodes ouverts en fond ne doit pas marteler les Pi) — tout repart
+  // immédiatement au retour de visibilité.
+  setInterval(() => { if (!document.hidden) loadSystem(); }, 5000);
+  setInterval(() => { if (!document.hidden) loadFleet(); }, 7000);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) { loadSystem(); loadFleet(); }
+  });
   loadParc();
+  // Accueil premier lancement : visible tant qu'il n'a pas été masqué
+  // (mémorisé par navigateur — un nouvel opérateur le voit aussi).
+  try {
+    if (!localStorage.getItem("lanterneAccueilVu")) $("#accueilCard").style.display = "";
+    $("#accueilFerme").addEventListener("click", () => {
+      $("#accueilCard").style.display = "none";
+      try { localStorage.setItem("lanterneAccueilVu", "1"); } catch (e) {}
+    });
+  } catch (e) { /* localStorage indisponible (navigation privée) : accueil masqué */ }
   // Un fichier copié directement dans media/ apparaît sans recharger la page.
-  setInterval(() => { if ($("#page-media").classList.contains("visible")) { loadMedia(); loadParc(); } }, 5000);
+  setInterval(() => { if (!document.hidden && $("#page-media").classList.contains("visible")) { loadMedia(); loadParc(); } }, 5000);
   sizeStage();
   paintSeek();
 })();
