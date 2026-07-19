@@ -163,6 +163,26 @@ Sous Windows, aucune dépendance système (midir utilise WinMM).
   intelligent (détection /proc/device-tree/model, mock TOOLBOX_MODELE),
   archives portables avec install.sh embarqué, infobulles néophyte.
 
+- v3.3.0 (2026-07-19) : passe de fiabilisation « commercialisation »
+  issue d'un audit multi-agents (7 dimensions × vérification
+  adversariale). 8 blocs corrigés, chacun testé : A séquenceur
+  (valider_commande refuse délais/heure/cue_go invalides — 400 HTTP,
+  enchaînement par NOM, anti-réentrance 250 ms), B Art-Net (canaux
+  bornés partout, lumieres.json corrompu → .corrompu), C synchro
+  (filtrage IP du maître, chien de garde 5 s → rate 1.0 + dérive None),
+  D HTTP (WS 64 Ko max, MJPEG 4 clients max/503, monitor+preview en
+  spawn_blocking, identify anti-double, upload tmp unique),
+  E persistance (core::ecrire_atomique avec sync_all PARTOUT, crash.txt
+  256 Ko max, résolution bornée au load, seq de log sous verrou),
+  F FFI/threads (ndi _recv_nom retenu, kms Null-on-fail + bus thread
+  borné, rtsp démarrage bloqué géré, fenêtre dormante si peintre KO au
+  boot), G rendu (Compositeur : rampe blackout + gel = parité fenêtre
+  TESTÉE au pixel, temps modulo 3600, LUT nan/inf refusés, player pause
+  après load), H UI (bandeau déconnexion, accueil 1er lancement,
+  confirmations deux temps « Confirmer ? », verrous d'actions longues,
+  fin des doubles toasts, master drag, masque focus, dblclick volume,
+  cue heure vide refusée, polls suspendus onglet caché). 213 tests.
+
 ## Prochaines étapes
 
 1. Au retour de Pym : tests matériels (Pi, capture HDMI, Chataigne réel,
