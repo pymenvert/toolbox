@@ -3,6 +3,58 @@
 Évolutions notables du node Toolbox. Format inspiré de
 [Keep a Changelog](https://keepachangelog.com/fr/), versionnage SemVer.
 
+## [3.3.0] — 2026-07-19
+
+Passe de fiabilisation complète en vue d'une exploitation professionnelle
+(audit multi-agents : 7 dimensions, chaque correctif testé et vérifié en
+réel). Aucun format de fichier ni contrat d'API existant ne change.
+
+### Fiabilité moteur
+
+- **Séquenceur** : les cues invalides sont refusées à l'enregistrement
+  (délai « après » infini/négatif, heure impossible, `cue_go` récursif) ;
+  l'enchaînement suit le NOM de la cue (éditer/supprimer pendant une
+  attente ne joue plus la mauvaise cue) ; garde anti-boucle (un cycle
+  `cue_go` a→b→a est coupé net).
+- **Lumières** : un `lumieres.json` corrompu est mis de côté
+  (`.corrompu`) au lieu d'être écrasé, canaux/univers bornés partout —
+  plus aucune panique possible dans l'émission Art-Net.
+- **Synchro** : le suiveur n'accepte l'horloge QUE du maître configuré ;
+  maître silencieux 5 s → vitesse normale et dérive « inconnue » en
+  Santé (fini l'indicateur vert périmé).
+- **Coupure de courant** : tous les fichiers d'état (`fonctions`,
+  `sortie`, `reglages`, `sequences`, `lumieres`, `demarrage`) sont
+  écrits avec flush disque — un Pi débranché au mauvais moment ne perd
+  plus sa configuration. `crash.txt` plafonné à 256 Ko.
+
+### Serveur web
+
+- Flux MJPEG plafonné à 4 spectateurs (503 explicite au-delà — le
+  multi-client, c'est le RTSP) ; messages WebSocket entrants bornés ;
+  aperçu et statistiques système rendus hors du fil des requêtes (un
+  `/proc` lent ne gèle plus l'interface) ; « Identifier » anti-double
+  (la mire ne reste plus bloquée) ; uploads simultanés sans collision.
+
+### Interface
+
+- Bandeau « liaison perdue » impossible à rater ; accueil premier
+  lancement (3 étapes) ; confirmations en deux temps (« Confirmer ? »)
+  au lieu des dialogs bloquants ; boutons verrouillés pendant les
+  actions longues ; messages d'erreur précis du serveur (fini les
+  doubles toasts génériques) ; cue horaire sans heure refusée ; fader
+  master stable pendant le glissement ; saisie des masques sans perte
+  de focus ; double-clic volume = 100 % ; sondages suspendus quand
+  l'onglet est caché (ménage les Pi).
+
+### Sorties réseau
+
+- RTSP/KMS/NDI : parité TOTALE avec la fenêtre — rampe de blackout et
+  gel d'image compris (testés au pixel) ; plus de fuite de thread aux
+  bascules on/off ; échec DRM proprement nettoyé ; nom du récepteur NDI
+  retenu (use-after-free potentiel éliminé) ; LUT `.cube` avec nan/inf
+  refusées ; charger un média pendant une pause préroule la première
+  image au lieu d'un écran noir.
+
 ## [3.2.0] — 2026-07-11
 
 - **Découverte NDI dans l'UI** : onglet Médias → Source externe →
