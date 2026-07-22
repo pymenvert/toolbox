@@ -58,6 +58,19 @@ const IDENTITY_COLUMNS: [[f32; 4]; 3] = [
     [0.0, 0.0, 1.0, 0.0],
 ];
 
+/// Issue d'un rendu GPU.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResultatRendu {
+    /// Frame présentée à l'écran.
+    Presentee,
+    /// Frame sautée transitoirement (fenêtre réduite/occultée, retard) — on
+    /// réessaiera au prochain redraw, rien à faire.
+    Sautee,
+    /// Device GPU perdu (pilote réinitialisé, écran débranché) : l'appelant
+    /// doit replier sur le rendu CPU pour ne pas rester en sortie noire.
+    DevicePerdu,
+}
+
 /// Le peintre GPU : surface, pipeline et texture vidéo.
 pub struct GpuPainter {
     surface: wgpu::Surface<'static>,
@@ -232,7 +245,8 @@ impl GpuPainter {
         })
     }
 
-    /// Rend une frame. Retourne `true` si elle a été présentée.
+    /// Rend une frame. Retourne l'issue : présentée, sautée (transitoire) ou
+    /// device perdu (l'appelant doit replier sur le rendu CPU).
     #[allow(clippy::too_many_arguments)] // pipeline de rendu : tout est requis
     pub fn render(
         &mut self,
@@ -243,7 +257,7 @@ impl GpuPainter {
         width: u32,
         height: u32,
         blackout: f32,
-    ) -> bool {
+    ) -> ResultatRendu {
         let (width, height) = (width.max(1), height.max(1));
         if self.config.width != width || self.config.height != height {
             self.config.width = width;
@@ -266,17 +280,21 @@ impl GpuPainter {
                 self.surface.configure(&self.device, &self.config);
                 match self.surface.get_current_texture() {
                     Cst::Success(frame) | Cst::Suboptimal(frame) => frame,
+                    // Surface toujours perdue APRÈS reconfiguration : le
+                    // device lui-même est réputé perdu (pilote réinitialisé,
+                    // écran débranché en plein écran). On le signale pour un
+                    // repli CPU à chaud, au lieu de rester en sortie noire.
                     other => {
-                        warn!(?other, "surface GPU indisponible");
-                        return false;
+                        warn!(?other, "device GPU perdu (surface non récupérable)");
+                        return ResultatRendu::DevicePerdu;
                     }
                 }
             }
             // Fenêtre réduite ou frame en retard : on saute, sans bruit.
-            Cst::Timeout | Cst::Occluded => return false,
+            Cst::Timeout | Cst::Occluded => return ResultatRendu::Sautee,
             other => {
-                warn!(?other, "frame GPU indisponible");
-                return false;
+                warn!(?other, "device GPU perdu (frame indisponible)");
+                return ResultatRendu::DevicePerdu;
             }
         };
         let view = frame
@@ -310,7 +328,7 @@ impl GpuPainter {
         }
         self.queue.submit([encoder.finish()]);
         self.queue.present(frame);
-        true
+        ResultatRendu::Presentee
     }
 
     /// Téléverse la LUT quand elle change (nom comparé, pas le contenu).

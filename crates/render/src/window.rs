@@ -17,7 +17,7 @@ use tracing::{error, info, warn};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{ElementState, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::keyboard::{Key, NamedKey};
 use winit::window::{Fullscreen, Window, WindowId};
 
@@ -148,9 +148,12 @@ fn run_event_loop(config: WindowConfig, channels: OutputChannels) {
         enabled,
         frames_since: 0,
         fps_window_start: std::time::Instant::now(),
+        derniere_frame: std::time::Instant::now(),
+        dernier_scan_ecrans: std::time::Instant::now(),
         started_at: std::time::Instant::now(),
         window: None,
         painter: None,
+        forcer_cpu: false,
         blackout_prec: false,
         blackout_depart: 0.0,
         blackout_depuis: std::time::Instant::now(),
@@ -245,10 +248,18 @@ struct OutputApp {
     /// Frames présentées depuis le début de la fenêtre de mesure courante.
     frames_since: u32,
     fps_window_start: std::time::Instant,
+    /// Instant de la dernière frame présentée : sert à faire retomber le
+    /// badge img/s à 0 quand le rendu s'arrête (sinon il resterait figé).
+    derniere_frame: std::time::Instant,
+    /// Dernier scan des écrans (throttle du rafraîchissement à chaud).
+    dernier_scan_ecrans: std::time::Instant,
     /// Origine du temps des effets animés (bruit).
     started_at: std::time::Instant,
     window: Option<Arc<Window>>,
     painter: Option<Painter>,
+    /// Repli CPU verrouillé après une perte de device GPU : on ne retente
+    /// plus le GPU (il vient de lâcher) pour cette session de fenêtre.
+    forcer_cpu: bool,
     /// Rampe du blackout de régie : consigne précédente, niveau au moment
     /// du dernier changement, instant du changement, niveau courant.
     blackout_prec: bool,
@@ -259,7 +270,14 @@ struct OutputApp {
     frame_gelee: Option<VideoFrame>,
     /// LUT chargée depuis `luts/<nom>` — `None` dans la paire : fichier
     /// illisible (mémorisé pour ne pas relire le disque à chaque frame).
-    lut_cache: Option<(String, Option<toolbox_engine::Lut3d>)>,
+    /// LUT chargée : nom, date de modification du fichier au chargement, et
+    /// la LUT décodée (`None` si le fichier était illisible). La mtime permet
+    /// de RECHARGER quand le fichier change sur disque à nom constant.
+    lut_cache: Option<(
+        String,
+        Option<std::time::SystemTime>,
+        Option<toolbox_engine::Lut3d>,
+    )>,
 }
 
 impl OutputApp {
@@ -300,6 +318,30 @@ impl OutputApp {
         monitors.get(target).or_else(|| monitors.first()).cloned()
     }
 
+    /// Republie la liste des écrans si elle a CHANGÉ (branchement/débranchement
+    /// à chaud) — sans log ni recalcul de cible, appelée périodiquement. Sinon
+    /// `/api/outputs` et la carte « Sortie » resteraient figés sur la liste du
+    /// démarrage jusqu'à la prochaine modification de réglages.
+    fn rafraichir_liste_ecrans(&self, event_loop: &ActiveEventLoop) {
+        let infos: Vec<MonitorInfo> = event_loop
+            .available_monitors()
+            .enumerate()
+            .map(|(index, m)| MonitorInfo {
+                index,
+                name: m.name().unwrap_or_else(|| format!("écran {index}")),
+                width: m.size().width,
+                height: m.size().height,
+            })
+            .collect();
+        if *self.monitors.borrow() != infos {
+            info!(
+                ecrans = infos.len(),
+                "liste des écrans mise à jour (branchement à chaud)"
+            );
+            self.monitors.send_replace(infos);
+        }
+    }
+
     /// Applique les réglages courants : écran cible + plein écran.
     fn apply_settings(&self, event_loop: &ActiveEventLoop) {
         let settings = *self.settings.borrow();
@@ -329,13 +371,15 @@ impl OutputApp {
     /// Fabrique le peintre (GPU si demandé, CPU en secours). `None` si aucun
     /// contexte d'affichage n'est possible.
     fn creer_peintre(&self, window: &Arc<Window>) -> Option<Painter> {
-        if self.config.gpu {
+        if self.config.gpu && !self.forcer_cpu {
             match GpuPainter::new(window.clone()) {
                 Ok(gpu) => return Some(Painter::Gpu(Box::new(gpu))),
                 Err(err) => {
                     warn!(%err, "rendu GPU indisponible — repli sur le rendu CPU");
                 }
             }
+        } else if self.forcer_cpu {
+            info!("rendu CPU forcé (device GPU perdu précédemment)");
         } else {
             info!("rendu GPU désactivé par la config ([output] gpu = false)");
         }
@@ -381,22 +425,40 @@ impl OutputApp {
     /// Charge (et mémorise) la LUT nommée par l'état. Un fichier illisible
     /// est journalisé une fois puis ignoré.
     fn sync_lut_cache(&mut self, nom: Option<&str>) {
-        match nom {
-            Some(nom) => {
-                if self.lut_cache.as_ref().map(|(n, _)| n.as_str()) != Some(nom) {
-                    let chemin = std::path::Path::new("luts").join(nom);
-                    let charge = std::fs::read_to_string(&chemin)
-                        .map_err(|e| e.to_string())
-                        .and_then(|t| toolbox_engine::Lut3d::depuis_texte(&t));
-                    match &charge {
-                        Ok(lut) => info!(nom, taille = lut.taille, "LUT d'étalonnage chargée"),
-                        Err(err) => warn!(nom, %err, "LUT illisible — ignorée"),
-                    }
-                    self.lut_cache = Some((nom.to_string(), charge.ok()));
-                }
-            }
-            None => self.lut_cache = None,
+        /// Plafond de taille d'un `.cube` : une LUT 128³ pèse ~25 Mo ; au-delà
+        /// c'est un fichier aberrant qu'on ne charge pas sur le thread de rendu.
+        const LUT_MAX_OCTETS: u64 = 64 * 1024 * 1024;
+        let Some(nom) = nom else {
+            self.lut_cache = None;
+            return;
+        };
+        let chemin = std::path::Path::new("luts").join(nom);
+        let mtime = std::fs::metadata(&chemin).and_then(|m| m.modified()).ok();
+        // Rechargement si le NOM ou la date de modification a changé (un
+        // fichier réécrit sous le même nom est bien repris).
+        let deja = self
+            .lut_cache
+            .as_ref()
+            .is_some_and(|(n, m, _)| n == nom && *m == mtime);
+        if deja {
+            return;
         }
+        // Plafond de taille avant lecture (bloquerait le rendu sinon).
+        if let Ok(meta) = std::fs::metadata(&chemin) {
+            if meta.len() > LUT_MAX_OCTETS {
+                warn!(nom, octets = meta.len(), "LUT trop volumineuse — ignorée");
+                self.lut_cache = Some((nom.to_string(), mtime, None));
+                return;
+            }
+        }
+        let charge = std::fs::read_to_string(&chemin)
+            .map_err(|e| e.to_string())
+            .and_then(|t| toolbox_engine::Lut3d::depuis_texte(&t));
+        match &charge {
+            Ok(lut) => info!(nom, taille = lut.taille, "LUT d'étalonnage chargée"),
+            Err(err) => warn!(nom, %err, "LUT illisible — ignorée"),
+        }
+        self.lut_cache = Some((nom.to_string(), mtime, charge.ok()));
     }
 
     fn redraw(&mut self) {
@@ -458,14 +520,21 @@ impl OutputApp {
         let lut = self
             .lut_cache
             .as_ref()
-            .and_then(|(nom, lut)| lut.as_ref().map(|l| (nom.as_str(), l)));
+            .and_then(|(nom, _mtime, lut)| lut.as_ref().map(|l| (nom.as_str(), l)));
         // L'emprunt du peintre doit se terminer avant de compter la frame
         // (le compteur emprunte `self` à son tour).
+        // Issue du rendu, calculée pendant l'emprunt du peintre, puis traitée
+        // APRÈS l'avoir relâché (le repli CPU réassigne `self.painter`).
+        enum Suite {
+            Presentee,
+            Sautee,
+            ReplierCpu,
+        }
         let Some(painter) = self.painter.as_mut() else {
             return;
         };
-        let presented = match painter {
-            Painter::Gpu(gpu) => gpu.render(
+        let suite = match painter {
+            Painter::Gpu(gpu) => match gpu.render(
                 &self.snapshot,
                 video.as_ref(),
                 lut,
@@ -473,7 +542,11 @@ impl OutputApp {
                 w.get(),
                 h.get(),
                 niveau,
-            ),
+            ) {
+                crate::gpu::ResultatRendu::Presentee => Suite::Presentee,
+                crate::gpu::ResultatRendu::Sautee => Suite::Sautee,
+                crate::gpu::ResultatRendu::DevicePerdu => Suite::ReplierCpu,
+            },
             Painter::Cpu(surface) => {
                 if let Err(err) = surface.resize(w, h) {
                     warn!(%err, "surface de sortie non retaillée");
@@ -492,22 +565,36 @@ impl OutputApp {
                         );
                         toolbox_engine::appliquer_blackout(&mut buffer, niveau);
                         match buffer.present() {
-                            Ok(()) => true,
+                            Ok(()) => Suite::Presentee,
                             Err(err) => {
                                 warn!(%err, "frame de sortie non présentée");
-                                false
+                                Suite::Sautee
                             }
                         }
                     }
                     Err(err) => {
                         warn!(%err, "tampon de sortie inaccessible");
-                        false
+                        Suite::Sautee
                     }
                 }
             }
         };
-        if presented {
-            self.count_presented_frame();
+        match suite {
+            Suite::Presentee => self.count_presented_frame(),
+            Suite::Sautee => {}
+            Suite::ReplierCpu => {
+                // Repli CPU à chaud : le device GPU vient de lâcher (pilote
+                // réinitialisé, écran débranché en plein écran). Plutôt qu'une
+                // sortie noire définitive, on recrée un peintre CPU et on
+                // verrouille ce mode pour cette session de fenêtre.
+                warn!("device GPU perdu — bascule sur le rendu CPU");
+                self.forcer_cpu = true;
+                self.painter = None;
+                if let Some(window) = self.window.clone() {
+                    self.painter = self.creer_peintre(&window);
+                    window.request_redraw();
+                }
+            }
         }
         // Rampe en cours : on continue à redessiner jusqu'à la cible.
         if (niveau - cible).abs() > 0.001 {
@@ -519,6 +606,7 @@ impl OutputApp {
 
     /// Mesure du débit de frames présentées, publiée ~1 fois par seconde.
     fn count_presented_frame(&mut self) {
+        self.derniere_frame = std::time::Instant::now();
         self.frames_since += 1;
         let elapsed = self.fps_window_start.elapsed().as_secs_f32();
         if elapsed >= 1.0 {
@@ -596,7 +684,32 @@ impl ApplicationHandler<Wake> for OutputApp {
         }
     }
 
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        // Fait retomber le badge img/s à 0 quand plus aucune frame n'est
+        // présentée (source arrêtée, mire figée) : sinon il resterait bloqué
+        // sur la dernière cadence et l'opérateur croirait que ça tourne.
+        // On ne programme ce réveil périodique QUE si un peintre est actif :
+        // fenêtre dormante = attente pure, 0 % CPU préservé.
+        if self.painter.is_some() && *self.enabled.borrow() {
+            if self.derniere_frame.elapsed() > std::time::Duration::from_millis(1200)
+                && (*self.fps.borrow() - 0.0).abs() > f32::EPSILON
+            {
+                self.fps.send_replace(0.0);
+            }
+            // Écrans branchés/débranchés à chaud (throttle ~2 s).
+            if self.dernier_scan_ecrans.elapsed() > std::time::Duration::from_secs(2) {
+                self.rafraichir_liste_ecrans(event_loop);
+                self.dernier_scan_ecrans = std::time::Instant::now();
+            }
+            event_loop.set_control_flow(ControlFlow::WaitUntil(
+                std::time::Instant::now() + std::time::Duration::from_secs(1),
+            ));
+        } else {
+            event_loop.set_control_flow(ControlFlow::Wait);
+        }
+    }
+
+    fn window_event(&mut self, _event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         match event {
             WindowEvent::RedrawRequested => self.redraw(),
             WindowEvent::Resized(_) => {
@@ -620,8 +733,19 @@ impl ApplicationHandler<Wake> for OutputApp {
                 }
             }
             WindowEvent::CloseRequested => {
-                info!("fenêtre de sortie fermée par l'utilisateur (le node continue)");
-                event_loop.exit();
+                // Alt+F4 / clic sur la croix : on NE quitte PAS la boucle
+                // d'événements (ça rendrait la sortie irrécupérable sans
+                // redémarrer le node). On masque la fenêtre et on libère le
+                // peintre — comme une mise en sommeil. La sortie se rouvre
+                // depuis l'onglet Sortie/Fonctions (bascule off/on).
+                self.painter = None;
+                if let Some(window) = &self.window {
+                    window.set_visible(false);
+                }
+                self.fps.send_replace(0.0);
+                info!(
+                    "fenêtre de sortie fermée par l'utilisateur — réactivable depuis l'UI (le node continue)"
+                );
             }
             _ => {}
         }
