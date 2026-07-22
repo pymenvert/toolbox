@@ -38,6 +38,11 @@ done
 say()  { printf '\033[1;36m>>\033[0m %s\n' "$*"; }
 fail() { printf '\033[1;31m!!\033[0m %s\n' "$*" >&2; exit 1; }
 
+# Échappe une valeur pour le REMPLACEMENT d'un sed dont le délimiteur est
+# « | » : & (rappel du motif), | (délimiteur) et \ doivent être protégés,
+# sinon un préfixe contenant l'un d'eux produirait une unité systemd cassée.
+esc_sed() { printf '%s' "$1" | sed -e 's/[&|\\]/\\&/g'; }
+
 # Exécute avec sudo seulement si nécessaire.
 run() {
     if [ "$NEED_SUDO" = true ]; then
@@ -49,7 +54,10 @@ run() {
 
 ask_yn() { # ask_yn "question" "défaut o/n"
     local answer
-    read -r -p "$1 [$2] " answer
+    # `|| answer=""` : en exécution NON interactive (SSH sans tty,
+    # provisioning), `read` renvoie EOF ; sans ça, `set -e` tuerait le script
+    # à mi-installation, sans message. On retombe alors sur le défaut.
+    read -r -p "$1 [$2] " answer || answer=""
     answer="${answer:-$2}"
     case "$answer" in o|O|y|Y|oui|yes) return 0 ;; *) return 1 ;; esac
 }
@@ -127,7 +135,7 @@ if [ -z "$PROFIL" ]; then
     echo "  6. personnalise   — questions module par module"
     defaut=1
     if [ "$MATERIEL" = pi3 ]; then defaut=2; fi
-    read -r -p "Choix [$defaut] " answer
+    read -r -p "Choix [$defaut] " answer || answer=""
     case "${answer:-$defaut}" in
         1) PROFIL=complet ;;
         2) PROFIL=lecteur ;;
@@ -170,16 +178,16 @@ HTTP_PORT=8080
 OSC_PORT=9000
 answer=""
 if [ "$MOD_HTTP" = true ]; then
-    read -r -p "  port web UI [8080] " answer
+    read -r -p "  port web UI [8080] " answer || answer=""
     HTTP_PORT="${answer:-8080}"
 fi
 if [ "$MOD_OSC" = true ]; then
-    read -r -p "  port OSC [9000] " answer
+    read -r -p "  port OSC [9000] " answer || answer=""
     OSC_PORT="${answer:-9000}"
 fi
 
 NODE_NAME="$(hostname 2>/dev/null || echo toolbox-node)"
-read -r -p "  nom du node [$NODE_NAME] " answer
+read -r -p "  nom du node [$NODE_NAME] " answer || answer=""
 NODE_NAME="${answer:-$NODE_NAME}"
 
 # --- installation ---------------------------------------------------------------
@@ -248,14 +256,14 @@ fi
 if command -v systemctl > /dev/null 2>&1; then
     if ask_yn "Installer le service systemd (démarrage auto + redémarrage en cas de crash) ?" o; then
         RUN_USER="${SUDO_USER:-$(id -un)}"
-        read -r -p "  utilisateur du service [$RUN_USER] " answer
+        read -r -p "  utilisateur du service [$RUN_USER] " answer || answer=""
         RUN_USER="${answer:-$RUN_USER}"
         SERVICE_USER="$RUN_USER"
         UNIT_SRC="$(dirname "$0")/systemd/toolbox-node.service"
         if [ ! -f "$UNIT_SRC" ]; then
             fail "fichier unité introuvable : $UNIT_SRC"
         fi
-        sed -e "s|@PREFIX@|$PREFIX|g" -e "s|@USER@|$RUN_USER|g" "$UNIT_SRC" \
+        sed -e "s|@PREFIX@|$(esc_sed "$PREFIX")|g" -e "s|@USER@|$(esc_sed "$RUN_USER")|g" "$UNIT_SRC" \
             | sudo tee /etc/systemd/system/toolbox-node.service > /dev/null
         sudo systemctl daemon-reload
         sudo systemctl enable toolbox-node.service

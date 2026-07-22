@@ -131,10 +131,20 @@ if ($DemarrageAuto) { $auto = "o" }
 elseif (-not $SansQuestion) { $auto = Read-Host "Lancer Toolbox a chaque ouverture de session ? [o/N]" }
 if ($auto -match "^[oOyY]") {
     $demarrage = [Environment]::GetFolderPath("Startup")
-    $cmd = Join-Path $demarrage "toolbox-node.cmd"
-    "@echo off`r`ncd /d `"$Dossier`"`r`nstart `"Toolbox`" /min `"$Dossier\toolbox-node.exe`"" |
-        Out-File -Encoding ascii $cmd
-    Dire "Demarrage automatique installe : $cmd"
+    # MEME nom de fichier que install-autostart-windows.bat : sa
+    # desinstallation (--remove) retire donc aussi celui-ci (coherence).
+    $lanceur = Join-Path $demarrage "toolbox-node-autostart.bat"
+    $exe = Join-Path $Dossier "toolbox-node.exe"
+    $contenu = "@echo off`r`ncd /d `"$Dossier`"`r`nif not exist media mkdir media`r`n" +
+        "if not exist presets mkdir presets`r`nif not exist logs mkdir logs`r`n" +
+        "start `"toolbox-node`" /min `"$exe`"`r`n"
+    # cmd.exe lit les .bat dans la CODEPAGE OEM du systeme (ni ASCII ni
+    # UTF-8) : ecrire en ASCII mutilait les chemins accentues (profils
+    # Windows francais type C:\Users\Frederic\...). On ecrit en OEM.
+    $oemCp = [System.Globalization.CultureInfo]::CurrentCulture.TextInfo.OEMCodePage
+    $oem = [System.Text.Encoding]::GetEncoding($oemCp)
+    [System.IO.File]::WriteAllText($lanceur, $contenu, $oem)
+    Dire "Demarrage automatique installe : $lanceur"
 }
 
 Dire "Installation terminee dans $Dossier"

@@ -11,12 +11,11 @@ set "STARTUP=%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup"
 set "LANCEUR=%STARTUP%\toolbox-node-autostart.bat"
 
 if /i "%~1"=="--remove" (
-  if exist "%LANCEUR%" (
-    del "%LANCEUR%"
-    echo Demarrage automatique retire.
-  ) else (
-    echo Rien a retirer : le demarrage automatique n'etait pas installe.
-  )
+  set "TROUVE="
+  if exist "%LANCEUR%" ( del "%LANCEUR%" & set "TROUVE=1" )
+  rem Retire aussi le lanceur d'anciennes versions de l'installeur PowerShell.
+  if exist "%STARTUP%\toolbox-node.cmd" ( del "%STARTUP%\toolbox-node.cmd" & set "TROUVE=1" )
+  if defined TROUVE ( echo Demarrage automatique retire. ) else ( echo Rien a retirer : le demarrage automatique n'etait pas installe. )
   goto :fin
 )
 
