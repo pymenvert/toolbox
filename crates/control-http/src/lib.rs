@@ -49,6 +49,10 @@ use toolbox_engine::PlaybackPosition;
 /// La page web embarquée (assets/index.html, un seul fichier).
 const INDEX_HTML: &str = include_str!("../assets/index.html");
 
+/// Le manuel utilisateur embarqué : accessible hors ligne depuis le node
+/// installé (`/manuel`), sans dépendre du dépôt ni d'Internet.
+const MANUEL_HTML: &str = include_str!("../../../docs/manuel.html");
+
 #[derive(Debug, Error)]
 pub enum HttpError {
     #[error("impossible d'écouter sur {addr} : {source}")]
@@ -292,6 +296,7 @@ impl IntoResponse for ApiError {
 pub fn router(app: AppState) -> Router {
     Router::new()
         .route("/", get(index))
+        .route("/manuel", get(manuel))
         .route("/api/health", get(health))
         .route("/api/state", get(get_state))
         .route("/api/position", get(get_position))
@@ -495,6 +500,11 @@ pub async fn serve_on(
 
 async fn index() -> Html<&'static str> {
     Html(INDEX_HTML)
+}
+
+/// Le manuel utilisateur (embarqué), pour l'aide en ligne du node.
+async fn manuel() -> Html<&'static str> {
+    Html(MANUEL_HTML)
 }
 
 async fn health(State(app): State<AppState>) -> Json<serde_json::Value> {
@@ -2051,6 +2061,27 @@ mod tests {
             .await
             .expect("resp");
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn manuel_est_servi_embarque() {
+        let bed = testbed();
+        let response = bed
+            .router
+            .oneshot(
+                HttpRequest::get("/manuel")
+                    .body(Body::empty())
+                    .expect("req"),
+            )
+            .await
+            .expect("resp");
+        assert_eq!(response.status(), StatusCode::OK);
+        let ct = response
+            .headers()
+            .get(axum::http::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        assert!(ct.contains("text/html"), "le manuel est servi en HTML");
     }
 
     #[tokio::test]
