@@ -298,6 +298,14 @@ impl Bus {
         drop(handle);
         info!("bus démarré");
         while let Some((source, command)) = rx.recv().await {
+            // NB : preset_save/mapping_save écrivent (fsync) DANS cette boucle,
+            // ce qui fige brièvement les commandes le temps de l'écriture. Les
+            // sortir en tâche asynchrone casserait l'ordre « sauver puis
+            // charger » dont dépendent le fader et le séquenceur (ils relisent
+            // le preset sur DISQUE). Le vrai remède serait un cache mémoire des
+            // presets partagé avec le fader — changement d'architecture laissé
+            // pour plus tard. Impact réel limité : une sauvegarde est une
+            // action manuelle ponctuelle, pas un flux continu.
             Self::process(
                 &mut state,
                 &events,

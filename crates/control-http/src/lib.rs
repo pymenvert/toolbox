@@ -1081,9 +1081,18 @@ async fn lut_pour_apercu(
     let nom = nom?;
     let mut cache = app.lut_apercu.lock().await;
     if cache.as_ref().map(|(n, _)| n.as_str()) != Some(nom) {
-        let charge = std::fs::read_to_string(std::path::Path::new("luts").join(nom))
-            .ok()
-            .and_then(|t| toolbox_engine::Lut3d::depuis_texte(&t).ok());
+        // Lecture disque + parse (jusqu'à 64 Mo) sur un thread bloquant : ne
+        // gèle pas le runtime tokio (le worker n'est pas retenu par le fsync
+        // ni le décodage). Le verrou sérialise les chargements concurrents.
+        let nom_owned = nom.to_string();
+        let charge = tokio::task::spawn_blocking(move || {
+            std::fs::read_to_string(std::path::Path::new("luts").join(&nom_owned))
+                .ok()
+                .and_then(|t| toolbox_engine::Lut3d::depuis_texte(&t).ok())
+        })
+        .await
+        .ok()
+        .flatten();
         *cache = charge.map(|l| (nom.to_string(), std::sync::Arc::new(l)));
     }
     cache.as_ref().map(|(_, l)| l.clone())
@@ -1170,31 +1179,35 @@ async fn lut_upload(
             Json(serde_json::json!({ "error": "fichier .cube trop gros (64 Mo max)" })),
         );
     }
-    let texte = match std::str::from_utf8(&body) {
-        Ok(t) => t,
-        Err(_) => {
-            return (
+    // Décodage (jusqu'à 64 Mo) + écriture ATOMIQUE sur un thread bloquant :
+    // ni le parse ni le fsync ne gèlent le runtime, et un dépôt interrompu ne
+    // corrompt pas une LUT existante (tmp + rename dans ecrire_atomique).
+    let nom_log = name.clone();
+    let resultat = tokio::task::spawn_blocking(move || -> Result<(), (StatusCode, String)> {
+        let texte = std::str::from_utf8(&body).map_err(|_| {
+            (
                 StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({ "error": "fichier .cube non textuel" })),
-            );
-        }
-    };
-    if let Err(err) = toolbox_engine::Lut3d::depuis_texte(texte) {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": format!(".cube invalide : {err}") })),
-        );
-    }
-    let chemin = std::path::Path::new("luts").join(&name);
-    let ecrit = std::fs::create_dir_all("luts").and_then(|()| std::fs::write(&chemin, &body));
-    match ecrit {
-        Ok(()) => {
-            info!(name, "LUT déposée");
+                "fichier .cube non textuel".to_string(),
+            )
+        })?;
+        toolbox_engine::Lut3d::depuis_texte(texte)
+            .map_err(|err| (StatusCode::BAD_REQUEST, format!(".cube invalide : {err}")))?;
+        let chemin = std::path::Path::new("luts").join(&name);
+        std::fs::create_dir_all("luts")
+            .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+        toolbox_core::ecrire_atomique(&chemin, &body)
+            .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))
+    })
+    .await;
+    match resultat {
+        Ok(Ok(())) => {
+            info!(name = %nom_log, "LUT déposée");
             (StatusCode::OK, Json(serde_json::json!({ "ok": true })))
         }
-        Err(err) => (
+        Ok(Err((status, msg))) => (status, Json(serde_json::json!({ "error": msg }))),
+        Err(_) => (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": err.to_string() })),
+            Json(serde_json::json!({ "error": "traitement de la LUT interrompu" })),
         ),
     }
 }

@@ -303,6 +303,12 @@ pub async fn service(
     let mut derniere_lecture: std::collections::HashMap<String, tokio::time::Instant> =
         std::collections::HashMap::new();
     const ANTI_REENTREE: std::time::Duration = std::time::Duration::from_millis(250);
+    // Amorce le décalage de fuseau en FOND (thread bloquant) : le premier
+    // calcul lance PowerShell (Windows) / `date` (Unix), 1-3 s. On NE bloque
+    // PAS le démarrage de la boucle (sinon un GO au tout début attendrait) ;
+    // la mémoïsation (OnceLock) est prête bien avant le premier tick horaire.
+    // `drop` de la poignée = tâche détachée (un job bloquant ne s'annule pas).
+    drop(tokio::task::spawn_blocking(heure_locale_hh_mm));
     info!("séquenceur prêt");
     loop {
         // Échéance de l'enchaînement (ou très loin s'il n'y en a pas).
