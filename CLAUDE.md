@@ -183,6 +183,31 @@ Sous Windows, aucune dépendance système (midir utilise WinMM).
   fin des doubles toasts, master drag, masque focus, dblclick volume,
   cue heure vide refusée, polls suspendus onglet caché). 213 tests.
 
+- v3.4.0 (2026-07-22) : 2e passe de fiabilisation « commercialisation »,
+  audit multi-agents à 13 dimensions (zones non couvertes en 3.3.0 +
+  relecture adversariale des correctifs 3.3.0). 51 problèmes réels
+  confirmés, corrigés en 11 blocs testés (223 tests). Faits notables :
+  install.sh chown (une install sudo repart fonctionnelle) ; RTSP appsrc
+  borné/bloquant (anti-OOM Pi) ; anti-CSRF sur routes mutatrices ; le mot
+  de passe UI n'est PLUS relayé au parc mDNS — nouveau `[security]
+  fleet_token` (en-tête `x-lanterne-parc`) ; OSC bundles bornés (anti-stack
+  overflow) + anti-boucle feedback ; MIDI (saut du Midi Through,
+  reconnexion à chaud, binding tolérant aux typos via `commande_tolerante`,
+  superviseur dans node::bascules) ; fader applique enfin mesh/masques/LUT
+  à t=1 + annulation sur chargement direct ; média : sous-dossier illisible
+  toléré ; fenêtre : repli CPU sur perte GPU (`ResultatRendu`), Alt+F4 ne
+  tue plus la boucle, LUT invalidée par mtime, badge img/s→0, écrans à
+  chaud ; gst : reprise flux réseau (`MediaSource::reconnectable`), pipeline
+  Null avant drop ; fleet : nom mDNS unique par machine (`suffixe_unique` +
+  propriété `nom`) ; CI en moindre privilège (read par défaut,
+  persist-credentials:false, push tokené) ; manuel EMBARQUÉ servi à
+  `/manuel`. Rapport détaillé : `AUDIT_V3.3_2026-07-20.md`.
+  LIMITE ASSUMÉE (documentée dans bus.rs) : preset_save/mapping_save font
+  toujours leur fsync DANS la boucle du bus (bref gel sur sauvegarde
+  manuelle) — le sortir casserait l'ordre « sauver puis charger » dont
+  dépendent fader et séquenceur ; vrai remède = cache mémoire des presets
+  partagé avec le fader (refonte, non faite).
+
 ## Prochaines étapes
 
 1. Au retour de Pym : tests matériels (Pi, capture HDMI, Chataigne réel,
