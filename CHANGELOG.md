@@ -3,6 +3,71 @@
 Évolutions notables du node Toolbox. Format inspiré de
 [Keep a Changelog](https://keepachangelog.com/fr/), versionnage SemVer.
 
+## [3.4.0] — 2026-07-22
+
+Deuxième passe de fiabilisation « commercialisation » : un audit
+multi-agents (13 dimensions, contre-vérification adversariale) a couvert
+les zones non explorées en 3.3.0 (OSC, MIDI, sécurité web fine, GStreamer,
+scripts d'installation, fenêtre GPU, JavaScript de l'UI) et relu les
+correctifs de 3.3.0. 51 problèmes réels confirmés, corrigés en 11 blocs
+testés. Aucun format de fichier ni contrat d'API existant ne change ;
+ajouts rétrocompatibles (`[security] fleet_token`, route `/manuel`).
+
+### Critiques
+
+- **Installation Linux/Pi** : `install.sh` donne désormais la propriété du
+  préfixe (`/opt/toolbox`) à l'utilisateur du node — une install `sudo`
+  partait cassée (plus aucun preset, réglage ni log inscriptible).
+- **Sortie RTSP** : l'appsrc est borné et bloquant — un encodeur qui ne
+  tenait pas la cadence faisait grimper la mémoire jusqu'à l'OOM sur Pi.
+
+### Sécurité
+
+- **Anti-CSRF** : les routes mutatrices (reboot, extinction, OTA, identify)
+  rejettent une origine étrangère — une page web piégée ne peut plus les
+  déclencher.
+- **Parc** : le mot de passe de l'UI n'est plus jamais relayé vers un node
+  découvert en mDNS (non authentifié) ; jeton de parc dédié optionnel
+  (`[security] fleet_token`). Client HTTP du parc sans suivi de redirection
+  (anti-SSRF).
+- **OSC** : profondeur de bundle bornée (un paquet forgé ne fait plus
+  déborder la pile → plus d'arrêt du node) ; anti-boucle de feedback.
+- **Synchro maître** : plafond de suiveurs (anti-amplification) ; le suiveur
+  re-résout l'IP du maître (filtrage de source fiable).
+
+### Fiabilité
+
+- **MIDI** : le port « Midi Through » n'est plus choisi par défaut ;
+  détection du débranchement + reconnexion à chaud ; une faute de frappe
+  dans un binding n'empêche plus le node de démarrer.
+- **Fondus** : un `preset_fade` applique enfin mesh, masques et LUT ; un
+  chargement direct pendant un fondu l'annule.
+- **Médiathèque** : un sous-dossier illisible (clé USB) ne vide plus la
+  liste entière.
+- **Fenêtre de sortie** : repli CPU à chaud sur perte du GPU ; Alt+F4 ne
+  tue plus la sortie ; LUT rechargée quand le fichier change ; badge img/s
+  qui retombe à 0 ; écrans rafraîchis à chaud.
+- **GStreamer** : reprise automatique des flux réseau (rtsp/srt/http) après
+  micro-coupure ; pas de fuite de pipeline/threads sur échec.
+- **Parc** : nom mDNS unique par machine (deux Pi de même nom ne sont plus
+  mutuellement invisibles).
+
+### Installation / CI
+
+- `install.sh` : unité systemd échappée, exécution non interactive sûre.
+- Autostart Windows écrit en codepage OEM (chemins accentués) ; les deux
+  installeurs cohérents pour la désinstallation.
+- CI en moindre privilège : lecture seule par défaut, identifiants non
+  persistés pendant les étapes cargo.
+
+### Produit
+
+- Suppressions définitives (cues, faders, scènes, chasers, masques, reset
+  mapping) protégées par une confirmation en deux temps.
+- **Manuel accessible depuis le produit** (embarqué, `/manuel`, lien dans
+  la navigation), infobulles DMX, définition de « cue », divers correctifs
+  d'interface.
+
 ## [3.3.0] — 2026-07-19
 
 Passe de fiabilisation complète en vue d'une exploitation professionnelle
