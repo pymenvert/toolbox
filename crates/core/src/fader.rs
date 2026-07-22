@@ -231,6 +231,11 @@ pub async fn run(
     info!("fader de presets prêt");
     loop {
         tokio::select! {
+            // Biaisé : les événements (dont l'annulation par chargement
+            // direct) sont traités AVANT un pas de fondu échu au même
+            // instant — sinon un dernier pas obsolète pourrait s'appliquer
+            // juste après un preset_load, écrasant brièvement l'état chargé.
+            biased;
             _ = shutdown.changed() => break,
             received = events.recv() => match received {
                 Ok(Event::PresetFadeStarted { name, seconds }) => match store.load(&name) {
@@ -473,12 +478,22 @@ mod tests {
                 },
             )
             .await;
-        // Laisser le temps au fondu de re-écraser s'il n'était pas annulé.
-        tokio::time::sleep(Duration::from_millis(500)).await;
-        let x = handle.snapshot().mapping.corners[0].x;
+        // Preuve d'annulation INDÉPENDANTE du timing (robuste sur CI lente) :
+        // le fondu est arrêté = le coin ne bouge plus. S'il n'était pas
+        // annulé, il continuerait de glisser vers 0.5 entre deux mesures.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let x1 = handle.snapshot().mapping.corners[0].x;
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let x2 = handle.snapshot().mapping.corners[0].x;
         assert!(
-            x > 0.85,
-            "le chargement direct doit tenir (coin à 0.9), pas être ramené vers 0.5 ; obtenu {x}"
+            (x1 - x2).abs() < 1e-6,
+            "le fondu doit être annulé (le coin ne glisse plus) ; {x1} → {x2}"
+        );
+        // Le fondu n'a pas non plus atteint sa cible (0.5) : il a bien été
+        // interrompu par le chargement, pas mené à terme.
+        assert!(
+            (x2 - 0.5).abs() > 0.05,
+            "le fondu ne doit pas avoir convergé vers 0.5 ; obtenu {x2}"
         );
     }
 
