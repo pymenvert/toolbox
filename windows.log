@@ -1,0 +1,206 @@
+[1m[92m    Updating[0m crates.io index
+[1m[92m   Compiling[0m toolbox-core v3.4.0 (D:\a\toolbox\toolbox\crates\core)
+[1m[92m   Compiling[0m toolbox-engine v3.4.0 (D:\a\toolbox\toolbox\crates\engine)
+[1m[92m   Compiling[0m toolbox-artnet v3.4.0 (D:\a\toolbox\toolbox\crates\artnet)
+[1m[92m   Compiling[0m toolbox-ndi v3.4.0 (D:\a\toolbox\toolbox\crates\ndi)
+[1m[92m   Compiling[0m toolbox-control-http v3.4.0 (D:\a\toolbox\toolbox\crates\control-http)
+[1m[92m   Compiling[0m toolbox-render v3.4.0 (D:\a\toolbox\toolbox\crates\render)
+[1m[92m   Compiling[0m toolbox-control-midi v3.4.0 (D:\a\toolbox\toolbox\crates\control-midi)
+[1m[92m   Compiling[0m toolbox-control-osc v3.4.0 (D:\a\toolbox\toolbox\crates\control-osc)
+[1m[92m   Compiling[0m toolbox-gst v3.4.0 (D:\a\toolbox\toolbox\crates\gst)
+[1m[92m   Compiling[0m toolbox-node v3.4.0 (D:\a\toolbox\toolbox\crates\node)
+[1m[92m    Finished[0m `test` profile [unoptimized + debuginfo] target(s) in 54.37s
+[1m[92m     Running[0m unittests src\lib.rs (target\debug\deps\toolbox_artnet-3ad2485cce10955b.exe)
+
+running 7 tests
+test tests::la_trame_artdmx_est_conforme ... ok
+test tests::le_chaser_fond_et_tient_aux_bons_instants ... ok
+test tests::les_trames_appliquent_chaser_et_master ... ok
+test tests::trames_de_sortie_ignore_les_canaux_hors_bornes ... ok
+test tests::la_console_persiste_et_recharge ... ok
+test tests::load_met_de_cote_un_fichier_corrompu ... ok
+test tests::le_service_emet_des_trames_artnet ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.50s
+
+[1m[92m     Running[0m unittests src\lib.rs (target\debug\deps\toolbox_control_http-64ecf61c797ec1cb.exe)
+
+running 29 tests
+test chataigne::tests::l_etat_serialise_le_lien_officiel ... ok
+test chataigne::tests::detecte_le_premier_candidat_present ... ok
+test oscquery::tests::namespace_exposes_parameters_with_ranges_and_values ... ok
+test oscquery::tests::http_serves_host_info_tree_and_attributes ... ok
+test tests::csrf_rejette_l_origine_etrangere ... ok
+test tests::dangerous_upload_names_are_rejected ... ok
+test tests::command_changes_state ... ok
+test tests::fleet_push_copies_media_to_another_node ... ok
+test tests::health_answers ... ok
+test tests::index_serves_embedded_ui ... ok
+test tests::malformed_command_is_rejected ... ok
+test tests::manuel_est_servi_embarque ... ok
+test tests::mapping_preset_api_lists_and_deletes ... ok
+test tests::media_upload_list_delete_roundtrip ... ok
+test tests::origine_correspond_bloque_le_cross_site ... ok
+test tests::output_api_lists_monitors_and_applies_settings ... ok
+test tests::password_gates_everything_when_set ... ok
+test tests::preset_api_lists_and_deletes ... ok
+test tests::preview_cache_shares_renders_within_the_window ... ok
+test tests::preview_png_renders ... ok
+test tests::shutdown_closes_open_websockets_quickly ... ok
+test monitor::tests::collect_never_panics_and_reports_platform ... ok
+test monitor::tests::stats_serialize_to_json ... ok
+test zipper::tests::archive_structure_is_valid ... ok
+test zipper::tests::crc32_reference_value ... ok
+test zipper::tests::empty_archive_is_just_an_eocd ... ok
+test tests::upload_too_large_is_refused_and_cleaned ... ok
+test tests::diagnostic_zip_responds_with_a_zip ... ok
+test tests::system_stats_respond ... ok
+
+test result: ok. 29 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.19s
+
+[1m[92m     Running[0m unittests src\lib.rs (target\debug\deps\toolbox_control_midi-18232c37a01bd057.exe)
+
+running 6 tests
+test tests::channel_filter_applies ... ok
+test tests::cc_scale_maps_to_bounds ... ok
+test tests::cc_can_fire_fixed_command_too ... ok
+test tests::choisir_port_saute_le_midi_through ... ok
+test tests::note_binding_fires_fixed_command ... ok
+test tests::parse_note_on_and_cc ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+[1m[92m     Running[0m unittests src\lib.rs (target\debug\deps\toolbox_control_osc-4a67132398a48996.exe)
+
+running 17 tests
+test tests::color_addresses_map_all_params ... ok
+test tests::blackout_et_freeze_se_mappent ... ok
+test tests::bundles_are_flattened_recursively ... ok
+test tests::compter_bundles_borne_l_imbrication ... ok
+test tests::corner_addresses_carry_index ... ok
+test tests::effect_addresses_map ... ok
+test tests::flip_crop_pattern_map ... ok
+test tests::feedback_mirrors_the_command_grammar ... ok
+test tests::loop_mode_accepts_strings_and_ints ... ok
+test tests::mapping_toggle_and_presets_map ... ok
+test tests::numeric_tolerance_matches_chataigne_habits ... ok
+test tests::playlist_addresses_map ... ok
+test tests::presets_map ... ok
+test tests::sync_addresses_map_with_double_precision ... ok
+test tests::transport_addresses_map ... ok
+test tests::unknown_addresses_are_reported ... ok
+test tests::feedback_delivers_datagrams ... ok
+
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+[1m[92m     Running[0m unittests src\lib.rs (target\debug\deps\toolbox_core-153935255ae43f28.exe)
+
+running 92 tests
+test bus::tests::every_subscriber_receives_all_events ... ok
+test bus::tests::invalid_command_emits_no_event ... ok
+test bus::tests::bus_stops_when_all_handles_dropped ... ok
+test bus::tests::command_produces_event_for_subscribers ... ok
+test bus::tests::mapping_preset_commands_without_store_are_rejected ... ok
+test bus::tests::preset_commands_without_store_are_rejected ... ok
+test bus::tests::missing_preset_leaves_state_untouched ... ok
+test bus::tests::snapshot_follows_mutations ... ok
+test bus::tests::try_send_works_from_sync_context ... ok
+test command::tests::json_format_is_stable ... ok
+test command::tests::mapping_commands_json_format_is_stable ... ok
+test command::tests::new_commands_json_format_is_stable ... ok
+test command::tests::simple_commands_roundtrip ... ok
+test command::tests::unknown_command_is_rejected ... ok
+test config::tests::invalid_toml_is_a_config_error ... ok
+test config::tests::midi_bindings_parse_from_toml ... ok
+test config::tests::missing_file_yields_defaults ... ok
+test bus::tests::preset_fade_is_validated_by_the_bus ... ok
+test config::tests::ndi_desactive_par_defaut ... ok
+test bus::tests::preset_save_and_load_via_bus ... ok
+test bus::tests::mapping_save_and_load_via_bus_keeps_playback ... ok
+test config::tests::output_parses_with_defaults ... ok
+test config::tests::resolution_auto_parses ... ok
+test config::tests::rtsp_desactive_par_defaut ... ok
+test config::tests::partial_file_fills_defaults ... ok
+test config::tests::startup_and_limits_parse_with_defaults ... ok
+test config::tests::telemetrie_absente_par_defaut ... ok
+test fader::tests::ease_is_smooth_and_bounded ... ok
+test config::tests::une_commande_de_binding_inconnue_ne_bloque_pas_le_node ... ok
+test fader::tests::plan_applies_discrete_switches_at_the_end ... ok
+test fader::tests::plan_applies_mesh_lut_masques_at_the_end ... ok
+test fader::tests::plan_between_identical_states_is_empty ... ok
+test fader::tests::plan_interpolates_continuous_params ... ok
+test features::tests::defaults_follow_the_config ... ok
+test features::tests::flags_persist_and_survive_corruption ... ok
+test features::tests::json_format_is_stable ... ok
+test features::tests::missing_fields_default_to_enabled ... ok
+test logging::tests::entry_json_is_stable ... ok
+test logging::tests::live_subscribers_receive_entries ... ok
+test logging::tests::ring_keeps_only_last_entries ... ok
+test logging::tests::sequence_is_strictly_increasing ... ok
+test logging::tests::tracing_events_are_captured_with_fields ... ok
+test logging::tests::zero_capacity_is_clamped ... ok
+test media::tests::dangerous_upload_names_are_rejected ... ok
+test media::tests::list_walks_subfolders_and_skips_hidden ... ok
+test media::tests::rename_collision_is_refused ... ok
+test media::tests::save_list_rename_delete_roundtrip ... ok
+test media::tests::upload_size_limit_is_enforced_and_tmp_cleaned ... ok
+test output::tests::json_formats_are_stable ... ok
+test output::tests::settings_persist_and_survive_corruption ... ok
+test preset::tests::list_and_delete ... ok
+test preset::tests::mapping_store_roundtrip_and_validation ... ok
+test preset::tests::overwrite_is_safe ... ok
+test preset::tests::path_traversal_is_rejected ... ok
+test preset::tests::save_load_roundtrip ... ok
+test preset::tests::tampered_preset_is_rejected_on_load ... ok
+test reglages::tests::les_reglages_persistent_et_les_bornes_tiennent ... ok
+test sequenceur::tests::edition_des_cues ... ok
+test fader::tests::mapping_fade_moves_only_the_mapping ... ok
+test fader::tests::fade_reaches_the_target_preset ... ok
+test sequenceur::tests::la_cue_recursive_ne_boucle_pas ... ok
+test sequenceur::tests::les_jours_de_semaine_filtrent_le_declencheur ... ok
+test sequenceur::tests::les_sequences_persistent ... ok
+test sequenceur::tests::valider_commande_rejette_les_pieges ... ok
+test source::tests::capture_and_ndi_parse ... ok
+test source::tests::files_parse_and_stay_relative ... ok
+test source::tests::les_flux_reseau_sont_reconnectables ... ok
+test source::tests::network_schemes_are_whitelisted ... ok
+test state::tests::blackout_et_freeze_se_posent_et_se_levent ... ok
+test state::tests::color_bounds_enforced ... ok
+test state::tests::corner_validation ... ok
+test state::tests::crop_bounds_enforced ... ok
+test state::tests::effects_validate_and_apply ... ok
+test state::tests::legacy_preset_json_still_loads ... ok
+test state::tests::load_then_play ... ok
+test state::tests::malicious_media_paths_are_rejected ... ok
+test state::tests::mapping_enabled_toggles_and_survives_reset ... ok
+test state::tests::network_capture_and_ndi_sources_are_accepted ... ok
+test state::tests::pause_without_media_is_rejected ... ok
+test state::tests::play_without_media_is_rejected ... ok
+test state::tests::playlist_navigation_and_loop_modes ... ok
+test state::tests::playlist_rejects_bad_paths ... ok
+test state::tests::presets_rejected_by_state ... ok
+test state::tests::rotation_and_flip ... ok
+test state::tests::state_json_roundtrip ... ok
+test state::tests::state_replaced_event_serializes_with_full_state ... ok
+test state::tests::sync_commands_validate_and_schedule ... ok
+test state::tests::validate_accepts_default_and_normal_states ... ok
+test state::tests::validate_rejects_tampered_states ... ok
+test fader::tests::direct_load_cancels_an_ongoing_fade ... FAILED
+test sequenceur::tests::l_enchainement_suit_le_nom_pas_l_index ... ok
+test sequenceur::tests::go_joue_et_enchaine ... ok
+
+failures:
+
+---- fader::tests::direct_load_cancels_an_ongoing_fade stdout ----
+
+thread 'fader::tests::direct_load_cancels_an_ongoing_fade' (2408) panicked at crates\core\src\fader.rs:479:9:
+le chargement direct doit tenir (coin à 0.9), pas être ramené vers 0.5 ; obtenu 0.006872277
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    fader::tests::direct_load_cancels_an_ongoing_fade
+
+test result: FAILED. 91 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.54s
+
+[1m[91merror[0m: test failed, to rerun pass `-p toolbox-core --lib`
