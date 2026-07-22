@@ -105,20 +105,31 @@ pub async fn maitre(
         port = settings.port,
         "synchro maître active (les suiveurs s'annoncent d'eux-mêmes)"
     );
+    // Plafond de suiveurs : sans lui, un hôte hostile pourrait annoncer des
+    // milliers de `hello` (adresses usurpées) et le maître leur émettrait à
+    // tous son horloge à 5 Hz — amplification/DoS. 32 nodes couvrent large.
+    const MAX_SUIVEURS: usize = 32;
     let mut suiveurs: std::collections::HashMap<std::net::SocketAddr, tokio::time::Instant> =
         std::collections::HashMap::new();
     let mut tick = tokio::time::interval(Duration::from_millis(200));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut dernier_warn_plafond = tokio::time::Instant::now() - Duration::from_secs(60);
     let mut buf = [0u8; 1024];
     loop {
         tokio::select! {
             _ = shutdown.changed() => break,
             received = socket.recv_from(&mut buf) => {
                 if let Ok((len, from)) = received {
-                    if serde_json::from_slice::<Bonjour>(&buf[..len]).is_ok()
-                        && suiveurs.insert(from, tokio::time::Instant::now()).is_none()
-                    {
-                        info!(%from, "suiveur de synchro connecté");
+                    if serde_json::from_slice::<Bonjour>(&buf[..len]).is_ok() {
+                        if suiveurs.contains_key(&from) {
+                            suiveurs.insert(from, tokio::time::Instant::now()); // rafraîchit
+                        } else if suiveurs.len() < MAX_SUIVEURS {
+                            suiveurs.insert(from, tokio::time::Instant::now());
+                            info!(%from, "suiveur de synchro connecté");
+                        } else if dernier_warn_plafond.elapsed() > Duration::from_secs(10) {
+                            warn!(%from, max = MAX_SUIVEURS, "plafond de suiveurs atteint — annonce ignorée");
+                            dernier_warn_plafond = tokio::time::Instant::now();
+                        }
                     }
                 }
             }
@@ -174,13 +185,22 @@ pub async fn suiveur(
     info!(%maitre, "synchro suiveur active");
     // IP(s) attendues du maître : on n'accepte l'horloge QUE de lui — sinon
     // n'importe quel hôte du LAN pourrait piloter la lecture du suiveur.
-    // Résolution vide (nom introuvable) = filtrage désactivé, tracé.
-    let ips_maitre: std::collections::HashSet<std::net::IpAddr> = tokio::net::lookup_host(&maitre)
-        .await
-        .map(|addrs| addrs.map(|a| a.ip()).collect())
-        .unwrap_or_default();
+    // Ré-résolue périodiquement (voir annonce.tick) : un maître pas encore
+    // résoluble au boot (il monte après) ou une IP qui change (DHCP)
+    // n'ouvre plus le filtre à vie.
+    let resoudre = |maitre: String| async move {
+        tokio::net::lookup_host(&maitre)
+            .await
+            .map(|addrs| {
+                addrs
+                    .map(|a| a.ip())
+                    .collect::<std::collections::HashSet<_>>()
+            })
+            .unwrap_or_default()
+    };
+    let mut ips_maitre = resoudre(maitre.clone()).await;
     if ips_maitre.is_empty() {
-        warn!(%maitre, "adresse du maître non résolue — filtrage de source désactivé");
+        warn!(%maitre, "adresse du maître non résolue au démarrage — nouvelle tentative en continu");
     }
     let tolerance_s = settings.tolerance_ms.max(20) as f64 / 1000.0;
     let bonjour = serde_json::to_vec(&Bonjour {
@@ -209,6 +229,12 @@ pub async fn suiveur(
         tokio::select! {
             _ = shutdown.changed() => break,
             _ = annonce.tick() => {
+                // Ré-résolution : on ne remplace le filtre que sur un résultat
+                // NON vide (un blip DNS ne doit pas ouvrir le filtrage).
+                let ips = resoudre(maitre.clone()).await;
+                if !ips.is_empty() {
+                    ips_maitre = ips;
+                }
                 if let Err(err) = socket.send_to(&bonjour, &maitre).await {
                     warn!(%err, "annonce au maître non envoyée");
                 }

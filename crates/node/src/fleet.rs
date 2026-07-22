@@ -88,9 +88,14 @@ fn run(
     nodes: &watch::Sender<serde_json::Value>,
 ) {
     // Annonce de ce node (l'IP est résolue automatiquement).
-    let instance = sanitize_instance(&node_name);
+    // Le nom d'INSTANCE mDNS sert aussi de hostname (`.local`) : deux nodes
+    // du même nom (deux Pi fraîchement imagés, tous « raspberrypi », ou deux
+    // configs identiques) entreraient en conflit et deviendraient MUTUELLEMENT
+    // invisibles dans le parc. On rend l'instance unique par un suffixe
+    // machine, et on garde le nom lisible dans la propriété « nom » pour l'UI.
+    let instance = format!("{}-{}", sanitize_instance(&node_name), suffixe_unique());
     let host = format!("{instance}.local.");
-    let properties = [("version", version.as_str())];
+    let properties = [("version", version.as_str()), ("nom", node_name.as_str())];
     match ServiceInfo::new(
         SERVICE_TYPE,
         &instance,
@@ -146,10 +151,16 @@ fn run(
     while let Ok(event) = receiver.recv() {
         match event {
             ServiceEvent::ServiceResolved(service) => {
-                let name = service
+                let instance_resolue = service
                     .get_fullname()
                     .trim_end_matches(&format!(".{SERVICE_TYPE}"))
                     .to_string();
+                // Nom lisible : la propriété « nom » (sans le suffixe machine) ;
+                // à défaut (vieux node), l'instance brute.
+                let name = service
+                    .get_property_val_str("nom")
+                    .map(str::to_string)
+                    .unwrap_or_else(|| instance_resolue.clone());
                 // IPv4 de préférence : une URL http://fe80::… est pénible à
                 // cliquer et souvent invalide sans zone id.
                 let addresses = service.get_addresses();
@@ -161,7 +172,7 @@ fn run(
                     continue;
                 };
                 let node = FleetNode {
-                    soi_meme: name == instance,
+                    soi_meme: instance_resolue == instance,
                     url: format!("http://{ip}:{}/", service.get_port()),
                     version: service
                         .get_property_val_str("version")
@@ -197,6 +208,24 @@ fn publish(nodes: &watch::Sender<serde_json::Value>, connus: &HashMap<String, Fl
 
 /// Nom d'instance mDNS : ASCII simple (les annonces exotiques cassent
 /// certains résolveurs).
+/// Suffixe hexadécimal court identifiant CETTE machine/instance, pour rendre
+/// le nom mDNS unique (le hostname par défaut « raspberrypi » est identique
+/// sur tous les Pi neufs). Dérivé du hostname + PID + heure de démarrage :
+/// stable pendant la vie du process, distinct d'une machine à l'autre.
+fn suffixe_unique() -> String {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    std::env::var("COMPUTERNAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .unwrap_or_default()
+        .hash(&mut h);
+    std::process::id().hash(&mut h);
+    if let Ok(d) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+        d.as_nanos().hash(&mut h);
+    }
+    format!("{:04x}", h.finish() & 0xffff)
+}
+
 fn sanitize_instance(name: &str) -> String {
     let clean: String = name
         .chars()
@@ -224,5 +253,17 @@ mod tests {
         assert_eq!(sanitize_instance("vp-01"), "vp-01");
         assert_eq!(sanitize_instance("Régie café"), "R-gie-caf-");
         assert_eq!(sanitize_instance(""), "toolbox-node");
+    }
+
+    #[test]
+    fn suffixe_unique_est_hexa_court_et_valide_en_hostname() {
+        let s = suffixe_unique();
+        assert_eq!(s.len(), 4, "4 caractères hexa");
+        assert!(s.chars().all(|c| c.is_ascii_hexdigit()));
+        // Combiné à un nom, l'instance reste un hostname valide (alphanum + -).
+        let instance = format!("{}-{}", sanitize_instance("raspberrypi"), s);
+        assert!(instance
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-'));
     }
 }
