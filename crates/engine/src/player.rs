@@ -411,7 +411,7 @@ impl<B: PlayerBackend> Player<B> {
 /// une reprise automatique ; un fichier absent, non.
 fn source_branchable(rel: &str) -> bool {
     toolbox_core::MediaSource::parse(rel)
-        .map(|source| source.is_live())
+        .map(|source| source.reconnectable())
         .unwrap_or(false)
 }
 

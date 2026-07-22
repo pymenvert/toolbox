@@ -108,7 +108,7 @@ pub fn demarrer(
 
     let arret = Arc::new(AtomicBool::new(false));
     let arret_pousseur = arret.clone();
-    let pousseur = std::thread::Builder::new()
+    let pousseur = match std::thread::Builder::new()
         .name("toolbox-kms".into())
         .spawn(move || {
             let periode = std::time::Duration::from_millis(u64::from(1000 / fps.max(1)));
@@ -138,8 +138,16 @@ pub fn demarrer(
                     std::thread::sleep(reste);
                 }
             }
-        })
-        .map_err(|e| format!("thread KMS : {e}"))?;
+        }) {
+        Ok(handle) => handle,
+        Err(e) => {
+            // Le pipeline est déjà en Playing (device DRM tenu). Sans thread
+            // pousseur, il faut le remettre à Null pour libérer /dev/dri —
+            // sinon le périphérique reste verrouillé jusqu'au redémarrage.
+            let _ = pipeline.set_state(gstreamer::State::Null);
+            return Err(format!("thread KMS : {e}"));
+        }
+    };
 
     // Les erreurs du pipeline (câble débranché, permission DRM…) sont
     // tracées : la page Logs de l'UI les montre. Itération PAR TRANCHES

@@ -224,7 +224,13 @@ impl PlayerBackend for GstBackend {
         self.source = Some(source);
         if let Err(err) = self.set_state(gst::State::Paused) {
             self.source = None;
-            self.custom = None;
+            // Le pipeline dédié DOIT passer à Null avant d'être détruit,
+            // sinon ses threads et le périphérique (webcam, capture) fuient —
+            // fuite CUMULATIVE à chaque reprise (toutes les 3 s) d'une source
+            // live indisponible.
+            if let Some(custom) = self.custom.take() {
+                let _ = custom.set_state(gst::State::Null);
+            }
             return Err(err);
         }
         info!(source = %raw, "source chargée (GStreamer)");

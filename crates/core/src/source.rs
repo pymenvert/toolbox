@@ -72,6 +72,18 @@ impl MediaSource {
     pub fn is_live(&self) -> bool {
         matches!(self, MediaSource::Capture(_) | MediaSource::Ndi(_))
     }
+
+    /// La source peut-elle se débrancher puis revenir, méritant une reprise
+    /// automatique ? Capture (webcam rebranchée), NDI (émetteur relancé) ET
+    /// flux réseau (rtsp/srt/http/udp : une micro-coupure ne doit pas arrêter
+    /// la lecture définitivement). Un fichier local absent, lui, ne revient
+    /// pas tout seul : pas de reprise.
+    pub fn reconnectable(&self) -> bool {
+        matches!(
+            self,
+            MediaSource::Capture(_) | MediaSource::Ndi(_) | MediaSource::Network(_)
+        )
+    }
 }
 
 /// Valide un chemin de fichier média : relatif, canonique, sans traversée.
@@ -162,5 +174,17 @@ mod tests {
         assert!(MediaSource::Ndi("x".into()).is_live());
         assert!(!MediaSource::File("a.mp4".into()).is_live());
         assert!(!MediaSource::Network("rtsp://h/s".into()).is_live());
+    }
+
+    #[test]
+    fn les_flux_reseau_sont_reconnectables() {
+        // La reprise automatique couvre capture, NDI ET flux réseau : une
+        // micro-coupure d'un rtsp/srt/http ne doit pas arrêter la lecture.
+        assert!(MediaSource::Capture(0).reconnectable());
+        assert!(MediaSource::Ndi("x".into()).reconnectable());
+        assert!(MediaSource::Network("rtsp://cam/live".into()).reconnectable());
+        assert!(MediaSource::Network("srt://h:9000".into()).reconnectable());
+        // Un fichier local absent ne revient pas seul : pas de reprise.
+        assert!(!MediaSource::File("a.mp4".into()).reconnectable());
     }
 }
