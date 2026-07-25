@@ -557,6 +557,12 @@ footer { margin-top: 60px; padding-top: 24px; border-top: 1px solid var(--lisere
     distance, fichiers du parc… comme en local ;</li>
     <li>recommandé dès que le node sort du réseau de confiance :
     <code>[security] password</code> dans <code>node.toml</code>.</li>
+    <li>si vous avez plusieurs nodes AVEC mot de passe et que vous vous
+    échangez des médias entre eux, ajoutez le même
+    <code>[security] fleet_token</code> sur chacun : c'est lui qui autorise
+    les envois de machine à machine. Le mot de passe de l'interface, lui,
+    n'est jamais transmis à une machine découverte sur le réseau (elle
+    pourrait être un intrus).</li>
   </ul>
   <h3>Chataigne sur la même machine</h3>
   <p>La carte Système → Chataigne détecte le logiciel s'il est installé, le
@@ -626,7 +632,7 @@ command = { cmd = "preset_load", name = "scene_01" }</code></pre>
       <tr><td><code>[limits]</code></td><td>Taille max d'upload, taille du journal</td><td>2048 Mo · 1000 lignes</td></tr>
       <tr><td><code>[osc]</code></td><td>Retour d'état vers <code>feedback = "hôte:port"</code></td><td>désactivé</td></tr>
       <tr><td><code>[sync]</code></td><td>Rôle maître/suiveur, verrouillage à la frame</td><td>désactivé</td></tr>
-      <tr><td><code>[security]</code></td><td>Mot de passe de l'UI et de l'API</td><td>aucun</td></tr>
+      <tr><td><code>[security]</code></td><td>Mot de passe de l'UI et de l'API ; <code>fleet_token</code> partag&eacute; pour les &eacute;changes entre nodes</td><td>aucun</td></tr>
       <tr><td><code>[telemetrie]</code></td><td>Envoi des rapports de crash vers <code>url</code></td><td>désactivé (opt-in)</td></tr>
       <tr><td><code>[midi]</code></td><td>Port et bindings</td><td>—</td></tr>
     </tbody>

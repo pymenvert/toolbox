@@ -75,6 +75,15 @@ gpu = true         # rendu par la carte graphique (repli CPU automatique en cas 
 # n'importe quel nom + ce mot de passe. L'OSC (UDP) reste ouvert.
 # Préférez un mot de passe sans accents (certains outils n'envoient pas l'UTF-8).
 #password = "changez-moi"
+#
+# Jeton PARTAGÉ entre les nodes d'un même parc, pour les échanges de médias
+# de machine à machine (page Médias → « Fichiers du parc » et « Envoyer »).
+# À renseigner IDENTIQUE sur tous les nodes du parc. Utile seulement si vous
+# avez mis un mot de passe ci-dessus : sans ce jeton, les envois vers un node
+# protégé sont refusés (le mot de passe de l'interface n'est JAMAIS transmis
+# à une machine annoncée sur le réseau — elle pourrait être un intrus).
+# Absent = les échanges de parc ne visent que des nodes sans mot de passe.
+#fleet_token = "un-secret-partage-du-parc"
 
 [limits]
 max_upload_mb = 2048   # taille max d'un média déposé via la web UI
