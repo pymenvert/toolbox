@@ -24,3 +24,8 @@ reglages.json
 # SDK NDI proprietaire (licence NewTek/Vizrt) : JAMAIS versionne.
 "NDI sdk/"
 NDI?sdk/
+# Rapports d'audit et de session : ils detaillent des failles (corrigees, mais
+# une feuille de route pour qui reste sur une ancienne version) et restent
+# donc HORS du depot public, dans le dossier parent du projet.
+AUDIT_*.md
+RAPPORT_*.md
