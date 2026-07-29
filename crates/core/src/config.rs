@@ -98,8 +98,7 @@ impl Startup {
     /// L'état de démarrage enregistré depuis l'UI (`demarrage.json`, à côté
     /// de node.toml) prime sur `[startup]` — même logique que sortie.json.
     pub fn load_override(path: &std::path::Path) -> Option<Self> {
-        let bytes = std::fs::read(path).ok()?;
-        serde_json::from_slice(&bytes).ok()
+        crate::charger_ou_mettre_de_cote(path, "état de démarrage")
     }
 
     pub fn save(&self, path: &std::path::Path) -> Result<(), CoreError> {

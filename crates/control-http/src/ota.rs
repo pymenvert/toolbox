@@ -85,11 +85,32 @@ pub fn verifier(version_courante: &str) -> Result<EtatMiseAJour, String> {
             })
         });
     Ok(EtatMiseAJour {
-        plus_recente: version_dispo != version_courante,
+        // STRICTEMENT supérieure. Une simple inégalité annonçait une « mise
+        // à jour » vers une version ANTÉRIEURE dès qu'un node tournait sur
+        // un binaire de CI plus récent que la dernière release — et un
+        // retour arrière peut rendre illisibles des fichiers d'état.
+        plus_recente: est_plus_recente(&version_dispo, version_courante),
         version_courante: version_courante.to_string(),
         version_disponible: Some(version_dispo),
         asset,
     })
+}
+
+/// `dispo` est-elle strictement postérieure à `courante` ? Comparaison
+/// numérique champ par champ (majeur.mineur.correctif) ; un champ non
+/// numérique (pré-version « 3.5.0-rc1 ») compte pour 0, ce qui rend une
+/// pré-version NON proposée face à la version finale — prudence voulue.
+pub fn est_plus_recente(dispo: &str, courante: &str) -> bool {
+    fn triplet(v: &str) -> (u32, u32, u32) {
+        let base = v.split(['-', '+']).next().unwrap_or(v);
+        let mut it = base.split('.').map(|c| c.parse::<u32>().unwrap_or(0));
+        (
+            it.next().unwrap_or(0),
+            it.next().unwrap_or(0),
+            it.next().unwrap_or(0),
+        )
+    }
+    triplet(dispo) > triplet(courante)
 }
 
 /// Télécharge et prépare le nouveau binaire (`toolbox-node.nouveau[.exe]`)
@@ -267,20 +288,97 @@ pub fn appliquer() -> Result<String, String> {
     Ok("Mise à jour appliquée : le node redémarre.".into())
 }
 
-/// Nettoyage au démarrage : l'ancien binaire d'une bascule réussie.
+/// Nettoyage au démarrage — mais SEULEMENT le script de bascule, jamais le
+/// binaire précédent.
+///
+/// L'ancien binaire est le SEUL filet de sécurité d'un opérateur non
+/// développeur dont le node ne redémarre plus après une mise à jour : le
+/// supprimer au tout premier démarrage de la nouvelle version (donc avant
+/// d'avoir la moindre preuve qu'elle fonctionne) revenait à couper la corde
+/// en même temps qu'on la tend. Il est conservé jusqu'au prochain
+/// `telecharger()`, et reste utilisable via [`revenir_en_arriere`].
 pub fn nettoyer_apres_demarrage() {
-    if let Ok(dossier) = dossier_du_binaire() {
-        for reste in [
-            "toolbox-node.exe.precedent",
-            "toolbox-node.precedent",
-            "mise-a-jour.bat",
-        ] {
-            let chemin = dossier.join(reste);
-            if chemin.exists() && std::fs::remove_file(&chemin).is_ok() {
-                info!(fichier = %chemin.display(), "reste de mise à jour nettoyé");
-            }
-        }
-    } else {
+    let Ok(dossier) = dossier_du_binaire() else {
         warn!("dossier du binaire inconnu : pas de nettoyage OTA");
+        return;
+    };
+    let script = dossier.join("mise-a-jour.bat");
+    if script.exists() && std::fs::remove_file(&script).is_ok() {
+        info!(fichier = %script.display(), "script de bascule nettoyé");
+    }
+    if binaire_precedent().is_some() {
+        info!("version précédente conservée : retour arrière possible depuis l'onglet Système");
+    }
+}
+
+/// Le binaire de la version précédente, s'il existe encore.
+pub fn binaire_precedent() -> Option<std::path::PathBuf> {
+    let dossier = dossier_du_binaire().ok()?;
+    ["toolbox-node.exe.precedent", "toolbox-node.precedent"]
+        .iter()
+        .map(|n| dossier.join(n))
+        .find(|p| p.exists())
+}
+
+/// Remet la version précédente en place (retour arrière après une mise à
+/// jour ratée). Le node doit redémarrer ensuite, comme pour `appliquer`.
+pub fn revenir_en_arriere() -> Result<String, String> {
+    let precedent = binaire_precedent().ok_or(
+        "aucune version précédente conservée — rien à restaurer (le retour arrière n'est possible qu'après une mise à jour)",
+    )?;
+    let dossier = dossier_du_binaire()?;
+    let courant = dossier.join(if cfg!(windows) {
+        "toolbox-node.exe"
+    } else {
+        "toolbox-node"
+    });
+    // On garde la version défaillante sous la main plutôt que de l'effacer :
+    // elle peut servir au diagnostic.
+    let ecarte = courant.with_extension("defaillant");
+    let _ = std::fs::remove_file(&ecarte);
+    std::fs::rename(&courant, &ecarte).map_err(|e| format!("mise à l'écart : {e}"))?;
+    if let Err(err) = std::fs::rename(&precedent, &courant) {
+        let _ = std::fs::rename(&ecarte, &courant); // rien n'a changé
+        return Err(format!("retour arrière échoué (annulé) : {err}"));
+    }
+    info!("retour à la version précédente effectué : le node redémarre");
+    Ok("Version précédente restaurée : le node redémarre.".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Le coeur du garde-fou : ne JAMAIS proposer une version antérieure.
+    /// Avant, une simple inégalité proposait « 3.3.0 » à un node en 3.4.0
+    /// (binaire de CI plus récent que la dernière release) — et accepter
+    /// revenait à installer un binaire qui peut ne plus relire les fichiers
+    /// d'état écrits depuis.
+    #[test]
+    fn est_plus_recente_compare_bien_les_versions() {
+        assert!(est_plus_recente("3.5.0", "3.4.0"));
+        assert!(est_plus_recente("3.4.1", "3.4.0"));
+        assert!(est_plus_recente("4.0.0", "3.9.9"));
+        // Le piège corrigé : plus ancienne ou identique = pas de proposition.
+        assert!(!est_plus_recente("3.3.0", "3.4.0"));
+        assert!(!est_plus_recente("3.4.0", "3.4.0"));
+        // Comparaison NUMÉRIQUE, pas lexicographique ("10" > "9").
+        assert!(est_plus_recente("3.10.0", "3.9.0"));
+        // Une pré-version n'est pas proposée face à la version finale.
+        assert!(!est_plus_recente("3.4.0-rc1", "3.4.0"));
+        // Champs manquants ou illisibles : traités comme 0, jamais de panique.
+        assert!(est_plus_recente("3.5", "3.4.9"));
+        assert!(!est_plus_recente("", "3.4.0"));
+        assert!(!est_plus_recente("bidon", "3.4.0"));
+    }
+
+    /// Sans mise à jour préalable, le retour arrière refuse proprement au
+    /// lieu de toucher au binaire en place.
+    #[test]
+    fn revenir_en_arriere_sans_precedent_refuse() {
+        if binaire_precedent().is_none() {
+            let err = revenir_en_arriere().expect_err("doit refuser");
+            assert!(err.contains("aucune version précédente"), "message : {err}");
+        }
     }
 }

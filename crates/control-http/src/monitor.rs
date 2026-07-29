@@ -50,6 +50,15 @@ pub fn collect(started_at: Instant) -> SystemStats {
     }
 }
 
+/// Espace libre du volume de travail, en Go. `None` = mesure indisponible
+/// (on ne bloque alors rien : mieux vaut laisser passer que refuser à tort).
+///
+/// Appelle un sous-processus (`df` / `wmic`) : à réserver aux gestes ponctuels
+/// (début d'un upload, d'une mise à jour), jamais à un chemin chaud.
+pub fn espace_libre_go() -> Option<f32> {
+    read_disk().map(|(libre, _)| libre)
+}
+
 /// Espace disque (libre, total) du volume courant, en Go.
 /// `df -k .` : POSIX, présent partout (Pi compris), sans unsafe.
 #[cfg(target_os = "linux")]

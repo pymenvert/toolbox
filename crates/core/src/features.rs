@@ -79,8 +79,7 @@ impl FeatureFlags {
     /// fichier est absent ou illisible — l'appelant retombe sur les défauts
     /// issus de la config.
     pub fn load(path: &std::path::Path) -> Option<Self> {
-        let bytes = std::fs::read(path).ok()?;
-        serde_json::from_slice(&bytes).ok()
+        crate::charger_ou_mettre_de_cote(path, "interrupteurs de fonctions")
     }
 
     /// Persiste les interrupteurs (écriture atomique + flush disque) :

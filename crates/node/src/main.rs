@@ -208,6 +208,31 @@ async fn run(mut config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std:
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let mut services: Vec<(&'static str, tokio::task::JoinHandle<()>)> = Vec::new();
 
+    // Purge périodique du journal. Elle n'avait lieu qu'au démarrage : un
+    // node en installation permanente ne redémarre pas pendant des mois, le
+    // journal grossissait donc sans fin jusqu'à saturer la carte SD.
+    {
+        let dossier = config.paths.logs.clone();
+        let mut arret = shutdown_rx.clone();
+        services.push((
+            "purge-journal",
+            tokio::spawn(async move {
+                let mut tick = tokio::time::interval(journal::INTERVALLE_PURGE);
+                tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                tick.tick().await; // le premier tick est immédiat : déjà fait au boot
+                loop {
+                    tokio::select! {
+                        _ = arret.changed() => break,
+                        _ = tick.tick() => {
+                            let d = dossier.clone();
+                            let _ = tokio::task::spawn_blocking(move || journal::purger(&d)).await;
+                        }
+                    }
+                }
+            }),
+        ));
+    }
+
     // Canaux de la sortie vidéo : frames décodées (backend → fenêtre),
     // réglages à chaud (API web → fenêtre, initialisés depuis [output]) et
     // écrans détectés (fenêtre → API web).

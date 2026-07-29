@@ -340,6 +340,7 @@ pub fn router(app: AppState) -> Router {
         .route("/api/update/check", get(update_check))
         .route("/api/update/download", post(update_download))
         .route("/api/update/apply", post(update_apply))
+        .route("/api/update/rollback", post(update_rollback))
         .route("/ws", get(ws_events_upgrade))
         .route("/ws/logs", get(ws_logs_upgrade))
         .layer(axum::middleware::from_fn_with_state(
@@ -354,6 +355,12 @@ pub fn router(app: AppState) -> Router {
 
 /// En-tête portant le jeton de parc (échanges serveur-à-serveur).
 const ENTETE_JETON_PARC: &str = "x-lanterne-parc";
+
+/// Marge disque en dessous de laquelle on refuse d'écrire de gros fichiers
+/// (upload de média, téléchargement de mise à jour). Il faut garder de quoi
+/// écrire les presets, réglages et journaux — un disque plein rend le node
+/// muet sans que l'opérateur comprenne pourquoi.
+const ESPACE_MINIMAL_GO: f32 = 0.5;
 
 /// Défense anti-CSRF : rejette toute requête MUTATRICE (POST/PUT/DELETE/PATCH)
 /// dont l'origine annoncée (Origin, sinon Referer) désigne un autre hôte que
@@ -605,6 +612,23 @@ async fn media_upload(
     request: Request,
 ) -> Result<(StatusCode, Json<MediaInfo>), ApiError> {
     validate_upload_name(&name)?;
+    // Refus net quand le disque est presque plein : sans ce garde, on écrit
+    // jusqu'à saturation, puis le node ne peut PLUS enregistrer ni preset ni
+    // réglage (l'échec est silencieux côté opérateur). Mesure indisponible =
+    // on laisse passer, mieux vaut ça qu'un refus à tort.
+    if let Some(libre) = tokio::task::spawn_blocking(monitor::espace_libre_go)
+        .await
+        .ok()
+        .flatten()
+    {
+        if libre < ESPACE_MINIMAL_GO {
+            warn!(libre, "upload refusé : espace disque insuffisant");
+            return Err(CoreError::InvalidCommand(format!(
+                "espace disque insuffisant ({libre:.1} Go libres) — faites de la place avant d'envoyer un média"
+            ))
+            .into());
+        }
+    }
     let root = app.media.root().to_path_buf();
     // Suffixe unique : deux uploads simultanés du même nom n'écrivent pas
     // dans le même temporaire (l'échec de l'un supprimerait le fichier en
@@ -1673,6 +1697,24 @@ async fn update_apply(State(_app): State<AppState>) -> Result<Json<serde_json::V
         .map_err(|e| CoreError::InvalidCommand(format!("bascule interrompue : {e}")))?
         .map_err(CoreError::InvalidCommand)?;
     warn!("mise à jour appliquée : arrêt du node dans 1 s (redémarrage attendu)");
+    tokio::spawn(async {
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        std::process::exit(0);
+    });
+    Ok(Json(serde_json::json!({ "message": message })))
+}
+
+/// Retour à la version précédente après une mise à jour ratée. C'est le
+/// SEUL geste de récupération disponible depuis l'interface pour un
+/// opérateur non développeur dont le node se comporte mal après une OTA.
+async fn update_rollback(
+    State(_app): State<AppState>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let message = tokio::task::spawn_blocking(ota::revenir_en_arriere)
+        .await
+        .map_err(|e| CoreError::InvalidCommand(format!("retour arrière interrompu : {e}")))?
+        .map_err(CoreError::InvalidCommand)?;
+    warn!("retour à la version précédente : arrêt du node dans 1 s");
     tokio::spawn(async {
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         std::process::exit(0);

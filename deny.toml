@@ -1,0 +1,39 @@
+# Contrôle des licences des dépendances (cargo-deny).
+#
+# Objectif : Lanterne est destiné à être VENDU. Toute dépendance sous une
+# licence à réciprocité forte (GPL/AGPL) intégrée au binaire rendrait la
+# distribution propriétaire impossible. Ce fichier fait échouer la CI avant
+# qu'une telle dépendance n'entre par la porte de derrière.
+
+[licenses]
+# Licences permissives acceptées sans discussion.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "CC0-1.0",
+    "BSL-1.0",
+    "MPL-2.0",       # copyleft de FICHIER : compatible avec un binaire vendu
+    "OpenSSL",
+    "Unlicense",
+]
+confidence-threshold = 0.8
+
+[bans]
+# Rien de banni a priori : c'est la liste de licences qui fait foi.
+multiple-versions = "allow"
+
+[advisories]
+# Les avis de sécurité sont informatifs ici (la CI ne doit pas casser sur
+# une CVE d'une dépendance transitive un lundi matin), mais ils remontent.
+yanked = "warn"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

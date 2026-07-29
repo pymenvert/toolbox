@@ -12,7 +12,7 @@
 //!   peut obtenir un instantané cohérent sans interroger le bus.
 
 use tokio::sync::{broadcast, mpsc, watch};
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 use crate::command::Command;
 use crate::preset::{MappingStore, PresetStore};
@@ -274,7 +274,16 @@ impl Bus {
                 emitted
             }
             Err(err) => {
-                warn!(%source, ?command, %err, "commande refusée");
+                // Une erreur d'ENTRÉE/SORTIE n'est pas une commande invalide :
+                // c'est une panne (disque plein, volume en lecture seule) qui
+                // fait échouer silencieusement un « Enregistrer ». On la trace
+                // en ERROR pour qu'elle compte dans les erreurs récentes et
+                // allume la pastille de la carte Santé.
+                if matches!(err, crate::error::CoreError::Io { .. }) {
+                    error!(%source, ?command, %err, "ÉCRITURE IMPOSSIBLE (disque plein ou en lecture seule ?)");
+                } else {
+                    warn!(%source, ?command, %err, "commande refusée");
+                }
                 Vec::new()
             }
         }

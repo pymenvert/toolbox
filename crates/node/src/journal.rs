@@ -16,6 +16,16 @@ use tracing_appender::non_blocking::{NonBlocking, WorkerGuard};
 /// Nombre de fichiers quotidiens conservés (≈ deux semaines d'historique).
 pub const JOURS_GARDES: usize = 14;
 
+/// Budget disque TOTAL du journal, tous fichiers confondus. Le compte de
+/// jours ne suffit pas : un service bavard (une boucle de reconnexion qui
+/// trace) peut produire des centaines de Mo en 14 jours et remplir la carte
+/// SD d'un node en installation permanente.
+pub const OCTETS_GARDES: u64 = 200 * 1024 * 1024;
+
+/// Intervalle de la purge périodique. Un node kiosque tourne des mois sans
+/// redémarrer : purger seulement au démarrage ne purgeait jamais.
+pub const INTERVALLE_PURGE: std::time::Duration = std::time::Duration::from_secs(6 * 3600);
+
 /// Préfixe des fichiers (`tracing-appender` ajoute `.AAAA-MM-JJ`).
 const PREFIXE: &str = "toolbox.log";
 
@@ -24,35 +34,59 @@ const PREFIXE: &str = "toolbox.log";
 /// les dernières lignes sont vidées sur disque).
 pub fn disk_writer(dir: &Path) -> io::Result<(NonBlocking, WorkerGuard)> {
     fs::create_dir_all(dir)?;
-    prune(dir, JOURS_GARDES);
+    purger(dir);
     let appender = tracing_appender::rolling::daily(dir, PREFIXE);
     Ok(tracing_appender::non_blocking(appender))
 }
 
-/// Supprime les fichiers de journal les plus anciens au-delà de `keep`.
-/// Les dates ISO se trient par le nom ; toute erreur est tracée sur stderr
-/// (le tracing n'est pas encore installé) et n'empêche jamais le démarrage.
-fn prune(dir: &Path, keep: usize) {
+/// Purge aux valeurs par défaut : à appeler au démarrage ET périodiquement.
+pub fn purger(dir: &Path) {
+    prune(dir, JOURS_GARDES, OCTETS_GARDES);
+}
+
+/// Supprime les journaux les plus anciens : d'abord au-delà de `keep`
+/// fichiers, puis tant que le total dépasse `budget` octets. Les dates ISO
+/// se trient par le nom ; toute erreur est tracée sur stderr (le tracing
+/// peut ne pas être installé) et n'empêche jamais le démarrage.
+fn prune(dir: &Path, keep: usize, budget: u64) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;
     };
-    let mut journaux: Vec<_> = entries
+    // (nom, taille) des seuls fichiers de journal.
+    let mut journaux: Vec<(String, u64)> = entries
         .flatten()
         .filter_map(|entry| {
             let name = entry.file_name().to_str()?.to_string();
-            name.starts_with(&format!("{PREFIXE}.")).then_some(name)
+            if !name.starts_with(&format!("{PREFIXE}.")) {
+                return None;
+            }
+            let taille = entry.metadata().map(|m| m.len()).unwrap_or(0);
+            Some((name, taille))
         })
         .collect();
-    if journaux.len() <= keep {
-        return;
-    }
     // Tri croissant : les plus vieux d'abord.
     journaux.sort();
-    let excedent = journaux.len() - keep;
-    for name in journaux.into_iter().take(excedent) {
-        if let Err(err) = fs::remove_file(dir.join(&name)) {
+
+    let supprimer = |dir: &Path, name: &str| {
+        if let Err(err) = fs::remove_file(dir.join(name)) {
             eprintln!("toolbox-node : purge du journal {name} impossible : {err}");
         }
+    };
+
+    // 1) Excédent en NOMBRE de jours.
+    let excedent = journaux.len().saturating_sub(keep);
+    for (name, _) in journaux.drain(..excedent) {
+        supprimer(dir, &name);
+    }
+
+    // 2) Excédent en TAILLE : on retire les plus vieux jusqu'à repasser sous
+    //    le budget, en gardant toujours le fichier du jour (le dernier).
+    let mut total: u64 = journaux.iter().map(|(_, t)| *t).sum();
+    while total > budget && journaux.len() > 1 {
+        let (name, taille) = journaux.remove(0);
+        total = total.saturating_sub(taille);
+        eprintln!("toolbox-node : journal {name} purgé (budget de {budget} octets dépassé)");
+        supprimer(dir, &name);
     }
 }
 
@@ -69,7 +103,7 @@ mod tests {
         // Un fichier étranger ne doit jamais être touché.
         std::fs::write(dir.path().join("autre.txt"), b"x").expect("write");
 
-        prune(dir.path(), 2);
+        prune(dir.path(), 2, OCTETS_GARDES);
 
         let mut restants: Vec<_> = std::fs::read_dir(dir.path())
             .expect("read_dir")
@@ -91,8 +125,38 @@ mod tests {
     fn prune_below_threshold_does_nothing() {
         let dir = tempfile::tempdir().expect("tempdir");
         std::fs::write(dir.path().join(format!("{PREFIXE}.2026-07-01")), b"x").expect("write");
-        prune(dir.path(), 14);
+        prune(dir.path(), 14, OCTETS_GARDES);
         assert!(dir.path().join(format!("{PREFIXE}.2026-07-01")).exists());
+    }
+
+    /// Le compte de jours ne suffit pas : un service bavard peut remplir le
+    /// disque en restant sous les 14 fichiers. Le budget de TAILLE purge les
+    /// plus vieux, mais garde toujours le journal du jour.
+    #[test]
+    fn prune_respecte_le_budget_de_taille() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        for day in ["2026-07-01", "2026-07-02", "2026-07-03"] {
+            std::fs::write(
+                dir.path().join(format!("{PREFIXE}.{day}")),
+                vec![b'x'; 1000],
+            )
+            .expect("write");
+        }
+        // Budget de 1500 octets pour 3000 : les deux plus vieux sautent.
+        prune(dir.path(), 14, 1500);
+
+        let restants: Vec<_> = std::fs::read_dir(dir.path())
+            .expect("read_dir")
+            .flatten()
+            .filter_map(|e| e.file_name().to_str().map(String::from))
+            .collect();
+        assert_eq!(restants, vec![format!("{PREFIXE}.2026-07-03")]);
+
+        // Un seul fichier trop gros : on ne le supprime PAS (sinon le node
+        // perdrait le journal en cours d'écriture, celui qui sert justement
+        // à comprendre pourquoi ça déborde).
+        prune(dir.path(), 14, 10);
+        assert!(dir.path().join(format!("{PREFIXE}.2026-07-03")).exists());
     }
 
     #[test]

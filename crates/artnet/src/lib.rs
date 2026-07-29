@@ -124,34 +124,15 @@ impl EtatLumieres {
     /// ainsi pour récupération). Les faders sont bornés (canal 1..=512,
     /// univers ≤ 32767) : un canal 0 ferait paniquer l'émission.
     pub fn load(path: &std::path::Path) -> Option<Self> {
-        let bytes = match std::fs::read(path) {
-            Ok(bytes) => bytes,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return None,
-            Err(err) => {
-                tracing::error!(%err, chemin = %path.display(), "lumieres.json illisible");
-                return None;
-            }
-        };
-        match serde_json::from_slice::<Self>(&bytes) {
-            Ok(mut etat) => {
-                etat.chaser_actif = None; // un chaser ne survit pas au redémarrage
-                for fader in &mut etat.faders {
-                    fader.canal = fader.canal.clamp(1, 512);
-                    fader.univers = fader.univers.min(32_767);
-                }
-                Some(etat)
-            }
-            Err(err) => {
-                let corrompu = path.with_extension("json.corrompu");
-                let _ = std::fs::rename(path, &corrompu);
-                tracing::error!(
-                    %err,
-                    sauvegarde = %corrompu.display(),
-                    "lumieres.json corrompu — mis de côté, console repartie à vide"
-                );
-                None
-            }
+        // Filet commun à tous les fichiers d'état (absent = silencieux,
+        // corrompu = mis de côté en `.corrompu` au lieu d'être écrasé).
+        let mut etat: Self = toolbox_core::charger_ou_mettre_de_cote(path, "console lumières")?;
+        etat.chaser_actif = None; // un chaser ne survit pas au redémarrage
+        for fader in &mut etat.faders {
+            fader.canal = fader.canal.clamp(1, 512);
+            fader.univers = fader.univers.min(32_767);
         }
+        Some(etat)
     }
 
     pub fn save(&self, path: &std::path::Path) -> Result<(), toolbox_core::CoreError> {

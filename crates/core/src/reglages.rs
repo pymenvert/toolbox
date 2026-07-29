@@ -47,9 +47,14 @@ impl Reglages {
     /// Relit les réglages persistés ; `None` si absents ou illisibles
     /// (l'appelant garde alors node.toml tel quel).
     pub fn load(path: &std::path::Path) -> Option<Self> {
-        let bytes = std::fs::read(path).ok()?;
-        let reglages: Self = serde_json::from_slice(&bytes).ok()?;
-        reglages.validate().ok()?;
+        let reglages: Self = crate::charger_ou_mettre_de_cote(path, "réglages de performance")?;
+        // Lisible mais incohérent (valeurs hors bornes) : on le signale au
+        // lieu de l'appliquer, sans détruire le fichier — l'opérateur peut
+        // le corriger à la main.
+        if let Err(err) = reglages.validate() {
+            tracing::error!(%err, fichier = %path.display(), "réglages de performance hors bornes — ignorés");
+            return None;
+        }
         Some(reglages)
     }
 

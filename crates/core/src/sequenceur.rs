@@ -91,8 +91,33 @@ pub fn valider_commande(commande: &CommandeSequenceur) -> Result<(), String> {
 pub struct Cue {
     pub nom: String,
     pub declencheur: Declencheur,
-    /// Commandes du bus, exécutées dans l'ordre.
+    /// Commandes du bus, exécutées dans l'ordre. Désérialisation TOLÉRANTE
+    /// action par action : une variante inconnue (fichier écrit par une
+    /// version plus récente, ou retour arrière après une mise à jour) est
+    /// ignorée SEULE. Sans ça, une action illisible faisait échouer le
+    /// fichier entier et effaçait toute la conduite du spectacle.
+    #[serde(deserialize_with = "actions_tolerantes")]
     pub actions: Vec<Command>,
+}
+
+/// Désérialise les actions d'une cue une par une, en sautant celles qui ne
+/// se relisent pas. Perdre une action sur dix vaut infiniment mieux que
+/// perdre l'intégralité des cues.
+fn actions_tolerantes<'de, D>(deserializer: D) -> Result<Vec<Command>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let brutes = Vec::<serde_json::Value>::deserialize(deserializer)?;
+    let mut actions = Vec::with_capacity(brutes.len());
+    for brute in brutes {
+        match serde_json::from_value::<Command>(brute.clone()) {
+            Ok(command) => actions.push(command),
+            Err(err) => {
+                tracing::error!(%err, action = %brute, "action de cue illisible — ignorée (le reste de la conduite est conservé)");
+            }
+        }
+    }
+    Ok(actions)
 }
 
 /// L'état du séquenceur, publié à l'UI et persisté (sans le transitoire).
@@ -110,8 +135,7 @@ pub struct EtatSequenceur {
 
 impl EtatSequenceur {
     pub fn load(path: &std::path::Path) -> Option<Self> {
-        let bytes = std::fs::read(path).ok()?;
-        let mut etat: Self = serde_json::from_slice(&bytes).ok()?;
+        let mut etat: Self = crate::charger_ou_mettre_de_cote(path, "séquences")?;
         // Le transitoire ne survit pas au redémarrage.
         etat.en_attente = None;
         etat.derniere = None;
@@ -485,6 +509,45 @@ mod tests {
         assert!(!jour_vise(&[4, 5], 0));
         // OSC/MIDI : une cue est déclenchable par le bus (commande cue_go),
         // vérifié par le test de bout en bout ci-dessous via CueDemandee.
+    }
+
+    /// Un sequences.json corrompu est MIS DE CÔTÉ, pas écrasé : la conduite
+    /// du spectacle reste récupérable à la main.
+    #[test]
+    fn un_fichier_de_cues_corrompu_est_preserve() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let chemin = dir.path().join("sequences.json");
+        assert!(EtatSequenceur::load(&chemin).is_none(), "absent = None");
+
+        std::fs::write(&chemin, b"{ pas du json").expect("write");
+        assert!(EtatSequenceur::load(&chemin).is_none());
+        assert!(
+            chemin.with_extension("json.corrompu").exists(),
+            "le fichier doit être mis de côté, jamais perdu"
+        );
+    }
+
+    /// Une action inconnue (fichier écrit par une version plus récente, ou
+    /// retour arrière après mise à jour) ne doit PAS emporter toute la
+    /// conduite : elle est ignorée seule.
+    #[test]
+    fn une_action_inconnue_ne_detruit_pas_la_conduite() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let chemin = dir.path().join("sequences.json");
+        std::fs::write(
+            &chemin,
+            br#"{"cues":[{"nom":"acte1","declencheur":{"type":"manuel"},
+                "actions":[{"cmd":"play"},{"cmd":"commande_du_futur"},{"cmd":"stop"}]}]}"#,
+        )
+        .expect("write");
+
+        let etat = EtatSequenceur::load(&chemin).expect("la conduite survit");
+        assert_eq!(etat.cues.len(), 1, "la cue est conservée");
+        assert_eq!(
+            etat.cues[0].actions,
+            vec![Command::Play, Command::Stop],
+            "seule l'action inconnue est perdue"
+        );
     }
 
     #[test]

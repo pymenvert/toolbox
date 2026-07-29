@@ -34,8 +34,7 @@ impl OutputSettings {
     /// `None` si le fichier est absent ou illisible — l'appelant retombe
     /// alors sur `[output]` de la config.
     pub fn load(path: &std::path::Path) -> Option<Self> {
-        let bytes = std::fs::read(path).ok()?;
-        serde_json::from_slice(&bytes).ok()
+        crate::charger_ou_mettre_de_cote(path, "réglages de sortie")
     }
 
     /// Persiste les réglages (écriture atomique + flush disque : ni un

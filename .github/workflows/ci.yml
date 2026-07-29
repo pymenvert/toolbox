@@ -172,6 +172,26 @@ jobs:
           git commit -qm "logs gstreamer $GITHUB_RUN_ID"
           git push -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" ci-logs-gstreamer
 
+  # Conformité de redistribution : Lanterne est destiné à être VENDU. Une
+  # dépendance sous GPL/AGPL entrée par une transitive rendrait la
+  # distribution propriétaire impossible — mieux vaut l'apprendre ici qu'au
+  # service juridique d'un client. Voir deny.toml et docs/TIERS.md.
+  licences:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Dépendances système (ALSA pour le MIDI)
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - name: cargo-deny (licences des dépendances)
+        run: |
+          set -o pipefail
+          cargo install --locked cargo-deny 2>&1 | tail -1
+          cargo deny check licenses
+
   shellcheck:
     runs-on: ubuntu-latest
     permissions:
@@ -274,6 +294,10 @@ jobs:
           mkdir -p dist/lib
           cp target/release/toolbox-node.exe dist/
           cp deploy/run-portable.bat dist/
+          # Mentions légales des composants tiers : obligation LGPL
+          # (GStreamer) et point de décision GPL — voir docs/TIERS.md.
+          cp docs/TIERS.md dist/
+          cp LICENSE dist/ 2>/dev/null || true
           cp "$GST"/bin/*.dll dist/
           cp -r "$GST"/lib/gstreamer-1.0 dist/lib/
           rm -f dist/lib/gstreamer-1.0/*.pdb 2>/dev/null || true
