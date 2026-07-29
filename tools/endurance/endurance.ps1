@@ -39,7 +39,22 @@ function Get-Champ($objet, $chemin) {
         $courant = $courant.$cle
     }
     if ($null -eq $courant) { return "" }
+    # SEPARATEUR DECIMAL : le point, toujours. Sur un Windows francais,
+    # "$valeur" rend « 3,10 » -- le collecteur shell, lui, ecrit « 3.10 ».
+    # Les deux collecteurs doivent produire des fichiers identiques, sinon
+    # la promesse « depouiller un CSV de Pi avec le script Windows » est
+    # fausse des qu'une colonne devient flottante.
+    if ($courant -is [double] -or $courant -is [single] -or $courant -is [decimal]) {
+        return $courant.ToString([cultureinfo]::InvariantCulture)
+    }
     return $courant
+}
+
+# Lecture d'un nombre venant du CSV, quelle que soit sa provenance :
+# les fichiers produits AVANT ce correctif portent des virgules decimales.
+function ConvertTo-Nombre($texte) {
+    if ($null -eq $texte -or "$texte" -eq "") { return $null }
+    return [double]::Parse(("$texte" -replace ",", "."), [cultureinfo]::InvariantCulture)
 }
 
 # La charge doit etre CONTINUE, pas un ping toutes les 15 s : un node au
@@ -106,8 +121,13 @@ function Stop-Charge($jobs) {
 function Start-Collecte {
     param($base, $minutes, $intervalle, $fichier, $sansCharge, $cadence)
 
-    "secondes;rss_mb;p50_us;p95_us;max_us;sautees;fps;erreurs;uptime_s" |
-        Out-File -FilePath $fichier -Encoding utf8
+    # UTF-8 SANS BOM, comme le collecteur shell : Out-File -Encoding utf8
+    # sous PowerShell 5.1 prefixe le fichier d'un BOM, qui colle a l'en-tete
+    # de la premiere colonne pour tout lecteur autre qu'Import-Csv.
+    [System.IO.File]::WriteAllText(
+        $fichier,
+        "secondes;rss_mb;p50_us;p95_us;max_us;sautees;fps;erreurs;uptime_s`r`n",
+        (New-Object System.Text.UTF8Encoding($false)))
 
     $debut = Get-Date
     $fin = $debut.AddMinutes($minutes)
@@ -194,13 +214,18 @@ function Show-Analyse($fichier) {
     $rss = @()
     $p95 = @()
     foreach ($l in $lignes) {
-        if ($l.rss_mb -ne "") {
-            $heures += [double]$l.secondes / 3600.0
-            $rss += [double]$l.rss_mb
+        $memoire = ConvertTo-Nombre $l.rss_mb
+        $secondes = ConvertTo-Nombre $l.secondes
+        if ($null -ne $memoire -and $null -ne $secondes) {
+            $heures += $secondes / 3600.0
+            $rss += $memoire
         }
-        if ($l.p95_us -ne "" -and [double]$l.p95_us -gt 0) { $p95 += [double]$l.p95_us }
+        $val = ConvertTo-Nombre $l.p95_us
+        if ($null -ne $val -and $val -gt 0) { $p95 += $val }
     }
-    $duree = [double]$lignes[-1].secondes / 3600.0
+    $derniere = ConvertTo-Nombre $lignes[-1].secondes
+    if ($null -eq $derniere) { $derniere = 0 }
+    $duree = $derniere / 3600.0
 
     Write-Host ""
     Write-Host "=== Endurance : $($lignes.Count) points sur $([math]::Round($duree,2)) h ==="
@@ -257,16 +282,16 @@ function Show-Analyse($fichier) {
     }
 
     # --- Incidents cumules.
-    $sautDebut = $lignes[0].sautees
-    $sautFin = $lignes[-1].sautees
-    if ($sautDebut -ne "" -and $sautFin -ne "") {
-        $delta = [int]$sautFin - [int]$sautDebut
+    $sautDebut = ConvertTo-Nombre $lignes[0].sautees
+    $sautFin = ConvertTo-Nombre $lignes[-1].sautees
+    if ($null -ne $sautDebut -and $null -ne $sautFin) {
+        $delta = [int]($sautFin - $sautDebut)
         Write-Host ""
         Write-Host "Images perdues pendant le run : $delta"
         if ($delta -gt 100) { Write-Host "  VERDICT : anormal, a investiguer." }
     }
-    $errFin = $lignes[-1].erreurs
-    if ($errFin -ne "" -and [int]$errFin -gt 0) {
+    $errFin = ConvertTo-Nombre $lignes[-1].erreurs
+    if ($null -ne $errFin -and $errFin -gt 0) {
         Write-Host "Erreurs dans le journal a la fin : $errFin (voir l'onglet Logs)"
     }
     Write-Host ""
