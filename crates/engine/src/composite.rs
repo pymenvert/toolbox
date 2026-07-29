@@ -69,17 +69,29 @@ impl Compositeur {
         if self.state.has_changed().unwrap_or(false) {
             self.snapshot = self.state.borrow_and_update().clone();
         }
-        match (&self.snapshot.lut, &mut self.lut_cache) {
+        // Clé d'identité = nom + date de modification : comparer le seul nom
+        // laissait les sorties réseau sur l'ANCIENNE LUT quand le fichier
+        // était réécrit sous le même nom (le rechargement n'existait que
+        // pour la fenêtre).
+        let cle_lut = self.snapshot.lut.as_ref().map(|nom| {
+            let mtime = std::fs::metadata(std::path::Path::new("luts").join(nom))
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or(0, |d| d.as_nanos());
+            (nom.clone(), format!("{nom}@{mtime}"))
+        });
+        match (&cle_lut, &mut self.lut_cache) {
             (None, cache) => *cache = None,
-            (Some(nom), Some((connu, _))) if connu == nom => {}
-            (Some(nom), cache) => {
+            (Some((_, cle)), Some((connue, _))) if connue == cle => {}
+            (Some((nom, cle)), cache) => {
                 let charge = std::fs::read_to_string(std::path::Path::new("luts").join(nom))
                     .map_err(|e| e.to_string())
                     .and_then(|t| crate::Lut3d::depuis_texte(&t));
                 if let Err(err) = &charge {
                     warn!(nom, %err, "LUT illisible pour la sortie réseau — ignorée");
                 }
-                *cache = Some((nom.clone(), charge.ok()));
+                *cache = Some((cle.clone(), charge.ok()));
             }
         }
         let lut = self.lut_cache.as_ref().and_then(|(_, l)| l.as_ref());

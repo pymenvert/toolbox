@@ -268,16 +268,12 @@ struct OutputApp {
     blackout_niveau: f32,
     /// Frame retenue pendant un gel d'image (`state.freeze`).
     frame_gelee: Option<VideoFrame>,
-    /// LUT chargée depuis `luts/<nom>` — `None` dans la paire : fichier
-    /// illisible (mémorisé pour ne pas relire le disque à chaque frame).
-    /// LUT chargée : nom, date de modification du fichier au chargement, et
-    /// la LUT décodée (`None` si le fichier était illisible). La mtime permet
-    /// de RECHARGER quand le fichier change sur disque à nom constant.
-    lut_cache: Option<(
-        String,
-        Option<std::time::SystemTime>,
-        Option<toolbox_engine::Lut3d>,
-    )>,
+    /// LUT chargée depuis `luts/<nom>` : clé d'identité (`nom@mtime`) et LUT
+    /// décodée (`None` = fichier illisible, mémorisé pour ne pas relire le
+    /// disque à chaque frame). La clé change quand le fichier est réécrit
+    /// sous le même nom, et c'est ELLE qu'on passe au peintre GPU pour qu'il
+    /// re-téléverse sa texture au lieu de garder l'ancienne.
+    lut_cache: Option<(String, Option<toolbox_engine::Lut3d>)>,
 }
 
 impl OutputApp {
@@ -433,21 +429,27 @@ impl OutputApp {
             return;
         };
         let chemin = std::path::Path::new("luts").join(nom);
-        let mtime = std::fs::metadata(&chemin).and_then(|m| m.modified()).ok();
-        // Rechargement si le NOM ou la date de modification a changé (un
-        // fichier réécrit sous le même nom est bien repris).
-        let deja = self
-            .lut_cache
-            .as_ref()
-            .is_some_and(|(n, m, _)| n == nom && *m == mtime);
-        if deja {
+        // Un seul appel disque : la métadonnée sert au plafond ET à la clé.
+        let meta = std::fs::metadata(&chemin).ok();
+        let mtime = meta.as_ref().and_then(|m| m.modified().ok());
+        // CLÉ D'IDENTITÉ = nom + date de modification. Elle sert aussi de
+        // clé au peintre GPU : comparer le seul nom laissait le GPU afficher
+        // l'ANCIENNE LUT après réécriture du fichier (le rechargement ne
+        // profitait qu'au peintre CPU).
+        let cle = format!(
+            "{nom}@{}",
+            mtime
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or(0, |d| d.as_nanos())
+        );
+        if self.lut_cache.as_ref().is_some_and(|(c, _)| *c == cle) {
             return;
         }
         // Plafond de taille avant lecture (bloquerait le rendu sinon).
-        if let Ok(meta) = std::fs::metadata(&chemin) {
+        if let Some(meta) = &meta {
             if meta.len() > LUT_MAX_OCTETS {
                 warn!(nom, octets = meta.len(), "LUT trop volumineuse — ignorée");
-                self.lut_cache = Some((nom.to_string(), mtime, None));
+                self.lut_cache = Some((cle, None));
                 return;
             }
         }
@@ -458,7 +460,7 @@ impl OutputApp {
             Ok(lut) => info!(nom, taille = lut.taille, "LUT d'étalonnage chargée"),
             Err(err) => warn!(nom, %err, "LUT illisible — ignorée"),
         }
-        self.lut_cache = Some((nom.to_string(), mtime, charge.ok()));
+        self.lut_cache = Some((cle, charge.ok()));
     }
 
     fn redraw(&mut self) {
@@ -520,7 +522,7 @@ impl OutputApp {
         let lut = self
             .lut_cache
             .as_ref()
-            .and_then(|(nom, _mtime, lut)| lut.as_ref().map(|l| (nom.as_str(), l)));
+            .and_then(|(cle, lut)| lut.as_ref().map(|l| (cle.as_str(), l)));
         // L'emprunt du peintre doit se terminer avant de compter la frame
         // (le compteur emprunte `self` à son tour).
         // Issue du rendu, calculée pendant l'emprunt du peintre, puis traitée

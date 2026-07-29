@@ -129,8 +129,14 @@ if (Test-Path $fonctionsJson) {
 $auto = "n"
 if ($DemarrageAuto) { $auto = "o" }
 elseif (-not $SansQuestion) { $auto = Read-Host "Lancer Toolbox a chaque ouverture de session ? [o/N]" }
+$demarrage = [Environment]::GetFolderPath("Startup")
+# Heritage : les versions <= 3.4.0 posaient « toolbox-node.cmd ». Le nom a
+# change, mais l'ancien fichier restait — Windows lancait alors DEUX instances
+# a l'ouverture de session (deux fenetres, deux serveurs sur le meme port).
+# On le retire TOUJOURS, que l'utilisateur reactive l'autostart ou non.
+Remove-Item (Join-Path $demarrage "toolbox-node.cmd") -Force -ErrorAction SilentlyContinue
+
 if ($auto -match "^[oOyY]") {
-    $demarrage = [Environment]::GetFolderPath("Startup")
     # MEME nom de fichier que install-autostart-windows.bat : sa
     # desinstallation (--remove) retire donc aussi celui-ci (coherence).
     $lanceur = Join-Path $demarrage "toolbox-node-autostart.bat"
@@ -145,6 +151,14 @@ if ($auto -match "^[oOyY]") {
     $oem = [System.Text.Encoding]::GetEncoding($oemCp)
     [System.IO.File]::WriteAllText($lanceur, $contenu, $oem)
     Dire "Demarrage automatique installe : $lanceur"
+} else {
+    # Repondre « non » lors d'une REINSTALLATION doit desactiver l'autostart,
+    # pas le laisser en place silencieusement.
+    $ancien = Join-Path $demarrage "toolbox-node-autostart.bat"
+    if (Test-Path $ancien) {
+        Remove-Item $ancien -Force -ErrorAction SilentlyContinue
+        Dire "Demarrage automatique retire."
+    }
 }
 
 Dire "Installation terminee dans $Dossier"

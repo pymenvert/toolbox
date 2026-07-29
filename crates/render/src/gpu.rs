@@ -280,10 +280,16 @@ impl GpuPainter {
                 self.surface.configure(&self.device, &self.config);
                 match self.surface.get_current_texture() {
                     Cst::Success(frame) | Cst::Suboptimal(frame) => frame,
-                    // Surface toujours perdue APRÈS reconfiguration : le
+                    // MÊME tri qu'en dehors : un Timeout ou une fenêtre
+                    // occultée juste après la reconfiguration reste
+                    // TRANSITOIRE. Les classer « device perdu » déclenchait
+                    // un repli CPU DÉFINITIF (forcer_cpu ne se réarme pas)
+                    // sur un simple hoquet — un verrouillage d'écran suffit.
+                    Cst::Timeout | Cst::Occluded => return ResultatRendu::Sautee,
+                    // Toujours perdue après reconfiguration : cette fois le
                     // device lui-même est réputé perdu (pilote réinitialisé,
-                    // écran débranché en plein écran). On le signale pour un
-                    // repli CPU à chaud, au lieu de rester en sortie noire.
+                    // écran débranché en plein écran). Repli CPU à chaud,
+                    // plutôt qu'une sortie noire.
                     other => {
                         warn!(?other, "device GPU perdu (surface non récupérable)");
                         return ResultatRendu::DevicePerdu;

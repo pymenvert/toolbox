@@ -185,6 +185,19 @@ pub fn plan(from: &NodeState, to: &NodeState, t: f32) -> Vec<Command> {
                 name: to.lut.clone(),
             });
         }
+        // Régie : blackout et freeze font PARTIE du preset (ils y sont
+        // sauvegardés, et preset_load les applique). Les omettre ici faisait
+        // diverger « charger » et « fondre vers » — un fondu vers un preset
+        // enregistré en blackout laissait l'image visible.
+        if from.blackout != to.blackout {
+            commands.push(Command::BlackoutSet {
+                actif: to.blackout.actif,
+                fondu_ms: Some(to.blackout.fondu_ms),
+            });
+        }
+        if from.freeze != to.freeze {
+            commands.push(Command::FreezeSet { actif: to.freeze });
+        }
         if from.masques != to.masques {
             // Resynchronise index par index, puis retire les excédents (du
             // plus haut index au plus bas pour garder les index valides).
@@ -413,6 +426,33 @@ mod tests {
         assert!(retour.contains(&Command::MeshReset));
         assert!(retour.contains(&Command::LutSet { name: None }));
         assert!(retour.contains(&Command::MasqueSupprime { index: 0 }));
+    }
+
+    /// Blackout et freeze sont sauvegardés dans les presets et appliqués par
+    /// `preset_load` : le fondu doit les basculer aussi, sinon « charger » et
+    /// « fondre vers » ne donnent pas le même résultat.
+    #[test]
+    fn plan_applies_blackout_and_freeze_at_the_end() {
+        let from = NodeState::default();
+        let mut to = NodeState::default();
+        to.blackout.actif = true;
+        to.blackout.fondu_ms = 800;
+        to.freeze = true;
+
+        assert!(plan(&from, &to, 0.99).is_empty(), "rien avant la fin");
+        let fin = plan(&from, &to, 1.0);
+        assert!(fin.contains(&Command::BlackoutSet {
+            actif: true,
+            fondu_ms: Some(800)
+        }));
+        assert!(fin.contains(&Command::FreezeSet { actif: true }));
+
+        // Sens inverse : on ressort du blackout et du gel.
+        let retour = plan(&to, &from, 1.0);
+        assert!(retour.contains(&Command::FreezeSet { actif: false }));
+        assert!(retour
+            .iter()
+            .any(|c| matches!(c, Command::BlackoutSet { actif: false, .. })));
     }
 
     /// Charger un preset PENDANT un fondu annule ce fondu : le chargement

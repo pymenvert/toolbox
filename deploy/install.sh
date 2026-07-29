@@ -273,16 +273,30 @@ if command -v systemctl > /dev/null 2>&1; then
 fi
 
 # --- propriété du préfixe -------------------------------------------------------
-# Créé en root (sudo), le préfixe ne serait PAS inscriptible par le node qui
-# tourne en simple utilisateur : plus aucun preset, réglage, LUT, log ni
-# bascule de l'UI ne pourrait être enregistré. On en donne la propriété à
-# l'utilisateur qui fera tourner le node (service systemd, ou à défaut celui
-# qui a lancé sudo). Root pur (pas de sudo) : rien à faire, root écrit partout.
-if [ "$NEED_SUDO" = true ]; then
+# Créé en root, le préfixe ne serait PAS inscriptible par le node qui tourne
+# en simple utilisateur : plus aucun preset, réglage, LUT, log ni bascule de
+# l'UI ne pourrait être enregistré. On en donne la propriété à l'utilisateur
+# qui fera tourner le node.
+#
+# NB : le test porte sur « les fichiers appartiennent-ils à root ? », PAS sur
+# NEED_SUDO — qui ne décrit que le mode d'élévation. Un `sudo ./install.sh`
+# (le geste le plus courant) laisse NEED_SUDO à false alors que TOUT est créé
+# en root : c'est précisément le cas que la v3.4.0 croyait avoir corrigé.
+if [ "$(id -u)" = 0 ] || [ "$NEED_SUDO" = true ]; then
     OWNER="${SERVICE_USER:-${SUDO_USER:-}}"
+    if [ -z "$OWNER" ] || [ "$OWNER" = root ]; then
+        # Ni service ni sudo : on demande, car personne d'autre ne le sait.
+        read -r -p "  utilisateur qui fera tourner le node (vide = laisser à root) " OWNER || OWNER=""
+    fi
     if [ -n "$OWNER" ] && [ "$OWNER" != root ]; then
-        run chown -R "$OWNER" "$PREFIX"
-        say "Propriété de $PREFIX donnée à « $OWNER » (écriture presets/réglages/logs)."
+        if run chown -R "$OWNER" "$PREFIX"; then
+            say "Propriété de $PREFIX donnée à « $OWNER » (écriture presets/réglages/logs)."
+        else
+            say "ATTENTION : chown vers « $OWNER » impossible — le node ne pourra rien enregistrer."
+        fi
+    else
+        say "ATTENTION : $PREFIX reste à root. Lancez le node en root, ou faites :"
+        say "  sudo chown -R <utilisateur> $PREFIX"
     fi
 fi
 

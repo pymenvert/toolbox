@@ -1112,8 +1112,20 @@ async fn lut_pour_apercu(
     nom: Option<&str>,
 ) -> Option<std::sync::Arc<toolbox_engine::Lut3d>> {
     let nom = nom?;
+    // Clé d'identité = nom + date de modification (même raison que la fenêtre
+    // et le compositeur : un fichier réécrit sous le même nom doit être
+    // repris, sinon l'aperçu web reste figé sur l'ancienne LUT).
+    let cle = {
+        let mtime = tokio::fs::metadata(std::path::Path::new("luts").join(nom))
+            .await
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map_or(0, |d| d.as_nanos());
+        format!("{nom}@{mtime}")
+    };
     let mut cache = app.lut_apercu.lock().await;
-    if cache.as_ref().map(|(n, _)| n.as_str()) != Some(nom) {
+    if cache.as_ref().map(|(n, _)| n.as_str()) != Some(cle.as_str()) {
         // Lecture disque + parse (jusqu'à 64 Mo) sur un thread bloquant : ne
         // gèle pas le runtime tokio (le worker n'est pas retenu par le fsync
         // ni le décodage). Le verrou sérialise les chargements concurrents.
@@ -1126,7 +1138,7 @@ async fn lut_pour_apercu(
         .await
         .ok()
         .flatten();
-        *cache = charge.map(|l| (nom.to_string(), std::sync::Arc::new(l)));
+        *cache = charge.map(|l| (cle, std::sync::Arc::new(l)));
     }
     cache.as_ref().map(|(_, l)| l.clone())
 }
