@@ -1,0 +1,12 @@
+
+In tools/endurance/endurance.sh line 79:
+  [ -n "$boucle_pid" ] && kill "$boucle_pid" 2>/dev/null || true
+                       ^-- SC2015 (info): Note that A && B || C is not if-then-else. C may run when A is true.
+
+
+In tools/endurance/endurance.sh line 80:
+  [ -n "$mjpeg_pid" ] && kill "$mjpeg_pid" 2>/dev/null || true
+                      ^-- SC2015 (info): Note that A && B || C is not if-then-else. C may run when A is true.
+
+For more information:
+  https://www.shellcheck.net/wiki/SC2015 -- Note that A && B || C is not if-t...
