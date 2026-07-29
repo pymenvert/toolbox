@@ -23,6 +23,12 @@ INTERVALLE="${INTERVALLE:-15}"
 CSV="${CSV:-endurance.csv}"
 CHARGE="${CHARGE:-1}"
 CADENCE="${CADENCE:-10}"
+# Une cadence non numerique ou nulle faisait echouer l'arithmetique dans la
+# sous-shell de charge, qui mourait sans un mot : le run entier se faisait
+# alors SANS charge, en croyant en avoir une.
+case "$CADENCE" in
+  ''|*[!0-9]*|0) echo "CADENCE doit etre un entier >= 1 (recu : '$CADENCE')" >&2; exit 1 ;;
+esac
 
 if ! command -v curl >/dev/null 2>&1; then
   echo "curl est requis." >&2
@@ -45,18 +51,38 @@ maintenant() {
 # Envoi d'une commande. Le code HTTP est LU : la version precedente avalait
 # les refus avec `|| true`, et une mire inexistante partait en 422 sans que
 # rien ne le signale — un sixieme de la charge annoncee n'existait pas.
-refus=0
+# COMPTEUR PARTAGE PAR FICHIER. `refus` etait une variable shell incrementee
+# dans cmd(), elle-meme appelee depuis la sous-shell de charge lancee avec
+# « & » : le shell principal ne voyait JAMAIS ses increments et le bilan
+# annoncait « 0 refus » quoi qu'il arrive. Un fichier est le seul canal
+# partage entre les deux.
+COMPTEUR_REFUS="${TMPDIR:-/tmp}/endurance-refus.$$"
+: >"$COMPTEUR_REFUS"
 cmd() {
+  # Le repli « || printf 000 » est INDISPENSABLE : sous set -e, l'echec de
+  # curl (code 7, connexion impossible) tuait le script entier, en silence,
+  # avant meme que la garde plus bas puisse parler. Un node injoignable doit
+  # produire un refus COMPTE, pas une mort subite.
+  #
+  # Et ce commentaire est AU-DESSUS de l'instruction, jamais au milieu de ses
+  # continuations de ligne : un « # » place apres une barre oblique inverse
+  # avale les arguments suivants, et curl se retrouvait sans URL.
   code=$(curl -s -m 10 -o /dev/null -w '%{http_code}' \
     -X POST -H 'Content-Type: application/json' \
-    -d "$1" "$URL/api/command" 2>/dev/null || printf '000')
+    -d "$1" "$URL/api/command" 2>/dev/null || true)
+  # Normalisation : curl ecrit deja « 000 » quand la connexion echoue. Y
+  # ajouter un repli qui ecrit « 000 » a son tour donnait « 000000 ».
+  case "$code" in
+    [0-9][0-9][0-9]) : ;;
+    *) code="000" ;;
+  esac
   case "$code" in
     2*) : ;;
     *)
-      refus=$((refus + 1))
-      if [ "$refus" -le 3 ] || [ $((refus % 100)) -eq 0 ]; then
-        echo "  commande refusee ($refus, HTTP $code) : $1" >&2
-      fi
+      printf 'x' >>"$COMPTEUR_REFUS"
+      # Un code vide (node injoignable) sort « 000 » une seule fois : curl
+      # n'ecrit rien, le repli fournit les trois chiffres.
+      echo "  commande refusee (HTTP ${code:-000}) : $1" >&2
       ;;
   esac
 }
@@ -87,13 +113,24 @@ nettoyer() {
     kill "$mjpeg_pid" 2>/dev/null || true
   fi
   if [ "$CHARGE" = "1" ]; then
+    avant=$(wc -c <"$COMPTEUR_REFUS" 2>/dev/null || echo 0)
     cmd '{"cmd":"set_test_pattern","pattern":null}'
+    cmd '{"cmd":"color_set","param":"gamma","value":1.0}'
     if [ "$sauvegarde" = "1" ]; then
       cmd '{"cmd":"mapping_load","name":"__endurance_avant"}'
     fi
+    apres=$(wc -c <"$COMPTEUR_REFUS" 2>/dev/null || echo 0)
+    if [ "$avant" != "$apres" ]; then
+      echo "!!! RESTAURATION INCOMPLETE : verifier la mire et le mapping" >&2
+      echo "    dans l'UI AVANT le prochain spectacle." >&2
+    fi
   fi
+  rm -f "$COMPTEUR_REFUS"
 }
-trap nettoyer EXIT INT TERM
+# HUP inclus : une session SSH coupee (le cas normal d'un test lance a
+# distance sur un Pi) envoie SIGHUP, pas SIGTERM — sans lui, la mire de test
+# restait allumee sur le videoprojecteur.
+trap nettoyer EXIT INT TERM HUP
 
 # Une commande par tour, au rythme demande — comme une console OSC qui
 # pilote le spectacle en continu. La version precedente n'envoyait que
@@ -135,8 +172,18 @@ echo "CSV : $CSV"
 if [ "$CHARGE" = "1" ]; then
   # Le mapping de l'operateur est ecrase par la charge (coin 0) : on le
   # sauve pour le rendre a la fin.
+  avant_save=$(wc -c <"$COMPTEUR_REFUS" 2>/dev/null || echo 0)
   cmd '{"cmd":"mapping_save","name":"__endurance_avant"}'
-  sauvegarde=1
+  apres_save=$(wc -c <"$COMPTEUR_REFUS" 2>/dev/null || echo 0)
+  if [ "$avant_save" = "$apres_save" ]; then
+    sauvegarde=1
+  else
+    # Sans sauvegarde reussie, la charge detruirait le mapping de
+    # l'operateur sans pouvoir le rendre. On refuse de commencer.
+    echo "mapping_save a echoue : la charge modifierait le mapping sans" >&2
+    echo "pouvoir le restaurer. Relancer avec CHARGE=0, ou reparer le node." >&2
+    exit 1
+  fi
   charge_continue &
   boucle_pid=$!
   curl -s -o /dev/null "$URL/flux.mjpg?fps=15" &
@@ -172,5 +219,6 @@ while [ "$(maintenant)" -lt "$fin" ]; do
   sleep "$INTERVALLE"
 done
 
+refus=$(wc -c <"$COMPTEUR_REFUS" 2>/dev/null || echo 0)
 echo "Collecte terminee : $points points, $echecs echec(s) de lecture, $refus refus."
 echo "Depouiller avec : pwsh tools/endurance/endurance.ps1 -Analyser $CSV"

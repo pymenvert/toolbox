@@ -89,15 +89,25 @@ pub struct GpuPainter {
     /// frame) et sa taille de grille (0 = aucune).
     lut_nom: Option<String>,
     lut_taille: u32,
-    /// Temps passé dans `get_current_texture()` au dernier `render()`.
+    /// Coût CPU de fabrication de la dernière image : tout `render()` SAUF
+    /// les deux attentes imposées par l'écran.
     ///
-    /// La surface est configurée en `AutoVsync` (donc FIFO) : quand le rendu
-    /// est continu, cet appel BLOQUE jusqu'au prochain balayage écran. Sur une
-    /// machine parfaitement saine à 60 Hz, l'attente vaut donc ~16 ms. La
-    /// compter dans le « temps par image » revenait à afficher « trop lent
-    /// pour du 60 Hz » précisément quand tout va bien — l'indicateur mesurait
-    /// la cadence de l'écran, pas le coût du rendu. L'appelant la retranche.
-    attente_presentation: std::time::Duration,
+    /// Le rendu est configuré en `AutoVsync` (FIFO), et selon le backend le
+    /// blocage jusqu'au balayage écran ne tombe pas au même endroit :
+    /// - **Vulkan** bloque dans `get_current_texture()` ;
+    /// - **GL/GLES** (le repli, et le Pi) rend la main immédiatement et
+    ///   bloque dans `present()`.
+    ///
+    /// Ne retrancher que l'acquisition ne corrigeait donc QUE Vulkan : sur
+    /// une machine sans pilote Vulkan, les ~16 ms de balayage restaient dans
+    /// la mesure et l'UI criait « trop lent » sur une sortie parfaite. On
+    /// borne donc la mesure des deux côtés : elle s'arrête AVANT `present()`
+    /// et exclut l'acquisition.
+    ///
+    /// Ce qu'elle mesure : le travail du processeur (téléversement vidéo,
+    /// LUT, uniformes, encodage, soumission). Pas le temps d'exécution du
+    /// GPU, qui est asynchrone et demanderait des requêtes d'horodatage.
+    duree_cpu: std::time::Duration,
 }
 
 impl GpuPainter {
@@ -251,7 +261,7 @@ impl GpuPainter {
             lut_buffer,
             lut_nom: None,
             lut_taille: 0,
-            attente_presentation: std::time::Duration::ZERO,
+            duree_cpu: std::time::Duration::ZERO,
         })
     }
 
@@ -268,6 +278,8 @@ impl GpuPainter {
         height: u32,
         blackout: f32,
     ) -> ResultatRendu {
+        // Chronomètre du coût CPU (voir le champ `duree_cpu`).
+        let debut_rendu = std::time::Instant::now();
         let (width, height) = (width.max(1), height.max(1));
         if self.config.width != width || self.config.height != height {
             self.config.width = width;
@@ -284,8 +296,11 @@ impl GpuPainter {
             .write_buffer(&self.uniforms, 0, bytemuck::bytes_of(&u));
 
         use wgpu::CurrentSurfaceTexture as Cst;
-        // Début de l'attente vsync : tout ce qui suit jusqu'à l'obtention de
-        // la frame est du temps SUBI, pas du temps de calcul.
+        // Début de l'attente d'acquisition : sur Vulkan, tout ce qui suit
+        // jusqu'à l'obtention de la frame est du temps SUBI, pas du calcul.
+        // La reconfiguration de la surface (branche Outdated/Lost) tombe
+        // dedans, et c'est voulu : c'est du temps imposé par le système de
+        // fenêtrage, pas le coût de fabrication de l'image.
         let debut_attente = std::time::Instant::now();
         let frame = match self.surface.get_current_texture() {
             Cst::Success(frame) | Cst::Suboptimal(frame) => frame,
@@ -316,7 +331,7 @@ impl GpuPainter {
                 return ResultatRendu::DevicePerdu;
             }
         };
-        self.attente_presentation = debut_attente.elapsed();
+        let attente = debut_attente.elapsed();
         let view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
@@ -347,15 +362,19 @@ impl GpuPainter {
             pass.draw(0..3, 0..1);
         }
         self.queue.submit([encoder.finish()]);
+        // Le chronomètre s'arrête ICI : `present()` bloque jusqu'au balayage
+        // écran sur le backend GL.
+        self.duree_cpu = debut_rendu.elapsed().saturating_sub(attente);
         self.queue.present(frame);
         ResultatRendu::Presentee
     }
 
-    /// Attente vsync du dernier `render()` réussi, à retrancher du temps de
-    /// frame mesuré par l'appelant (voir [`GpuPainter::attente_presentation`]).
+    /// Coût CPU de la dernière image présentée (voir
+    /// [`GpuPainter::duree_cpu`]). Ne vaut que pour un `render()` ayant
+    /// renvoyé `Presentee` : les autres issues n'y touchent pas.
     #[must_use]
-    pub fn attente_presentation(&self) -> std::time::Duration {
-        self.attente_presentation
+    pub fn duree_cpu(&self) -> std::time::Duration {
+        self.duree_cpu
     }
 
     /// Téléverse la LUT quand elle change (nom comparé, pas le contenu).

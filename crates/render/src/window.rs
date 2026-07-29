@@ -570,12 +570,12 @@ impl OutputApp {
         // frame (composition + warp + présentation), pas la préparation qui
         // précède — c'est ce temps-là qui décide si la sortie décroche.
         let debut = std::time::Instant::now();
-        // Attente vsync à retrancher : en rendu continu, le GPU BLOQUE sur
-        // l'obtention de la surface jusqu'au balayage écran suivant. Sans
-        // cette soustraction, une machine saine à 60 Hz afficherait ~16 ms
-        // par image et l'UI crierait « trop lent » — on mesurerait la cadence
-        // de l'écran, pas le coût du rendu.
-        let mut attente = std::time::Duration::ZERO;
+        // Le peintre GPU mesure LUI-MÊME son coût CPU, car les deux attentes
+        // imposées par l'écran (acquisition sur Vulkan, présentation sur GL)
+        // tombent à des endroits qu'on ne peut pas borner depuis ici. Sans
+        // ça, une machine saine à 60 Hz afficherait ~16 ms par image et l'UI
+        // crierait « trop lent » : on mesurerait la cadence de l'écran.
+        let mut duree_gpu = None;
         let suite = match painter {
             Painter::Gpu(gpu) => {
                 let issue = gpu.render(
@@ -587,7 +587,7 @@ impl OutputApp {
                     h.get(),
                     niveau,
                 );
-                attente = gpu.attente_presentation();
+                duree_gpu = Some(gpu.duree_cpu());
                 match issue {
                     crate::gpu::ResultatRendu::Presentee => Suite::Presentee,
                     crate::gpu::ResultatRendu::Sautee => Suite::Sautee,
@@ -630,7 +630,9 @@ impl OutputApp {
                 }
             }
         };
-        let duree = debut.elapsed().saturating_sub(attente);
+        // Peintre CPU : la mesure locale suffit (softbuffer ne fait pas de
+        // vsync). Peintre GPU : on prend SA mesure, bornée des deux côtés.
+        let duree = duree_gpu.unwrap_or_else(|| debut.elapsed());
         match suite {
             Suite::Presentee => {
                 self.chrono.ajouter(duree);
@@ -699,6 +701,16 @@ impl OutputApp {
     }
 }
 
+/// Le battement a-t-il quelque chose à dire ?
+///
+/// `true` si le cumul d'images perdues a bougé, OU si l'alerte publiée
+/// (« N sur la dernière seconde ») n'est plus vraie et doit s'éteindre.
+/// Auto-terminant : une republication ramène la fenêtre à zéro, la condition
+/// redevient fausse.
+fn doit_battre(cumul: u64, cumul_publie: u64, fenetre_publiee: u32) -> bool {
+    cumul != cumul_publie || fenetre_publiee != 0
+}
+
 /// Résume le chrono et l'envoie sur le canal.
 ///
 /// `effacer_percentiles` sert quand plus rien n'est peint : on ne veut pas
@@ -716,6 +728,9 @@ fn publier_mesures(
         mesures.p50_us = 0;
         mesures.p95_us = 0;
         mesures.max_us = 0;
+        // Le compte d'échantillons tombe avec eux : sans ça, /api/system et
+        // le ZIP de diagnostic publiaient « 5 images mesurées, 0 µs ».
+        mesures.echantillons = 0;
     }
     canal.send_replace(mesures);
     mesures
@@ -807,13 +822,31 @@ impl ApplicationHandler<Wake> for OutputApp {
             // tampon inaccessible) voyait donc son compteur d'images perdues
             // grimper en mémoire sans jamais atteindre l'UI ni le harnais
             // d'endurance — qui concluait « 0 image perdue » sur une sortie
-            // noire. On publie dès qu'il y a du neuf à dire.
+            // noire.
+            //
+            // Deux raisons de battre, et pas une :
+            // - du neuf à dire (le cumul a bougé) ;
+            // - une alerte publiée qui n'est PLUS vraie. Sans ce second cas,
+            //   `sautees_fenetre` restait figé sur sa dernière valeur non
+            //   nulle : l'alerte « ça se produit maintenant » ne pouvait
+            //   plus s'éteindre, et le correctif de l'alarme permanente en
+            //   recréait une sous une autre forme.
             let cumul = self.chrono.sautees();
-            let publie = self.mesures.borrow().sautees;
-            if cumul != publie
+            let (cumul_publie, fenetre_publiee) = {
+                let m = self.mesures.borrow();
+                (m.sautees, m.sautees_fenetre)
+            };
+            if doit_battre(cumul, cumul_publie, fenetre_publiee)
                 && self.derniere_publication.elapsed() >= std::time::Duration::from_secs(1)
             {
-                self.eteindre_mesures();
+                // On n'efface les percentiles QUE si rien n'a été peint
+                // depuis. Effacer inconditionnellement faisait afficher
+                // « sortie au repos » en pleine saccade : le battement
+                // jetait les mesures d'une seconde où des images avaient
+                // bel et bien été produites.
+                let rien_de_peint = self.chrono.en_attente() == 0;
+                publier_mesures(&mut self.chrono, &self.mesures, rien_de_peint);
+                self.derniere_publication = std::time::Instant::now();
             }
             // Écrans branchés/débranchés à chaud (throttle ~2 s).
             if self.dernier_scan_ecrans.elapsed() > std::time::Duration::from_secs(2) {
@@ -916,6 +949,24 @@ mod tests {
         let publie = publier_mesures(&mut chrono, &tx, true);
         assert_eq!(publie.p95_us, 0, "percentiles effacés");
         assert_eq!(publie.max_us, 0, "y compris le max");
+        assert_eq!(
+            publie.echantillons, 0,
+            "« N images mesurées à 0 µs » n'a aucun sens"
+        );
         assert_eq!(publie.sautees, 1, "le compteur d'incidents survit");
+    }
+
+    /// La condition du battement, isolée. Elle décide seule si l'UI reste
+    /// figée sur une alerte périmée — c'est elle qu'il faut fixer, pas
+    /// seulement l'assistant qu'elle appelle.
+    #[test]
+    fn le_battement_doit_pouvoir_eteindre_une_alerte_perimee() {
+        // Rien de neuf, mais une alerte publiée qui n'est plus vraie :
+        // il FAUT republier, sinon le voyant rouge est à vie.
+        assert!(doit_battre(7, 7, 3), "alerte périmée à éteindre");
+        // Une fois republiée à zéro, on se tait.
+        assert!(!doit_battre(7, 7, 0), "plus rien à dire");
+        // Une nouvelle perte : on publie.
+        assert!(doit_battre(8, 7, 0), "nouvelle image perdue");
     }
 }
