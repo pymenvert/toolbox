@@ -76,8 +76,16 @@ boucle_pid=""
 mjpeg_pid=""
 
 nettoyer() {
-  [ -n "$boucle_pid" ] && kill "$boucle_pid" 2>/dev/null || true
-  [ -n "$mjpeg_pid" ] && kill "$mjpeg_pid" 2>/dev/null || true
+  # `if` explicites : `A && B || C` n'est pas un si-alors-sinon (SC2015), et
+  # sous `set -e` une condition fausse a un comportement qui varie d'un shell
+  # a l'autre. Le nettoyage est justement le code qui n'a pas droit a
+  # l'approximation : c'est lui qui eteint la mire.
+  if [ -n "$boucle_pid" ]; then
+    kill "$boucle_pid" 2>/dev/null || true
+  fi
+  if [ -n "$mjpeg_pid" ]; then
+    kill "$mjpeg_pid" 2>/dev/null || true
+  fi
   if [ "$CHARGE" = "1" ]; then
     cmd '{"cmd":"set_test_pattern","pattern":null}'
     if [ "$sauvegarde" = "1" ]; then
@@ -94,7 +102,9 @@ trap nettoyer EXIT INT TERM
 # deux runs n'etaient donc pas comparables.
 charge_continue() {
   pause_ms=$((1000 / CADENCE))
-  [ "$pause_ms" -lt 1 ] && pause_ms=1
+  if [ "$pause_ms" -lt 1 ]; then
+    pause_ms=1
+  fi
   pause="$((pause_ms / 1000)).$(printf '%03d' $((pause_ms % 1000)))"
   i=0
   while :; do
