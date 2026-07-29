@@ -2817,6 +2817,23 @@ async function loadSystem() {
     html += tile("Mémoire", (used / 1024).toFixed(1), "/ " + (sys.mem_total_mb / 1024).toFixed(1) + " Go",
       sys.mem_available_mb + " Mo disponibles", used / sys.mem_total_mb > 0.9);
   }
+  // Mémoire de Lanterne lui-même : c'est CE chiffre qui révèle une fuite
+  // (celui du dessus mélange tous les programmes de la machine).
+  if (sys.rss_mb != null)
+    html += tile("Mémoire de Lanterne", String(sys.rss_mb), "Mo",
+      "note-la au démarrage : si elle grimpe sans cesse, signale-le", false);
+  // Coût d'une image. Le badge img/s dit qu'on tient la cadence ; le p95 dit
+  // avec quelle marge. Au-delà de 16 ms, une sortie 60 Hz commence à sauter.
+  if (sys.rendu && sys.rendu.p95_us > 0) {
+    const p95 = sys.rendu.p95_us / 1000, p50 = sys.rendu.p50_us / 1000;
+    html += tile("Temps par image", p95.toFixed(1), "ms (p95)",
+      "habituel " + p50.toFixed(1) + " ms · " + (p95 < 8 ? "grande marge"
+        : p95 < 16 ? "marge correcte" : "trop lent pour du 60 Hz"), p95 >= 16);
+  }
+  if (sys.rendu && sys.rendu.sautees > 0)
+    html += tile("Images perdues", String(sys.rendu.sautees), "",
+      "depuis le démarrage · quelques-unes au lancement sont normales",
+      sys.rendu.sautees > 100);
   if (sys.temperature_c != null)
     html += tile("Température", sys.temperature_c.toFixed(1), "°C", sys.temperature_c >= 75 ? "surveiller (throttle proche)" : "", sys.temperature_c >= 75);
   if (sys.disk_free_gb != null)

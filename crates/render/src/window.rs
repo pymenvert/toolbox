@@ -21,6 +21,7 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy}
 use winit::keyboard::{Key, NamedKey};
 use winit::window::{Fullscreen, Window, WindowId};
 
+use toolbox_core::mesure::{Chrono, RenduMesures};
 use toolbox_core::{MonitorInfo, NodeState, OutputSettings};
 use toolbox_engine::VideoFrame;
 
@@ -56,6 +57,10 @@ pub struct OutputChannels {
     /// Frames réellement présentées par seconde, publiées pour l'UI
     /// (indicateur de fluidité du rendu, rafraîchi ~1 fois/s).
     pub fps: watch::Sender<f32>,
+    /// Temps passé à produire une frame (médiane, p95, max) et frames
+    /// perdues. Le débit seul ne dit pas si la machine est à l'aise ou au
+    /// bord du décrochage : ces chiffres-là le disent.
+    pub mesures: watch::Sender<RenduMesures>,
     /// Interrupteur « fenêtre de sortie » (onglet Fonctions) : à `false`,
     /// la fenêtre est masquée et le peintre détruit (surface GPU rendue,
     /// aucun redraw — 0 % CPU/GPU) ; à `true`, tout est recréé à chaud.
@@ -100,6 +105,7 @@ fn run_event_loop(config: WindowConfig, channels: OutputChannels) {
         settings,
         monitors,
         fps,
+        mesures,
         enabled,
         shutdown,
     } = channels;
@@ -145,6 +151,8 @@ fn run_event_loop(config: WindowConfig, channels: OutputChannels) {
         settings,
         monitors,
         fps,
+        mesures,
+        chrono: Chrono::new(),
         enabled,
         frames_since: 0,
         fps_window_start: std::time::Instant::now(),
@@ -243,6 +251,11 @@ struct OutputApp {
     settings: watch::Receiver<OutputSettings>,
     monitors: watch::Sender<Vec<MonitorInfo>>,
     fps: watch::Sender<f32>,
+    /// Publication du coût des frames (voir [`OutputChannels::mesures`]).
+    mesures: watch::Sender<RenduMesures>,
+    /// Accumulateur de durées de frame. Écrit sur le chemin chaud (sans
+    /// allocation ni verrou), résumé à la même cadence que le badge img/s.
+    chrono: Chrono,
     /// Interrupteur de la fonction (onglet Fonctions).
     enabled: watch::Receiver<bool>,
     /// Frames présentées depuis le début de la fenêtre de mesure courante.
@@ -423,6 +436,7 @@ impl OutputApp {
             self.painter = None; // libère la surface (GPU comprise)
             window.set_visible(false);
             self.fps.send_replace(0.0);
+            self.eteindre_mesures();
             info!("fenêtre de sortie en sommeil (0 rendu, surface libérée)");
         }
     }
@@ -547,6 +561,10 @@ impl OutputApp {
         let Some(painter) = self.painter.as_mut() else {
             return;
         };
+        // Chronomètre du chemin chaud : il n'entoure QUE la production de la
+        // frame (composition + warp + présentation), pas la préparation qui
+        // précède — c'est ce temps-là qui décide si la sortie décroche.
+        let debut = std::time::Instant::now();
         let suite = match painter {
             Painter::Gpu(gpu) => match gpu.render(
                 &self.snapshot,
@@ -593,10 +611,17 @@ impl OutputApp {
                 }
             }
         };
+        let duree = debut.elapsed();
         match suite {
-            Suite::Presentee => self.count_presented_frame(),
-            Suite::Sautee => {}
+            Suite::Presentee => {
+                self.chrono.ajouter(duree);
+                self.count_presented_frame();
+            }
+            Suite::Sautee => self.chrono.sautee(),
             Suite::ReplierCpu => {
+                // Une frame perdue reste une frame perdue, même si la cause
+                // est le device : elle doit apparaître au compteur.
+                self.chrono.sautee();
                 // Repli CPU à chaud : le device GPU vient de lâcher (pilote
                 // réinitialisé, écran débranché en plein écran). Plutôt qu'une
                 // sortie noire définitive, on recrée un peintre CPU et on
@@ -625,9 +650,22 @@ impl OutputApp {
         let elapsed = self.fps_window_start.elapsed().as_secs_f32();
         if elapsed >= 1.0 {
             self.fps.send_replace(self.frames_since as f32 / elapsed);
+            // Le tri des échantillons ne se paie qu'ici, une fois par seconde.
+            self.mesures.send_replace(self.chrono.resumer());
             self.frames_since = 0;
             self.fps_window_start = std::time::Instant::now();
         }
+    }
+
+    /// Le rendu s'est arrêté : on efface les percentiles au lieu de laisser
+    /// l'UI afficher éternellement ceux de la dernière frame peinte. Le cumul
+    /// de frames perdues, lui, survit (c'est un historique d'incidents).
+    fn eteindre_mesures(&mut self) {
+        let mut vides = self.chrono.resumer();
+        vides.p50_us = 0;
+        vides.p95_us = 0;
+        vides.max_us = 0;
+        self.mesures.send_replace(vides);
     }
 }
 
@@ -709,6 +747,7 @@ impl ApplicationHandler<Wake> for OutputApp {
                 && (*self.fps.borrow() - 0.0).abs() > f32::EPSILON
             {
                 self.fps.send_replace(0.0);
+                self.eteindre_mesures();
             }
             // Écrans branchés/débranchés à chaud (throttle ~2 s).
             if self.dernier_scan_ecrans.elapsed() > std::time::Duration::from_secs(2) {
@@ -757,6 +796,7 @@ impl ApplicationHandler<Wake> for OutputApp {
                     window.set_visible(false);
                 }
                 self.fps.send_replace(0.0);
+                self.eteindre_mesures();
                 info!(
                     "fenêtre de sortie fermée par l'utilisateur — réactivable depuis l'UI (le node continue)"
                 );

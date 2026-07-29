@@ -16,6 +16,7 @@ pub mod fader;
 pub mod features;
 pub mod logging;
 pub mod media;
+pub mod mesure;
 pub mod output;
 pub mod preset;
 pub mod reglages;

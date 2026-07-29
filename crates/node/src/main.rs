@@ -285,6 +285,9 @@ async fn run(mut config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std:
     }
     let (monitors_tx, monitors_rx) = watch::channel(Vec::new());
     let (fps_tx, fps_rx) = watch::channel(0.0f32);
+    // Coût de production d'une frame (p50/p95/max) et frames perdues : le
+    // pendant qualitatif du compteur img/s ci-dessus.
+    let (mesures_tx, mesures_rx) = watch::channel(toolbox_core::mesure::RenduMesures::default());
 
     // Parc mDNS : la liste publiée pour /api/fleet (le service lui-même est
     // démarré/arrêté par le contrôleur de fonctions).
@@ -420,6 +423,7 @@ async fn run(mut config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std:
                 monitors: monitors_rx.clone(),
                 settings: output_settings_tx.clone(),
                 fps: fps_rx.clone(),
+                mesures: mesures_rx.clone(),
                 video: video_rx.clone(),
             },
             fleet_rx.clone(),
@@ -574,6 +578,7 @@ async fn run(mut config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std:
         drop(output_settings_rx);
         drop(monitors_tx);
         drop(fps_tx);
+        drop(mesures_tx);
         drop(output_enabled_rx);
         None
     } else {
@@ -588,6 +593,7 @@ async fn run(mut config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std:
                 settings: output_settings_rx,
                 monitors: monitors_tx,
                 fps: fps_tx,
+                mesures: mesures_tx,
                 enabled: output_enabled_rx,
                 shutdown: shutdown_rx.clone(),
             },
@@ -600,6 +606,7 @@ async fn run(mut config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std:
         drop(output_settings_rx);
         drop(monitors_tx);
         drop(fps_tx);
+        drop(mesures_tx);
         drop(output_enabled_rx);
         if initial_features.output && !mode_kms {
             warn!("fenêtre de sortie demandée mais ce binaire est compilé sans (feature `render`)");

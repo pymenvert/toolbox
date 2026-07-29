@@ -82,6 +82,8 @@ pub struct OutputControl {
     pub settings: std::sync::Arc<watch::Sender<OutputSettings>>,
     /// Frames par seconde réellement présentées par la fenêtre de sortie.
     pub fps: watch::Receiver<f32>,
+    /// Coût de production d'une frame (p50/p95/max) et frames perdues.
+    pub mesures: watch::Receiver<toolbox_core::mesure::RenduMesures>,
     /// Dernière frame vidéo décodée — pour l'aperçu web de la sortie.
     pub video: watch::Receiver<Option<toolbox_engine::VideoFrame>>,
 }
@@ -93,11 +95,13 @@ impl OutputControl {
         let (_, monitors) = watch::channel(Vec::new());
         let (settings, _) = watch::channel(OutputSettings::default());
         let (_, fps) = watch::channel(0.0);
+        let (_, mesures) = watch::channel(toolbox_core::mesure::RenduMesures::default());
         let (_, video) = watch::channel(None);
         Self {
             monitors,
             settings: std::sync::Arc::new(settings),
             fps,
+            mesures,
             video,
         }
     }
@@ -751,6 +755,14 @@ async fn system_stats(State(app): State<AppState>) -> Json<serde_json::Value> {
             "fonctions".into(),
             serde_json::to_value(*app.features.borrow()).unwrap_or_default(),
         );
+        // Coût réel du rendu : le débit (img/s) dit qu'on tient la cadence,
+        // ces chiffres-là disent AVEC QUELLE MARGE. Une machine à 60 img/s
+        // dont le p95 frôle les 16 ms est une machine qui va décrocher.
+        objet.insert(
+            "rendu".into(),
+            serde_json::to_value(*app.output.mesures.borrow()).unwrap_or_default(),
+        );
+        objet.insert("fps".into(), serde_json::json!(*app.output.fps.borrow()));
     }
     Json(json)
 }
@@ -2525,6 +2537,49 @@ mod tests {
         assert!(json["os"].is_string());
     }
 
+    /// Le coût du rendu et la mémoire du process doivent sortir par
+    /// `/api/system` : c'est la seule fenêtre qu'a l'opérateur (et le harnais
+    /// d'endurance) sur la marge réelle de la machine.
+    #[tokio::test]
+    async fn system_stats_exposent_le_cout_du_rendu_et_la_memoire_du_process() {
+        let mut bed = testbed();
+        // On branche une fenêtre de sortie fictive qui a déjà mesuré.
+        // (Les émetteurs peuvent mourir : un `watch::Receiver` continue de
+        // rendre la dernière valeur publiée.)
+        let (_mesures_tx, mesures_rx) = watch::channel(toolbox_core::mesure::RenduMesures {
+            p50_us: 3_000,
+            p95_us: 7_500,
+            max_us: 12_000,
+            sautees: 2,
+        });
+        let (_fps_tx, fps_rx) = watch::channel(30.0f32);
+        bed.app.output.mesures = mesures_rx;
+        bed.app.output.fps = fps_rx;
+        let response = router(bed.app.clone())
+            .oneshot(
+                HttpRequest::get("/api/system")
+                    .body(Body::empty())
+                    .expect("req"),
+            )
+            .await
+            .expect("resp");
+        assert_eq!(response.status(), StatusCode::OK);
+        let json = body_json(response).await;
+        // Valeurs injectées par le testbed : elles doivent traverser intactes.
+        assert_eq!(json["rendu"]["p50_us"], 3_000);
+        assert_eq!(json["rendu"]["p95_us"], 7_500);
+        assert_eq!(json["rendu"]["max_us"], 12_000);
+        assert_eq!(json["rendu"]["sautees"], 2);
+        assert_eq!(json["fps"], 30.0);
+        // La mémoire du process est mesurée sur les deux plateformes cibles.
+        // `null` reste toléré ailleurs, mais jamais un champ absent : le
+        // harnais d'endurance échantillonne cette clé.
+        assert!(
+            json.get("rss_mb").is_some(),
+            "clé rss_mb absente de /api/system"
+        );
+    }
+
     /// Fichiers du parc : la poussée copie RÉELLEMENT le média chez un autre
     /// node (serveur HTTP réel sur un port libre), le proxy liste ses médias,
     /// et les URL hors parc sont refusées (pas de proxy ouvert).
@@ -2815,11 +2870,18 @@ mod tests {
         ]);
         let (settings_tx, mut settings_rx) = watch::channel(OutputSettings::default());
         let (_fps_tx, fps_rx) = watch::channel(30.0);
+        let (_mesures_tx, mesures_rx) = watch::channel(toolbox_core::mesure::RenduMesures {
+            p50_us: 3_000,
+            p95_us: 7_500,
+            max_us: 12_000,
+            sautees: 2,
+        });
         let (_video_tx, video_rx) = watch::channel(None);
         let output = OutputControl {
             monitors: monitors_rx,
             settings: std::sync::Arc::new(settings_tx),
             fps: fps_rx,
+            mesures: mesures_rx,
             video: video_rx,
         };
         let app = AppState::new(

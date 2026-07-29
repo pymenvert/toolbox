@@ -19,9 +19,16 @@ pub struct SystemStats {
     pub uptime_s: u64,
     /// Charge système 1 min (Linux uniquement).
     pub load_1min: Option<f32>,
-    /// Mémoire totale / disponible en Mo (Linux uniquement).
+    /// Mémoire totale / disponible de la MACHINE en Mo (Linux uniquement).
     pub mem_total_mb: Option<u64>,
     pub mem_available_mb: Option<u64>,
+    /// Mémoire résidente du process Lanterne lui-même, en Mo.
+    ///
+    /// Les deux champs au-dessus décrivent la machine : une fuite de Lanterne
+    /// s'y noyait dans le bruit des autres programmes, et sous Windows on ne
+    /// voyait strictement rien. Celui-ci est le seul chiffre qui permette de
+    /// dire « le node a grossi de 40 Mo en six heures ».
+    pub rss_mb: Option<u64>,
     /// Température CPU en °C (Linux : thermal_zone0 — fiable sur Pi).
     pub temperature_c: Option<f32>,
     /// Espace disque libre / total du dossier de travail, en Go.
@@ -35,7 +42,10 @@ pub struct SystemStats {
 /// Collecte les statistiques. Ne panique jamais : tout ce qui n'est pas
 /// lisible devient `None`.
 pub fn collect(started_at: Instant) -> SystemStats {
-    let disk = read_disk();
+    // Un seul appel : sous Windows, disque et mémoire du process sortent de
+    // la MÊME sous-commande PowerShell (deux invocations toutes les 5 s
+    // coûteraient plus cher que tout le reste de la page Système réunie).
+    let (disk, rss_mb) = disque_et_memoire();
     SystemStats {
         os: std::env::consts::OS,
         arch: std::env::consts::ARCH,
@@ -43,11 +53,71 @@ pub fn collect(started_at: Instant) -> SystemStats {
         load_1min: read_load(),
         mem_total_mb: read_meminfo_kb("MemTotal:").map(|kb| kb / 1024),
         mem_available_mb: read_meminfo_kb("MemAvailable:").map(|kb| kb / 1024),
+        rss_mb,
         temperature_c: read_temperature(),
         disk_free_gb: disk.map(|(free, _)| free),
         disk_total_gb: disk.map(|(_, total)| total),
         tailscale: read_tailscale(),
     }
+}
+
+/// Disque du volume de travail et mémoire résidente du process, en un seul
+/// passage. Sous Linux ce sont deux lectures de fichiers (gratuites) ; sous
+/// Windows, une seule sous-commande PowerShell rapporte les deux.
+#[cfg(target_os = "linux")]
+fn disque_et_memoire() -> (Option<(f32, f32)>, Option<u64>) {
+    (read_disk(), read_meminfo_self_kb().map(|kb| kb / 1024))
+}
+
+/// Mémoire résidente du process courant, en Ko (`/proc/self/status`).
+#[cfg(target_os = "linux")]
+fn read_meminfo_self_kb() -> Option<u64> {
+    let text = std::fs::read_to_string("/proc/self/status").ok()?;
+    let line = text.lines().find(|l| l.starts_with("VmRSS:"))?;
+    line.split_whitespace().nth(1)?.parse().ok()
+}
+
+/// Windows : espace disque + `WorkingSet64` du process, une invocation.
+/// Si `Get-Process` échoue, la troisième valeur manque simplement et la
+/// mémoire devient `None` — le disque, lui, reste mesuré.
+#[cfg(target_os = "windows")]
+fn disque_et_memoire() -> (Option<(f32, f32)>, Option<u64>) {
+    let script = format!(
+        "$d = Get-PSDrive -Name (Get-Location).Drive.Name; \
+         $p = Get-Process -Id {} -ErrorAction SilentlyContinue; \
+         \"$($d.Free) $($d.Used) $($p.WorkingSet64)\"",
+        std::process::id()
+    );
+    let Ok(out) = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-Command", &script])
+        .output()
+    else {
+        return (None, None);
+    };
+    let text = String::from_utf8_lossy(&out.stdout);
+    // Découpage POSITIONNEL, pas séquentiel : un jeton illisible ne doit pas
+    // décaler la lecture des suivants (le disque en panne rendrait alors la
+    // mémoire fausse au lieu d'absente).
+    let jetons: Vec<&str> = text.split_whitespace().collect();
+    let nombre = |i: usize| jetons.get(i).and_then(|v| v.parse::<f64>().ok());
+    let disque = match (nombre(0), nombre(1)) {
+        (Some(free), Some(used)) => {
+            let gib = 1024.0 * 1024.0 * 1024.0;
+            #[allow(clippy::cast_possible_truncation)] // Go : la précision f32 suffit
+            Some(((free / gib) as f32, ((free + used) / gib) as f32))
+        }
+        _ => None,
+    };
+    let rss = jetons
+        .get(2)
+        .and_then(|v| v.parse::<u64>().ok())
+        .map(|octets| octets / (1024 * 1024));
+    (disque, rss)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
+fn disque_et_memoire() -> (Option<(f32, f32)>, Option<u64>) {
+    (read_disk(), None)
 }
 
 /// Espace libre du volume de travail, en Go. `None` = mesure indisponible
@@ -151,6 +221,34 @@ mod tests {
         if stats.os == "linux" {
             assert!(stats.load_1min.is_some());
             assert!(stats.mem_total_mb.is_some());
+            // /proc/self/status est toujours lisible par le process lui-même :
+            // pas de raison légitime que la mémoire du node soit absente.
+            assert!(stats.rss_mb.is_some(), "VmRSS de /proc/self/status");
+        }
+    }
+
+    #[test]
+    fn la_memoire_du_process_est_plausible_quand_elle_est_mesuree() {
+        // On ne peut pas exiger une valeur exacte (elle dépend de la machine),
+        // mais un chiffre absurde signalerait une erreur d'unité — le piège
+        // classique de ce genre de mesure (octets pris pour des Mo).
+        let stats = collect(Instant::now());
+        if let Some(rss) = stats.rss_mb {
+            assert!(
+                rss < 100_000,
+                "un binaire de test à {rss} Mo : unité probablement fausse"
+            );
+        }
+    }
+
+    #[test]
+    fn la_memoire_du_process_est_distincte_de_celle_de_la_machine() {
+        // Le bug qu'on veut rendre impossible : recopier mem_available_mb
+        // dans rss_mb. Le process de test pèse forcément moins que la RAM
+        // totale de la machine.
+        let stats = collect(Instant::now());
+        if let (Some(rss), Some(total)) = (stats.rss_mb, stats.mem_total_mb) {
+            assert!(rss < total, "RSS {rss} Mo >= RAM totale {total} Mo");
         }
     }
 
