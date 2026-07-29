@@ -82,7 +82,13 @@ while [ "$(date +%s)" -lt "$fin" ]; do
     echecs=$((echecs + 1))
     echo "  node injoignable ($echecs)"
   fi
-  [ "$CHARGE" = "1" ] && charge
+  # `if` explicite, PAS `[ ... ] && charge` : sous `set -e`, une liste ET
+  # dont la condition est fausse renvoie 1, et le comportement qui s'ensuit
+  # depend du shell. Sur le Pi, /bin/sh est dash, pas bash -- CHARGE=0
+  # risquait d'arreter la collecte au premier point.
+  if [ "$CHARGE" = "1" ]; then
+    charge
+  fi
   sleep "$INTERVALLE"
 done
 

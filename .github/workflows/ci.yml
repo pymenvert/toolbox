@@ -204,7 +204,7 @@ jobs:
         run: |
           set -o pipefail
           sudo apt-get install -y shellcheck 2>&1 | tee apt.log
-          shellcheck tools/bench/*.sh deploy/*.sh 2>&1 | tee sc.log
+          shellcheck tools/bench/*.sh tools/endurance/*.sh deploy/*.sh 2>&1 | tee sc.log
       - name: Publier les logs en cas d'échec
         if: failure()
         env:
