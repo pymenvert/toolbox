@@ -177,6 +177,16 @@ async fn run(mut config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std:
         &config.paths.media,
         config.limits.max_upload_mb.saturating_mul(1024 * 1024),
     )?;
+    // Un upload coupé net (coupure de courant, arrêt du service) laisse un
+    // temporaire caché de la taille du média. Personne ne peut le voir ni le
+    // supprimer depuis l'interface : on nettoie au démarrage.
+    let liberes = media.purger_temporaires();
+    if liberes > 0 {
+        info!(
+            octets = liberes,
+            "temporaires d'upload orphelins supprimés au démarrage"
+        );
+    }
 
     // Dossier des LUT .cube (étalonnage) : créé pour que l'utilisateur
     // puisse y déposer ses fichiers (ou via PUT /api/luts/<nom>).

@@ -290,12 +290,24 @@ pub async fn run(
                 // départ) écrasent l'état fraîchement chargé et l'image repart
                 // vers l'ancienne cible. Ces événements ne sont jamais émis
                 // par les pas du fader : pas d'auto-annulation.
-                Ok(Event::PresetLoaded { .. })
-                | Ok(Event::StateReplaced { .. })
-                | Ok(Event::MappingLoaded { .. })
-                | Ok(Event::MappingReset) => {
+                // État COMPLET remplacé : le fondu entier n'a plus d'objet.
+                Ok(Event::PresetLoaded { .. }) | Ok(Event::StateReplaced { .. }) => {
                     if current.take().is_some() {
                         info!("fondu annulé par un chargement direct");
+                    }
+                }
+                // Seul le MAPPING est remplacé : on fige la partie mapping du
+                // fondu (en la recalant sur l'état courant, plan() cesse
+                // d'émettre coins, crop, mesh…) mais volume, couleur, effets
+                // et blending continuent jusqu'au bout. Tout annuler ici était
+                // excessif : charger un mapping stoppait net un fondu de
+                // preset de 40 s en cours sur le reste de l'image.
+                Ok(Event::MappingLoaded { .. }) | Ok(Event::MappingReset) => {
+                    if let Some(fade) = &mut current {
+                        let mapping = bus.snapshot().mapping;
+                        fade.from.mapping = mapping.clone();
+                        fade.to.mapping = mapping;
+                        info!("mapping repris à la main : le fondu continue sans lui");
                     }
                 }
                 Ok(_) => {}
@@ -534,6 +546,101 @@ mod tests {
         assert!(
             (x2 - 0.5).abs() > 0.05,
             "le fondu ne doit pas avoir convergé vers 0.5 ; obtenu {x2}"
+        );
+    }
+
+    /// Reprendre le MAPPING à la main pendant un fondu de preset fige le
+    /// calage, mais laisse le reste (volume, couleur…) atteindre sa cible.
+    #[tokio::test]
+    async fn mapping_load_ne_tue_que_la_partie_mapping_du_fondu() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = PresetStore::open(dir.path().join("presets")).expect("open");
+        let mappings =
+            MappingStore::open(dir.path().join("presets").join("mapping")).expect("open");
+        let bus = Bus::new(256, 1024)
+            .with_presets(store.clone())
+            .with_mapping_presets(mappings.clone());
+        let handle = bus.handle();
+        tokio::spawn(bus.run());
+        let (_shutdown_tx, shutdown_rx) = watch::channel(false);
+        tokio::spawn(run(handle.clone(), store, mappings, shutdown_rx));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // Mapping « neutre » sauvé seul, puis preset cible (coin 0.6, vol 0.2).
+        handle
+            .send(
+                Source::Http,
+                Command::MappingSave {
+                    name: "plat".into(),
+                },
+            )
+            .await;
+        handle
+            .send(
+                Source::Http,
+                Command::CornerSet {
+                    index: 0,
+                    x: 0.6,
+                    y: 0.0,
+                },
+            )
+            .await;
+        handle
+            .send(Source::Http, Command::SetVolume { volume: 0.2 })
+            .await;
+        handle
+            .send(
+                Source::Http,
+                Command::PresetSave {
+                    name: "cible".into(),
+                },
+            )
+            .await;
+        // Départ : coin 0.0, volume 1.0.
+        handle.send(Source::Http, Command::MappingReset).await;
+        handle
+            .send(Source::Http, Command::SetVolume { volume: 1.0 })
+            .await;
+
+        handle
+            .send(
+                Source::Http,
+                Command::PresetFade {
+                    name: "cible".into(),
+                    seconds: 0.6,
+                },
+            )
+            .await;
+        tokio::time::sleep(Duration::from_millis(120)).await;
+        // En plein fondu, l'opérateur recharge un mapping à la main.
+        handle
+            .send(
+                Source::Http,
+                Command::MappingLoad {
+                    name: "plat".into(),
+                },
+            )
+            .await;
+        // Laisser le bus appliquer le chargement ET le fader le prendre en
+        // compte avant de photographier le calage.
+        tokio::time::sleep(Duration::from_millis(120)).await;
+        let coin_au_moment = handle.snapshot().mapping.corners[0].x;
+        tokio::time::sleep(Duration::from_millis(800)).await;
+
+        let etat = handle.snapshot();
+        assert!(
+            (etat.mapping.corners[0].x - coin_au_moment).abs() < 1e-5,
+            "le mapping doit rester celui chargé à la main ({coin_au_moment}) ; obtenu {}",
+            etat.mapping.corners[0].x
+        );
+        assert!(
+            (etat.mapping.corners[0].x - 0.6).abs() > 0.05,
+            "le fondu ne doit PAS avoir ramené le mapping vers sa cible 0.6"
+        );
+        assert!(
+            (etat.player.volume - 0.2).abs() < 1e-5,
+            "le volume doit quand même atteindre sa cible ; obtenu {}",
+            etat.player.volume
         );
     }
 

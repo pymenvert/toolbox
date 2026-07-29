@@ -223,6 +223,23 @@ fn appliquer_blending(blending: &toolbox_core::BlendingState, pixel: u32, u: f64
     (canal(16) << 16) | (canal(8) << 8) | canal(0)
 }
 
+/// Temps à passer aux effets animés (bruit, mire), en secondes, replié sur
+/// l'heure.
+///
+/// Après plusieurs jours de marche continue, un `f32` « secondes depuis le
+/// boot » n'a plus la précision d'une frame et les animations saccadent. Le
+/// repli modulo 3600 garde la précision — les motifs sont périodiques, la
+/// coupure est invisible. TOUTES les sorties doivent utiliser ce helper :
+/// le repli n'existait que dans le compositeur réseau, la fenêtre qui
+/// projette (le seul rendu que le public voit) en était privée.
+#[must_use]
+pub fn temps_effets(depart: std::time::Instant) -> f32 {
+    #[allow(clippy::cast_possible_truncation)] // < 3600 par construction
+    {
+        (depart.elapsed().as_secs_f64() % 3600.0) as f32
+    }
+}
+
 /// Niveau courant d'une rampe de blackout : progresse linéairement de
 /// `depart` vers `cible` en `fondu_ms`. Pure — l'appelant fournit le temps
 /// écoulé depuis le changement de consigne. `fondu_ms == 0` : saut direct.

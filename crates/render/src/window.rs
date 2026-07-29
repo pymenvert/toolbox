@@ -403,6 +403,15 @@ impl OutputApp {
             return;
         };
         if enabled {
+            // Réveil DEMANDÉ par l'opérateur : c'est exactement le moment de
+            // redonner sa chance au GPU. Sans ce réarmement, un repli CPU
+            // déclenché par un hoquet (écran verrouillé, pilote rechargé)
+            // durait jusqu'au redémarrage du node — alors que la bascule
+            // off/on est documentée partout comme LE geste de reprise.
+            if self.forcer_cpu {
+                info!("réveil manuel : nouvelle tentative de rendu GPU");
+                self.forcer_cpu = false;
+            }
             if self.painter.is_none() {
                 self.painter = self.creer_peintre(&window);
             }
@@ -518,7 +527,10 @@ impl OutputApp {
             self.snapshot.blackout.fondu_ms,
         );
         self.blackout_niveau = niveau;
-        let time = self.started_at.elapsed().as_secs_f32();
+        // Helper partagé : même repli sur l'heure que les sorties réseau —
+        // la fenêtre qui projette en était privée, ses effets animés
+        // finissaient donc par saccader après quelques jours de marche.
+        let time = toolbox_engine::temps_effets(self.started_at);
         let lut = self
             .lut_cache
             .as_ref()

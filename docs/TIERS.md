@@ -12,9 +12,23 @@ Dernière revue : 2026-07-29 (version 3.4.1).
 ## 1. Bibliothèques Rust
 
 Toutes les dépendances Rust du binaire sont sous licence permissive
-(MIT, Apache-2.0, BSD, ISC, Zlib, Unicode, MPL-2.0). Aucune dépendance sous
-GPL/AGPL n'est intégrée au binaire — c'est vérifié **automatiquement à
+(MIT, Apache-2.0, BSD, ISC, Zlib, Unicode, MPL-2.0, IJG). Aucune dépendance
+sous GPL/AGPL n'est intégrée au binaire — c'est vérifié **automatiquement à
 chaque commit** par le job `licences` de la CI (voir `deny.toml`).
+
+### Mention obligatoire — Independent JPEG Group
+
+L'encodeur JPEG du flux MJPEG (`jpeg-encoder`) est sous
+`(MIT OR Apache-2.0) AND IJG`. La licence IJG est permissive et compatible
+avec une distribution commerciale, mais elle **exige** que la mention
+suivante accompagne le logiciel :
+
+> This software is based in part on the work of the Independent JPEG Group.
+>
+> (Ce logiciel est basé en partie sur le travail de l'Independent JPEG Group.)
+
+Cette mention doit rester présente dans ce fichier, livré avec chaque
+archive, et elle est reprise dans le manuel utilisateur.
 
 Pour produire l'inventaire nominatif complet (nom, version, licence, texte) :
 

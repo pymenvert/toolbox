@@ -669,9 +669,13 @@ async fn media_upload(
 
     match result {
         Ok(()) => {
-            tokio::fs::rename(&tmp_path, &final_path)
-                .await
-                .map_err(|e| CoreError::io(final_path.display().to_string(), e))?;
+            // Le rename peut échouer (cible verrouillée, disque plein) : sans
+            // ce nettoyage, un temporaire CACHÉ de la taille du média restait
+            // sur le disque — invisible dans l'onglet Médias, jamais purgé.
+            if let Err(e) = tokio::fs::rename(&tmp_path, &final_path).await {
+                let _ = tokio::fs::remove_file(&tmp_path).await;
+                return Err(CoreError::io(final_path.display().to_string(), e).into());
+            }
             info!(media = %name, bytes = written, "média déposé");
             Ok((
                 StatusCode::CREATED,
@@ -892,7 +896,7 @@ async fn preview_png(
     let state = app.bus.snapshot();
     let video = app.output.video.borrow().clone();
     let frame_key = video.as_ref().map(|f| f.rgba.as_ptr() as usize);
-    let time = app.started_at.elapsed().as_secs_f32();
+    let time = toolbox_engine::temps_effets(app.started_at);
 
     let lut = lut_pour_apercu(&app, state.lut.as_deref()).await;
     let mut cache = app.preview.lock().await;
@@ -1055,7 +1059,7 @@ async fn flux_mjpg(
                     &snapshot,
                     video.as_ref(),
                     lut,
-                    depart.elapsed().as_secs_f32(),
+                    toolbox_engine::temps_effets(depart),
                     width,
                     height,
                     &mut pixels,
@@ -1342,6 +1346,9 @@ async fn fleet_media(
         .send()
         .await
         .map_err(|e| CoreError::InvalidCommand(format!("node injoignable : {e}")))?;
+    if !reponse.status().is_success() {
+        return Err(CoreError::InvalidCommand(message_refus_parc(reponse.status())).into());
+    }
     let json: serde_json::Value = reponse
         .json()
         .await
@@ -1477,7 +1484,23 @@ async fn envoyer_media(
     if reponse.status().is_success() {
         Ok(())
     } else {
-        Err(format!("refusé par le node : HTTP {}", reponse.status()))
+        Err(message_refus_parc(reponse.status()))
+    }
+}
+
+/// Message d'échec d'un échange de parc. Un 401/403 après la v3.4.0 a une
+/// cause précise et une seule : les deux machines n'ont pas le même
+/// `[security] fleet_token`. Le dire explicitement évite à l'opérateur de
+/// chercher pendant une heure — auparavant, le mot de passe de l'UI suffisait
+/// et la mise à jour a silencieusement cassé les parcs protégés.
+fn message_refus_parc(status: reqwest::StatusCode) -> String {
+    if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+        "node refusé (HTTP 401/403) : ajoutez le MÊME « [security] fleet_token » dans le \
+         node.toml des DEUX machines, puis redémarrez-les — depuis la v3.4.0 le mot de passe \
+         de l'interface n'est plus relayé au parc (il aurait fui vers un node inconnu)"
+            .to_string()
+    } else {
+        format!("refusé par le node : HTTP {status}")
     }
 }
 

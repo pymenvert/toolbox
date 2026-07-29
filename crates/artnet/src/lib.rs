@@ -423,10 +423,25 @@ pub async fn service(
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut sequence: u8 = 1;
     let mut chaser_depart = tokio::time::Instant::now();
+    // Persistance différée : `a_sauver` est posé par les commandes, et
+    // l'écriture n'a lieu qu'après `DELAI_SAUVEGARDE` sans nouvelle
+    // modification — un glissé de master ne déclenche plus 16 écritures
+    // complètes par seconde dans la boucle d'émission.
+    const DELAI_SAUVEGARDE: std::time::Duration = std::time::Duration::from_millis(400);
+    let mut a_sauver = false;
+    let mut sauvegarde = tokio::time::interval(DELAI_SAUVEGARDE);
+    sauvegarde.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     info!("console lumières prête (Art-Net)");
     loop {
         tokio::select! {
             _ = shutdown.changed() => break,
+            // Accalmie : on écrit enfin (et une seule fois pour tout le geste).
+            _ = sauvegarde.tick(), if a_sauver => {
+                a_sauver = false;
+                if let Err(err) = etat.save(&chemin) {
+                    warn!(%err, "console lumières non persistée");
+                }
+            }
             _ = actif.changed() => {
                 if !*actif.borrow() {
                     socket = None; // socket fermée : zéro ressource réseau
@@ -439,9 +454,13 @@ pub async fn service(
                     chaser_depart = tokio::time::Instant::now();
                 }
                 if appliquer(&mut etat, commande) {
-                    if let Err(err) = etat.save(&chemin) {
-                        warn!(%err, "console lumières non persistée");
-                    }
+                    // Persistance DIFFÉRÉE : l'écriture fait un fsync (des
+                    // dizaines de ms sur carte SD) DANS la boucle qui émet
+                    // aussi les trames à 30 Hz. Glisser le master envoie ~16
+                    // commandes/s : autant d'écritures complètes du fichier,
+                    // qui bloquent l'émission et usent la carte. On note
+                    // qu'il faut sauver, et on le fait après une accalmie.
+                    a_sauver = true;
                 }
                 etat_tx.send_replace(etat.clone());
             }
@@ -506,6 +525,14 @@ pub async fn service(
                 }
                 sequence = if sequence == 255 { 1 } else { sequence + 1 };
             }
+        }
+    }
+    // Sortie de boucle (arrêt du node, interrupteur coupé) : une écriture
+    // encore en attente ne doit PAS être perdue — c'est le prix de la
+    // persistance différée, et il se paie ici.
+    if a_sauver {
+        if let Err(err) = etat.save(&chemin) {
+            warn!(%err, "console lumières non persistée à l'arrêt");
         }
     }
     info!("console lumières arrêtée");

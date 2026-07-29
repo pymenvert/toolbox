@@ -22,6 +22,10 @@ allow = [
     "MPL-2.0",       # copyleft de FICHIER : compatible avec un binaire vendu
     "OpenSSL",
     "Unlicense",
+    # Independent JPEG Group (via jpeg-encoder, utilisé par le flux MJPEG).
+    # Permissive et redistribuable dans un produit commercial, MAIS elle
+    # impose une mention explicite — voir docs/TIERS.md, section 1.
+    "IJG",
 ]
 confidence-threshold = 0.8
 

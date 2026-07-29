@@ -106,12 +106,7 @@ impl Compositeur {
             self.frame_gelee = None;
             self.video.borrow().clone()
         };
-        // Temps des effets animés replié sur l'heure : après des jours de
-        // marche continue, un f32 « secondes depuis le boot » n'a plus la
-        // précision d'une frame (les animations saccadent) — le repli garde
-        // la précision, les motifs sont périodiques de toute façon.
-        #[allow(clippy::cast_possible_truncation)] // < 3600 par construction
-        let time = (self.depart.elapsed().as_secs_f64() % 3600.0) as f32;
+        let time = crate::temps_effets(self.depart);
         crate::raster::render_frame_lut(
             &self.snapshot,
             video.as_ref(),

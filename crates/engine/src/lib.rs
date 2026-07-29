@@ -24,7 +24,7 @@ pub use lut::Lut3d;
 pub use player::{
     BackendEvent, MemoryBackend, PlaybackPosition, Player, PlayerBackend, PlayerError,
 };
-pub use raster::{appliquer_blackout, niveau_rampe, render_frame};
+pub use raster::{appliquer_blackout, niveau_rampe, render_frame, temps_effets};
 pub use render::{ColorUniforms, RenderParams};
 pub use video::VideoFrame;
 

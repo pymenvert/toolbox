@@ -164,6 +164,23 @@ pub fn demarrer(
                     return;
                 }
             }
+            // Surveillance du drapeau d'arrêt DEPUIS la boucle GLib. Sans
+            // elle, un `main_loop.quit()` émis avant que `run()` n'ait
+            // démarré est perdu : la boucle tourne alors indéfiniment et le
+            // thread ne se termine jamais — exactement l'inverse de ce que
+            // promettait le commentaire de la v3.3.0.
+            {
+                let arret_boucle = arret_thread.clone();
+                let a_quitter = boucle.clone();
+                glib::timeout_add(std::time::Duration::from_millis(500), move || {
+                    if arret_boucle.load(Ordering::Relaxed) {
+                        a_quitter.quit();
+                        glib::ControlFlow::Break
+                    } else {
+                        glib::ControlFlow::Continue
+                    }
+                });
+            }
             boucle.run();
             info!("sortie RTSP arrêtée");
         })
@@ -181,7 +198,10 @@ pub fn demarrer(
         Err(_) => {
             // Thread bloqué avant l'écoute (GLib souffrant) : on demande
             // l'arrêt sans le joindre — un join ici bloquerait l'appelant
-            // aussi longtemps que le thread. Marqué, il se terminera s'il
+            // aussi longtemps que le thread. La surveillance posée dans la
+            // boucle GLib (timeout_add ci-dessus) fera effectivement quitter
+            // dès qu'elle tourne, quel que soit l'instant où elle démarre.
+            // Marqué, il se terminera s'il
             // se débloque, et le warn rend la fuite visible dans les logs.
             arret.store(true, Ordering::Relaxed);
             main_loop.quit();

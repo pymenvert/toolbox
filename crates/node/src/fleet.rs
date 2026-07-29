@@ -206,24 +206,82 @@ fn publish(nodes: &watch::Sender<serde_json::Value>, connus: &HashMap<String, Fl
     }
 }
 
-/// Nom d'instance mDNS : ASCII simple (les annonces exotiques cassent
-/// certains résolveurs).
-/// Suffixe hexadécimal court identifiant CETTE machine/instance, pour rendre
-/// le nom mDNS unique (le hostname par défaut « raspberrypi » est identique
-/// sur tous les Pi neufs). Dérivé du hostname + PID + heure de démarrage :
-/// stable pendant la vie du process, distinct d'une machine à l'autre.
+/// Suffixe hexadécimal court identifiant CETTE MACHINE, pour rendre le nom
+/// mDNS unique (le hostname par défaut « raspberrypi » est identique sur
+/// tous les Pi neufs).
+///
+/// Il doit être STABLE d'un démarrage à l'autre : dérivé du PID et de
+/// l'heure, il changeait à chaque lancement et le parc affichait des nodes
+/// FANTÔMES après un redémarrage (l'ancienne annonce survit dans les caches
+/// mDNS des autres machines). On le dérive donc d'une valeur persistante —
+/// `/etc/machine-id` sous Linux, `MachineGuid` sous Windows — avec repli sur
+/// un identifiant tiré une seule fois et rangé à côté du binaire.
 fn suffixe_unique() -> String {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
+    identite_machine().hash(&mut h);
+    format!("{:04x}", h.finish() & 0xffff)
+}
+
+/// Une chaîne stable et propre à la machine. Ordre de préférence : identité
+/// système persistante, puis un identifiant tiré au sort UNE fois et rangé
+/// dans `identite-machine` à côté du binaire, puis (dernier recours) le
+/// hostname — jamais le PID ni l'heure, qui changent à chaque démarrage.
+fn identite_machine() -> String {
+    #[cfg(unix)]
+    for chemin in ["/etc/machine-id", "/var/lib/dbus/machine-id"] {
+        if let Ok(id) = std::fs::read_to_string(chemin) {
+            let id = id.trim();
+            if !id.is_empty() {
+                return id.to_string();
+            }
+        }
+    }
+    #[cfg(windows)]
+    {
+        let sortie = std::process::Command::new("reg")
+            .args([
+                "query",
+                r"HKLM\SOFTWARE\Microsoft\Cryptography",
+                "/v",
+                "MachineGuid",
+            ])
+            .output();
+        if let Ok(sortie) = sortie {
+            let texte = String::from_utf8_lossy(&sortie.stdout);
+            if let Some(guid) = texte.split_whitespace().last() {
+                if guid.len() > 8 {
+                    return guid.to_string();
+                }
+            }
+        }
+    }
+    // Repli portable : un identifiant tiré une seule fois et conservé.
+    let fichier = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join("identite-machine")));
+    if let Some(fichier) = fichier {
+        if let Ok(id) = std::fs::read_to_string(&fichier) {
+            let id = id.trim();
+            if !id.is_empty() {
+                return id.to_string();
+            }
+        }
+        // Tirage unique, à partir d'une source qui varie au premier lancement.
+        let graine = format!(
+            "{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos())
+        );
+        if std::fs::write(&fichier, &graine).is_ok() {
+            return graine;
+        }
+    }
     std::env::var("COMPUTERNAME")
         .or_else(|_| std::env::var("HOSTNAME"))
-        .unwrap_or_default()
-        .hash(&mut h);
-    std::process::id().hash(&mut h);
-    if let Ok(d) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
-        d.as_nanos().hash(&mut h);
-    }
-    format!("{:04x}", h.finish() & 0xffff)
+        .unwrap_or_else(|_| "lanterne".into())
 }
 
 fn sanitize_instance(name: &str) -> String {

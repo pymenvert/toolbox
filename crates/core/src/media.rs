@@ -74,6 +74,37 @@ impl MediaLibrary {
         &self.root
     }
 
+    /// Supprime les temporaires d'upload laissés par une interruption
+    /// BRUTALE (coupure de courant, `systemctl stop`, arrêt du process en
+    /// plein transfert). Ils commencent par un point : invisibles dans
+    /// l'onglet Médias, non supprimables depuis l'interface, et pesant la
+    /// taille du média — sur une carte SD, ça finit par tout remplir.
+    /// À appeler au démarrage du node. Retourne le nombre d'octets libérés.
+    pub fn purger_temporaires(&self) -> u64 {
+        let Ok(entries) = fs::read_dir(&self.root) else {
+            return 0;
+        };
+        let mut liberes = 0;
+        for entry in entries.flatten() {
+            let Some(nom) = entry.file_name().to_str().map(String::from) else {
+                continue;
+            };
+            if !(nom.starts_with('.') && nom.contains(".upload.") && nom.ends_with(".tmp")) {
+                continue;
+            }
+            let taille = entry.metadata().map(|m| m.len()).unwrap_or(0);
+            if fs::remove_file(entry.path()).is_ok() {
+                liberes += taille;
+                tracing::warn!(
+                    fichier = %nom,
+                    octets = taille,
+                    "temporaire d'upload orphelin supprimé (transfert interrompu)"
+                );
+            }
+        }
+        liberes
+    }
+
     /// Taille maximale acceptée pour un dépôt de fichier, en octets.
     pub fn max_upload_bytes(&self) -> u64 {
         self.max_upload_bytes
@@ -243,6 +274,28 @@ fn write_capped(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Les temporaires d'un upload interrompu sont nettoyés au démarrage —
+    /// et RIEN d'autre n'est touché.
+    #[test]
+    fn purger_temporaires_ne_prend_que_les_orphelins() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let lib = MediaLibrary::open(dir.path(), 1024).expect("open");
+        std::fs::write(dir.path().join(".film.mp4.upload.3.tmp"), vec![b'x'; 500]).expect("write");
+        std::fs::write(dir.path().join(".autre.mov.upload.0.tmp"), vec![b'x'; 200]).expect("write");
+        // Ni les médias, ni les fichiers cachés étrangers.
+        std::fs::write(dir.path().join("film.mp4"), b"vrai media").expect("write");
+        std::fs::write(dir.path().join(".DS_Store"), b"x").expect("write");
+
+        assert_eq!(lib.purger_temporaires(), 700);
+        assert!(dir.path().join("film.mp4").exists(), "le média est intact");
+        assert!(
+            dir.path().join(".DS_Store").exists(),
+            "fichier étranger intact"
+        );
+        assert!(!dir.path().join(".film.mp4.upload.3.tmp").exists());
+        assert!(!dir.path().join(".autre.mov.upload.0.tmp").exists());
+    }
 
     fn lib() -> (tempfile::TempDir, MediaLibrary) {
         let dir = tempfile::tempdir().expect("tempdir");
