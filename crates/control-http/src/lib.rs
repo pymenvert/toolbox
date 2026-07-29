@@ -2574,9 +2574,12 @@ mod tests {
         // La mémoire du process est mesurée sur les deux plateformes cibles.
         // `null` reste toléré ailleurs, mais jamais un champ absent : le
         // harnais d'endurance échantillonne cette clé.
+        // `is_some()` sur la CLÉ était une tautologie : serde sérialise
+        // toujours un Option<u64>, `null` compris. C'est la VALEUR qui doit
+        // être là — les deux OS de la CI savent la fournir.
         assert!(
-            json.get("rss_mb").is_some(),
-            "clé rss_mb absente de /api/system"
+            !json["rss_mb"].is_null(),
+            "rss_mb non mesurée — le harnais d'endurance a besoin d'une valeur"
         );
     }
 

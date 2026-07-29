@@ -89,6 +89,15 @@ pub struct GpuPainter {
     /// frame) et sa taille de grille (0 = aucune).
     lut_nom: Option<String>,
     lut_taille: u32,
+    /// Temps passé dans `get_current_texture()` au dernier `render()`.
+    ///
+    /// La surface est configurée en `AutoVsync` (donc FIFO) : quand le rendu
+    /// est continu, cet appel BLOQUE jusqu'au prochain balayage écran. Sur une
+    /// machine parfaitement saine à 60 Hz, l'attente vaut donc ~16 ms. La
+    /// compter dans le « temps par image » revenait à afficher « trop lent
+    /// pour du 60 Hz » précisément quand tout va bien — l'indicateur mesurait
+    /// la cadence de l'écran, pas le coût du rendu. L'appelant la retranche.
+    attente_presentation: std::time::Duration,
 }
 
 impl GpuPainter {
@@ -242,6 +251,7 @@ impl GpuPainter {
             lut_buffer,
             lut_nom: None,
             lut_taille: 0,
+            attente_presentation: std::time::Duration::ZERO,
         })
     }
 
@@ -274,6 +284,9 @@ impl GpuPainter {
             .write_buffer(&self.uniforms, 0, bytemuck::bytes_of(&u));
 
         use wgpu::CurrentSurfaceTexture as Cst;
+        // Début de l'attente vsync : tout ce qui suit jusqu'à l'obtention de
+        // la frame est du temps SUBI, pas du temps de calcul.
+        let debut_attente = std::time::Instant::now();
         let frame = match self.surface.get_current_texture() {
             Cst::Success(frame) | Cst::Suboptimal(frame) => frame,
             Cst::Outdated | Cst::Lost => {
@@ -303,6 +316,7 @@ impl GpuPainter {
                 return ResultatRendu::DevicePerdu;
             }
         };
+        self.attente_presentation = debut_attente.elapsed();
         let view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
@@ -335,6 +349,13 @@ impl GpuPainter {
         self.queue.submit([encoder.finish()]);
         self.queue.present(frame);
         ResultatRendu::Presentee
+    }
+
+    /// Attente vsync du dernier `render()` réussi, à retrancher du temps de
+    /// frame mesuré par l'appelant (voir [`GpuPainter::attente_presentation`]).
+    #[must_use]
+    pub fn attente_presentation(&self) -> std::time::Duration {
+        self.attente_presentation
     }
 
     /// Téléverse la LUT quand elle change (nom comparé, pas le contenu).

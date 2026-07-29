@@ -95,6 +95,17 @@ impl Chrono {
         self.ecrits.min(ECHANTILLONS)
     }
 
+    /// Cumul de frames perdues, sans consommer la fenêtre.
+    ///
+    /// Sert à l'appelant pour savoir s'il a du neuf à publier : la seule
+    /// publication périodique se faisait sur une frame RÉUSSIE, donc une
+    /// sortie qui n'affiche plus rien du tout n'envoyait plus jamais son
+    /// compteur — exactement la panne que ce compteur doit révéler.
+    #[must_use]
+    pub fn sautees(&self) -> u64 {
+        self.sautees
+    }
+
     /// Calcule le résumé et **repart sur une fenêtre vide**. À appeler à la
     /// cadence de publication, pas à chaque frame : le tri coûte plus cher
     /// qu'une frame.
@@ -124,10 +135,17 @@ impl Chrono {
 }
 
 /// Index du centile `p` dans un tableau trié de `n` éléments (`n >= 1`).
+///
+/// Méthode du **rang le plus proche** : `ceil(n × p / 100) - 1`. La version
+/// naïve `floor(n × p / 100)` décale d'un cran chaque fois que `n × p` est
+/// multiple de 100 — donc, pour p = 50, à TOUT n pair. À n = 2, l'effet est
+/// maximal : elle renvoyait la PIRE des deux frames comme « médiane ». Ce
+/// n'est pas un cas d'école : au repos, la fenêtre ne repeint que sur
+/// changement d'état, donc une seconde de publication peut ne contenir que
+/// deux frames.
 fn centile(n: usize, p: usize) -> usize {
-    // `n * p / 100` puis bornage : pour n petit (une poignée de frames), le
-    // p95 retombe naturellement sur le dernier élément.
-    (n.saturating_mul(p) / 100).min(n - 1)
+    let rang = n.saturating_mul(p).div_ceil(100).max(1);
+    rang.min(n) - 1
 }
 
 #[cfg(test)]
@@ -157,9 +175,22 @@ mod tests {
             c.ajouter(Duration::from_micros(u64::from(i) * 1000));
         }
         let r = c.resumer();
-        assert_eq!(r.p50_us, 51_000, "médiane");
-        assert_eq!(r.p95_us, 96_000, "p95");
+        // Rang le plus proche : la 50ᵉ des 100 valeurs, pas la 51ᵉ.
+        assert_eq!(r.p50_us, 50_000, "médiane");
+        assert_eq!(r.p95_us, 95_000, "p95");
         assert_eq!(r.max_us, 100_000, "max");
+    }
+
+    /// Le cas où l'ancienne formule se trompait le plus : deux frames.
+    /// Elle publiait la pire des deux comme « habituel », et l'UI affichait
+    /// « 100 ms · trop lent pour du 60 Hz » alors qu'une des deux frames
+    /// avait coûté 1 ms.
+    #[test]
+    fn la_mediane_de_deux_frames_est_la_plus_rapide_pas_la_pire() {
+        let mut c = chrono_de(&[1_000, 100_000]);
+        let r = c.resumer();
+        assert_eq!(r.p50_us, 1_000, "médiane de deux frames");
+        assert_eq!(r.max_us, 100_000, "le max reste le max");
     }
 
     /// Un pic ISOLÉ (1 frame sur 100) ne bouge ni la médiane ni le p95 : seul
@@ -216,8 +247,21 @@ mod tests {
         }
         assert_eq!(c.en_attente(), ECHANTILLONS);
         let r = c.resumer();
-        assert!(r.max_us > 0);
-        assert!(r.p50_us <= r.p95_us && r.p95_us <= r.max_us);
+        // ATTENTES EXACTES, pas des tautologies. Les anciennes assertions
+        // (`max > 0`, `p50 <= p95 <= max`) sont vraies de TOUT tableau trié :
+        // une implémentation qui garderait les 256 PLUS ANCIENS échantillons
+        // — l'exact contraire d'un anneau — les satisfaisait aussi. Vérifié
+        // par injection de faute.
+        //
+        // Écrit : 0..767 µs. Un anneau de 256 ne doit garder que 512..767.
+        let plus_ancien = (ECHANTILLONS * 2) as u32; // 512
+        assert_eq!(
+            r.max_us,
+            (ECHANTILLONS * 3 - 1) as u32,
+            "la dernière frame écrite doit être le max"
+        );
+        assert_eq!(r.p50_us, plus_ancien + 127, "médiane des 256 plus RÉCENTS");
+        assert_eq!(r.p95_us, plus_ancien + 243, "p95 des 256 plus RÉCENTS");
     }
 
     #[test]

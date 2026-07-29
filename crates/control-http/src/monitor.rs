@@ -22,12 +22,17 @@ pub struct SystemStats {
     /// Mémoire totale / disponible de la MACHINE en Mo (Linux uniquement).
     pub mem_total_mb: Option<u64>,
     pub mem_available_mb: Option<u64>,
-    /// Mémoire résidente du process Lanterne lui-même, en Mo.
+    /// Mémoire du process Lanterne lui-même, en Mo.
     ///
     /// Les deux champs au-dessus décrivent la machine : une fuite de Lanterne
     /// s'y noyait dans le bruit des autres programmes, et sous Windows on ne
     /// voyait strictement rien. Celui-ci est le seul chiffre qui permette de
     /// dire « le node a grossi de 40 Mo en six heures ».
+    ///
+    /// Ce qui est mesuré diffère selon l'OS, et c'est voulu : `VmRSS` sous
+    /// Linux, mémoire **privée** (pas le working set) sous Windows. Dans les
+    /// deux cas, l'objectif est la même question — le process retient-il de
+    /// plus en plus ? — pas une comparaison chiffrée entre plateformes.
     pub rss_mb: Option<u64>,
     /// Température CPU en °C (Linux : thermal_zone0 — fiable sur Pi).
     pub temperature_c: Option<f32>,
@@ -77,15 +82,26 @@ fn read_meminfo_self_kb() -> Option<u64> {
     line.split_whitespace().nth(1)?.parse().ok()
 }
 
-/// Windows : espace disque + `WorkingSet64` du process, une invocation.
-/// Si `Get-Process` échoue, la troisième valeur manque simplement et la
-/// mémoire devient `None` — le disque, lui, reste mesuré.
+/// Windows : espace disque + mémoire privée du process, une invocation.
+///
+/// **`PrivateMemorySize64`, PAS `WorkingSet64`.** Le working set est la
+/// partie du process actuellement en RAM physique : Windows le vide à sa
+/// guise (mise en veille, pression mémoire, réduction de fenêtre) SANS que
+/// le programme ait libéré quoi que ce soit. Mesuré sur ce poste : 300 Mo
+/// alloués et toujours référencés, working set tombé de 387 à 11 Mo après
+/// une réduction demandée par l'OS, mémoire privée inchangée à 370 Mo. Un
+/// test d'endurance basé sur le working set aurait donc conclu « aucune
+/// fuite » sur une fuite franche.
 #[cfg(target_os = "windows")]
 fn disque_et_memoire() -> (Option<(f32, f32)>, Option<u64>) {
     let script = format!(
-        "$d = Get-PSDrive -Name (Get-Location).Drive.Name; \
+        // Un chemin réseau (UNC) n'a pas de lettre de lecteur : `Get-PSDrive`
+        // échouait alors et sa ligne vide décalait tout le reste.
+        "$d = if ((Get-Location).Drive) {{ \
+             Get-PSDrive -Name (Get-Location).Drive.Name -ErrorAction SilentlyContinue \
+         }} else {{ $null }}; \
          $p = Get-Process -Id {} -ErrorAction SilentlyContinue; \
-         \"$($d.Free) $($d.Used) $($p.WorkingSet64)\"",
+         \"$($d.Free)`n$($d.Used)`n$($p.PrivateMemorySize64)\"",
         std::process::id()
     );
     let Ok(out) = std::process::Command::new("powershell")
@@ -94,13 +110,22 @@ fn disque_et_memoire() -> (Option<(f32, f32)>, Option<u64>) {
     else {
         return (None, None);
     };
-    let text = String::from_utf8_lossy(&out.stdout);
-    // Découpage POSITIONNEL, pas séquentiel : un jeton illisible ne doit pas
-    // décaler la lecture des suivants (le disque en panne rendrait alors la
-    // mémoire fausse au lieu d'absente).
-    let jetons: Vec<&str> = text.split_whitespace().collect();
-    let nombre = |i: usize| jetons.get(i).and_then(|v| v.parse::<f64>().ok());
-    let disque = match (nombre(0), nombre(1)) {
+    decoder_sortie(&String::from_utf8_lossy(&out.stdout))
+}
+
+/// Décode les trois lignes du script ci-dessus. Séparé pour être testable
+/// sans lancer PowerShell — et parce que le découpage se voulait
+/// « positionnel » alors qu'il ne l'était pas : `split_whitespace` fusionne
+/// les séparateurs, donc une valeur vide décalait toutes les suivantes et la
+/// mémoire prenait la valeur du disque. Une ligne par valeur, et un champ
+/// absent reste absent.
+#[cfg(target_os = "windows")]
+fn decoder_sortie(text: &str) -> (Option<(f32, f32)>, Option<u64>) {
+    let mut lignes = text.lines();
+    let libre = lignes.next().unwrap_or("").trim().parse::<f64>().ok();
+    let occupe = lignes.next().unwrap_or("").trim().parse::<f64>().ok();
+    let prive = lignes.next().unwrap_or("").trim().parse::<u64>().ok();
+    let disque = match (libre, occupe) {
         (Some(free), Some(used)) => {
             let gib = 1024.0 * 1024.0 * 1024.0;
             #[allow(clippy::cast_possible_truncation)] // Go : la précision f32 suffit
@@ -108,11 +133,7 @@ fn disque_et_memoire() -> (Option<(f32, f32)>, Option<u64>) {
         }
         _ => None,
     };
-    let rss = jetons
-        .get(2)
-        .and_then(|v| v.parse::<u64>().ok())
-        .map(|octets| octets / (1024 * 1024));
-    (disque, rss)
+    (disque, prive.map(|octets| octets / (1024 * 1024)))
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "windows")))]
@@ -239,6 +260,33 @@ mod tests {
                 "un binaire de test à {rss} Mo : unité probablement fausse"
             );
         }
+    }
+
+    /// Le décodage Windows sur des sorties RÉELLES capturées sur le poste.
+    /// Il n'était pas testé du tout, et son découpage prétendument
+    /// positionnel se décalait dès qu'une valeur manquait.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn le_decodage_windows_encaisse_les_sorties_degradees() {
+        // Nominal : 61 Go libres, 1937 Go occupés, 78 Mo privés.
+        let (disque, rss) = decoder_sortie("61397131264\n1937913286656\n82837504\n");
+        assert!(disque.is_some(), "disque nominal");
+        assert_eq!(rss, Some(79), "mémoire privée en Mo");
+
+        // Chemin réseau : pas de lettre de lecteur, les deux premières
+        // lignes sont vides. La mémoire doit RESTER lue — c'est le décalage
+        // qui la rendait fausse auparavant.
+        let (disque, rss) = decoder_sortie("\n\n82837504\n");
+        assert!(disque.is_none(), "disque non mesurable");
+        assert_eq!(rss, Some(79), "la mémoire ne doit pas être décalée");
+
+        // Get-Process muet : le disque reste bon, la mémoire devient absente.
+        let (disque, rss) = decoder_sortie("61397131264\n1937913286656\n\n");
+        assert!(disque.is_some(), "disque toujours mesuré");
+        assert_eq!(rss, None, "mémoire absente, pas inventée");
+
+        // Sortie vide (PowerShell en échec) : rien, sans panique.
+        assert_eq!(decoder_sortie(""), (None, None));
     }
 
     #[test]

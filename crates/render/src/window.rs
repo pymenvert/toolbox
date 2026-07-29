@@ -156,6 +156,7 @@ fn run_event_loop(config: WindowConfig, channels: OutputChannels) {
         enabled,
         frames_since: 0,
         fps_window_start: std::time::Instant::now(),
+        derniere_publication: std::time::Instant::now(),
         derniere_frame: std::time::Instant::now(),
         dernier_scan_ecrans: std::time::Instant::now(),
         started_at: std::time::Instant::now(),
@@ -261,6 +262,10 @@ struct OutputApp {
     /// Frames présentées depuis le début de la fenêtre de mesure courante.
     frames_since: u32,
     fps_window_start: std::time::Instant,
+    /// Dernier envoi sur le canal `mesures`, quelle qu'en soit la cause.
+    /// Sert à espacer le battement de publication qui prend le relais quand
+    /// plus aucune frame n'est présentée.
+    derniere_publication: std::time::Instant,
     /// Instant de la dernière frame présentée : sert à faire retomber le
     /// badge img/s à 0 quand le rendu s'arrête (sinon il resterait figé).
     derniere_frame: std::time::Instant,
@@ -565,53 +570,67 @@ impl OutputApp {
         // frame (composition + warp + présentation), pas la préparation qui
         // précède — c'est ce temps-là qui décide si la sortie décroche.
         let debut = std::time::Instant::now();
+        // Attente vsync à retrancher : en rendu continu, le GPU BLOQUE sur
+        // l'obtention de la surface jusqu'au balayage écran suivant. Sans
+        // cette soustraction, une machine saine à 60 Hz afficherait ~16 ms
+        // par image et l'UI crierait « trop lent » — on mesurerait la cadence
+        // de l'écran, pas le coût du rendu.
+        let mut attente = std::time::Duration::ZERO;
         let suite = match painter {
-            Painter::Gpu(gpu) => match gpu.render(
-                &self.snapshot,
-                video.as_ref(),
-                lut,
-                time,
-                w.get(),
-                h.get(),
-                niveau,
-            ) {
-                crate::gpu::ResultatRendu::Presentee => Suite::Presentee,
-                crate::gpu::ResultatRendu::Sautee => Suite::Sautee,
-                crate::gpu::ResultatRendu::DevicePerdu => Suite::ReplierCpu,
-            },
+            Painter::Gpu(gpu) => {
+                let issue = gpu.render(
+                    &self.snapshot,
+                    video.as_ref(),
+                    lut,
+                    time,
+                    w.get(),
+                    h.get(),
+                    niveau,
+                );
+                attente = gpu.attente_presentation();
+                match issue {
+                    crate::gpu::ResultatRendu::Presentee => Suite::Presentee,
+                    crate::gpu::ResultatRendu::Sautee => Suite::Sautee,
+                    crate::gpu::ResultatRendu::DevicePerdu => Suite::ReplierCpu,
+                }
+            }
+            // Pas de `return` ici : sortir de `redraw()` sauterait le
+            // comptage, et une surface qu'on n'arrive plus à retailler est
+            // exactement une frame perdue — celle qu'il faut voir.
             Painter::Cpu(surface) => {
                 if let Err(err) = surface.resize(w, h) {
                     warn!(%err, "surface de sortie non retaillée");
-                    return;
-                }
-                match surface.buffer_mut() {
-                    Ok(mut buffer) => {
-                        toolbox_engine::raster::render_frame_lut(
-                            &self.snapshot,
-                            video.as_ref(),
-                            lut.map(|(_, l)| l),
-                            time,
-                            w.get(),
-                            h.get(),
-                            &mut buffer,
-                        );
-                        toolbox_engine::appliquer_blackout(&mut buffer, niveau);
-                        match buffer.present() {
-                            Ok(()) => Suite::Presentee,
-                            Err(err) => {
-                                warn!(%err, "frame de sortie non présentée");
-                                Suite::Sautee
+                    Suite::Sautee
+                } else {
+                    match surface.buffer_mut() {
+                        Ok(mut buffer) => {
+                            toolbox_engine::raster::render_frame_lut(
+                                &self.snapshot,
+                                video.as_ref(),
+                                lut.map(|(_, l)| l),
+                                time,
+                                w.get(),
+                                h.get(),
+                                &mut buffer,
+                            );
+                            toolbox_engine::appliquer_blackout(&mut buffer, niveau);
+                            match buffer.present() {
+                                Ok(()) => Suite::Presentee,
+                                Err(err) => {
+                                    warn!(%err, "frame de sortie non présentée");
+                                    Suite::Sautee
+                                }
                             }
                         }
-                    }
-                    Err(err) => {
-                        warn!(%err, "tampon de sortie inaccessible");
-                        Suite::Sautee
+                        Err(err) => {
+                            warn!(%err, "tampon de sortie inaccessible");
+                            Suite::Sautee
+                        }
                     }
                 }
             }
         };
-        let duree = debut.elapsed();
+        let duree = debut.elapsed().saturating_sub(attente);
         match suite {
             Suite::Presentee => {
                 self.chrono.ajouter(duree);
@@ -631,7 +650,20 @@ impl OutputApp {
                 self.painter = None;
                 if let Some(window) = self.window.clone() {
                     self.painter = self.creer_peintre(&window);
-                    window.request_redraw();
+                    if self.painter.is_some() {
+                        window.request_redraw();
+                    } else {
+                        // Repli raté : plus AUCUN redraw n'aura lieu, donc
+                        // plus aucune publication. Sans ces deux lignes,
+                        // l'UI resterait figée sur les dernières bonnes
+                        // valeurs et afficherait une sortie en pleine forme
+                        // alors qu'elle est éteinte.
+                        error!(
+                            "repli CPU impossible — sortie éteinte (onglet Fonctions : off puis on pour réessayer)"
+                        );
+                        self.fps.send_replace(0.0);
+                        self.eteindre_mesures();
+                    }
                 }
             }
         }
@@ -652,6 +684,7 @@ impl OutputApp {
             self.fps.send_replace(self.frames_since as f32 / elapsed);
             // Le tri des échantillons ne se paie qu'ici, une fois par seconde.
             self.mesures.send_replace(self.chrono.resumer());
+            self.derniere_publication = std::time::Instant::now();
             self.frames_since = 0;
             self.fps_window_start = std::time::Instant::now();
         }
@@ -666,6 +699,7 @@ impl OutputApp {
         vides.p95_us = 0;
         vides.max_us = 0;
         self.mesures.send_replace(vides);
+        self.derniere_publication = std::time::Instant::now();
     }
 }
 
@@ -747,6 +781,20 @@ impl ApplicationHandler<Wake> for OutputApp {
                 && (*self.fps.borrow() - 0.0).abs() > f32::EPSILON
             {
                 self.fps.send_replace(0.0);
+                self.eteindre_mesures();
+            }
+            // BATTEMENT DE PUBLICATION, indépendant de la réussite du rendu.
+            // La seule publication périodique se faisait sur une frame
+            // PRÉSENTÉE : une sortie qui échoue en boucle (surface refusée,
+            // tampon inaccessible) voyait donc son compteur d'images perdues
+            // grimper en mémoire sans jamais atteindre l'UI ni le harnais
+            // d'endurance — qui concluait « 0 image perdue » sur une sortie
+            // noire. On publie dès qu'il y a du neuf à dire.
+            let cumul = self.chrono.sautees();
+            let publie = self.mesures.borrow().sautees;
+            if cumul != publie
+                && self.derniere_publication.elapsed() >= std::time::Duration::from_secs(1)
+            {
                 self.eteindre_mesures();
             }
             // Écrans branchés/débranchés à chaud (throttle ~2 s).
