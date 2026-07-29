@@ -231,9 +231,14 @@ Sous Windows, aucune dépendance système (midir utilise WinMM).
   précédente » ; `docs/TIERS.md` + `deny.toml` + job CI `licences` (a
   révélé l'obligation de mention IJG de jpeg-encoder). 235 tests.
   Rapport : `../AUDIT_CORRECTIFS_2026-07-29.md`.
-  POINT OUVERT (décision de Pym) : le pack Windows embarque
-  gst-plugins-ugly (x264enc, GPL) pour le RTSP H.264 — options dans
-  `docs/TIERS.md` §2. Ce pack ne doit pas être vendu tel quel.
+  DÉCISION DE PYM (2026-07-29) : le pack Windows GARDE gst-plugins-ugly
+  (x264enc, GPL) pour le RTSP H.264. Pym ne vend pas Lanterne, et le GPL
+  n'oblige qu'à la distribution — ici des binaires amont non modifiés,
+  publiés gratuitement. Le H.264 vaut mieux que le MJPEG en bande
+  passante : la performance prime. **À rouvrir UNIQUEMENT si le pack est
+  livré contre paiement** (options + procédure dans `docs/TIERS.md` §2 ;
+  le basculement ne demande aucun code, `rtsp.rs` retombe seul sur MJPEG
+  si x264enc est absent). Ne pas re-litiger la question autrement.
 
 ## Prochaines étapes
 

@@ -68,7 +68,27 @@ notamment :
 vendu sous licence propriétaire est juridiquement contestable, et un service
 juridique côté client peut bloquer la livraison.
 
-**Options** (décision de Pym, non tranchée à ce jour) :
+### Décision prise le 2026-07-29 : on garde x264enc
+
+Pym ne vend pas Lanterne. Les obligations du GPL se déclenchent à la
+**distribution**, et la seule distribution en cours est la page Releases
+publique : des binaires amont **non modifiés**, dont les sources sont
+publiquement disponibles chez GStreamer. Le risque pratique est négligeable,
+et le H.264 vaut mieux que le MJPEG en bande passante.
+
+**Condition de réouverture — précise, à ne pas oublier :** dès que le pack
+Windows est livré à un tiers **contre paiement** (vente, ou intégré à une
+prestation facturée), il faut appliquer l'option A ou C ci-dessous AVANT la
+livraison. Deux risques se réveillent alors : le service juridique du client
+peut bloquer, et les brevets H.264 (Via LA) deviennent opposables — `libx264`
+ne fournit aucune licence de brevet.
+
+Le basculement ne demande **aucun développement** : `rtsp.rs` teste
+`ElementFactory::find("x264enc")` et retombe seul sur MJPEG si le plugin est
+absent. Il suffit de ne plus copier `gst-plugins-ugly` et `gst-libav` dans le
+pack (job `build-windows-gstreamer` de la CI).
+
+**Options si la condition est atteinte** :
 
 - **A.** Retirer `gst-plugins-ugly` et `gst-libav` du pack. La sortie RTSP
   bascule alors sur **MJPEG**, déjà implémenté et fonctionnel (voir
