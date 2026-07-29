@@ -208,6 +208,33 @@ Sous Windows, aucune dépendance système (midir utilise WinMM).
   dépendent fader et séquenceur ; vrai remède = cache mémoire des presets
   partagé avec le fader (refonte, non faite).
 
+- v3.4.1 (2026-07-29) : relecture ADVERSARIALE DES CORRECTIFS eux-mêmes
+  (les deux étapes jamais exécutées de l'audit v3.4.0 : vérifications
+  tombées faute de crédits, critique de complétude). 23 défauts confirmés
+  DANS les correctifs 3.3.0/3.4.0 + 4 angles morts. Faits notables :
+  install.sh chown conditionné au mauvais drapeau (la panne « critique »
+  corrigée en 3.4.0 restait possible avec `sudo ./install.sh`) ; le
+  rechargement LUT par mtime ne marchait QUE sur le peintre CPU (les 4
+  caches portent désormais une clé `nom@mtime`) ; anti-CSRF aveugle au
+  WebSocket ; jeton de parc = clé maîtresse (restreint à GET /api/media et
+  PUT /api/media/{nom} via `route_de_parc`) ; MIDI : `choisir_port` sans
+  filtre n'ouvre plus AUCUN port virtuel (le repli sur Midi Through
+  piégeait le superviseur, la reconnexion promise ne marchait jamais sur
+  Pi) + journalisation bornée ; diagnostics de config accumulés dans
+  `config.avertissements` et rejoués par main.rs APRÈS l'init du
+  subscriber ; feedback OSC : `est_impulsion()` exclut les déclencheurs de
+  la déduplication ; fader applique blackout/freeze, et `mapping_load` ne
+  fige que le mapping ; `toolbox_core::charger_ou_mettre_de_cote` (filet
+  `.corrompu`) appliqué aux 6 fichiers d'état + actions de cue tolérantes ;
+  journal borné (200 Mo + purge 6 h) ; OTA : `est_plus_recente` (semver),
+  `.precedent` conservé, route + bouton « Revenir à la version
+  précédente » ; `docs/TIERS.md` + `deny.toml` + job CI `licences` (a
+  révélé l'obligation de mention IJG de jpeg-encoder). 235 tests.
+  Rapport : `../AUDIT_CORRECTIFS_2026-07-29.md`.
+  POINT OUVERT (décision de Pym) : le pack Windows embarque
+  gst-plugins-ugly (x264enc, GPL) pour le RTSP H.264 — options dans
+  `docs/TIERS.md` §2. Ce pack ne doit pas être vendu tel quel.
+
 ## Prochaines étapes
 
 1. Au retour de Pym : tests matériels (Pi, capture HDMI, Chataigne réel,

@@ -3,6 +3,73 @@
 Évolutions notables du node Toolbox. Format inspiré de
 [Keep a Changelog](https://keepachangelog.com/fr/), versionnage SemVer.
 
+## [3.4.1] — 2026-07-29
+
+Relecture **adversariale des correctifs eux-mêmes**. Deux étapes de l'audit
+précédent n'avaient jamais pu s'exécuter (vérifications interrompues, critique
+de complétude jamais lancé) : elles ont été reprises. Résultat — 23 défauts
+confirmés **dans les correctifs de la v3.3.0/v3.4.0**, plus 4 angles morts que
+vingt dimensions d'audit avaient manqués. Tout est corrigé ici.
+
+### Correctifs qui ne faisaient pas ce qui était annoncé
+
+- **Installation Linux** : le `chown` était conditionné au mode d'élévation,
+  pas au propriétaire réel des fichiers. Avec `sudo ./install.sh` — le geste
+  le plus courant — la panne « le node ne peut rien enregistrer » restait
+  entière malgré le correctif de la 3.4.0.
+- **LUT** : le rechargement à fichier modifié ne marchait que sur le rendu
+  CPU. Le GPU (mode par défaut), les sorties réseau et l'aperçu web gardaient
+  l'ancienne LUT. Les quatre caches portent désormais une clé `nom@date`.
+- **Anti-CSRF** : le WebSocket `/ws` échappait au contrôle d'origine alors
+  qu'il accepte des commandes.
+- **Jeton de parc** : il ouvrait redémarrage, extinction et mise à jour. Il ne
+  donne plus accès qu'aux deux routes d'échange de médias.
+- **Autostart Windows** : l'ancien lanceur n'était pas supprimé — **deux
+  instances** démarraient à l'ouverture de session.
+- **MIDI sur Pi** : le repli automatique sur « Midi Through » (port de
+  bouclage qui ne disparaît jamais) rendait la reconnexion à chaud
+  impossible sur la plateforme cible. Sans matériel, la boucle vidait aussi
+  le journal en 25 minutes.
+- **Diagnostics de config** : émis avant l'installation du journal, ils
+  partaient dans le vide — une coquille dans un binding restait invisible.
+- **Retour d'état OSC** : la déduplication anti-boucle avalait les
+  **déclencheurs** répétés (`/cue/go`, `/dmx/scene`…).
+- **Fondus** : blackout et freeze n'étaient toujours pas appliqués ; et un
+  simple `mapping_load` annulait le fondu entier au lieu du seul mapping.
+- **Rendu** : un écran verrouillé était pris pour une perte de GPU et
+  déclenchait un repli CPU **définitif**.
+
+### Angles morts (jamais couverts auparavant)
+
+- **Le disque n'était pas traité comme une ressource finie** : journal sans
+  plafond purgé au seul démarrage, espace mesuré mais jamais consommé, et un
+  « Enregistrer » qui échouait **en silence** sur disque plein. Budget de
+  200 Mo, purge périodique, refus d'upload sous 500 Mo libres, échec
+  d'écriture désormais visible dans la carte Santé.
+- **Fichiers d'état** : la protection anti-corruption n'existait que sur 1
+  fichier sur 6. Filet commun appliqué aux six ; et une action de cue
+  illisible n'emporte plus toute la conduite du spectacle.
+- **OTA** : il proposait des versions **antérieures** et détruisait son filet
+  de sécurité au premier redémarrage. Comparaison de versions corrigée,
+  binaire précédent conservé, et bouton **« Revenir à la version
+  précédente »** dans l'onglet Système.
+- **Licences** : inventaire complet dans `docs/TIERS.md` (livré avec chaque
+  archive) et contrôle automatique en CI. Il a immédiatement révélé une
+  mention obligatoire (Independent JPEG Group) désormais présente. **Point
+  ouvert** : le pack Windows embarque des plugins GStreamer sous GPL — voir
+  `docs/TIERS.md` avant toute vente de CE pack.
+
+### Divers
+
+Nom mDNS stable entre redémarrages (fini les nodes fantômes) ; temps des
+effets animés replié aussi pour la fenêtre qui projette ; persistance de la
+console lumières différée (un glissé de master n'écrit plus 16 fois par
+seconde) ; temporaires d'upload nettoyés et purgés au démarrage ; arrêt du
+serveur RTSP effectivement garanti ; message explicite quand deux nodes n'ont
+pas le même `fleet_token`.
+
+235 tests.
+
 ## [3.4.0] — 2026-07-22
 
 Deuxième passe de fiabilisation « commercialisation » : un audit
