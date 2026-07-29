@@ -3,6 +3,62 @@
 Évolutions notables du node Toolbox. Format inspiré de
 [Keep a Changelog](https://keepachangelog.com/fr/), versionnage SemVer.
 
+## [Non publié]
+
+Lanterne savait dire combien d'images par seconde il présentait, jamais
+combien de temps chacune coûtait ni combien de mémoire il occupait. Deux
+machines très différentes — l'une à l'aise, l'autre au bord du décrochage —
+affichaient donc le même « 60 img/s ». Cette section comble ce trou, et
+rend compte des deux relectures adversariales qui ont suivi.
+
+### Ce qu'on peut enfin voir
+
+- **Temps par image** (p50 / p95 / pire image) et **images perdues**, mesurés
+  sans allocation ni verrou sur le chemin chaud. Le p95 révèle une gêne
+  *installée*, la pire image attrape le blocage isolé — celui que le
+  spectateur voit. Les deux sont affichés ensemble, parce que lire l'un sans
+  l'autre induit en erreur.
+- **Mémoire du node lui-même** (`rss_mb`) : jusqu'ici seule la mémoire de la
+  machine était remontée, et uniquement sous Linux. Une fuite de Lanterne y
+  était invisible.
+- Le tout dans la page Système, dans `/api/system` et dans l'**export
+  diagnostic** — celui que le manuel demande d'envoyer après un incident, et
+  qui ne contenait rien de tout ça.
+- `tools/endurance/` : deux collecteurs (Windows, Linux/Pi) au même format,
+  un dépouillement commun, et une charge continue réaliste.
+
+### Ce que les relectures ont corrigé
+
+Deux passes multi-agents, la seconde portant sur les correctifs de la
+première. Elles ont trouvé 29 puis 41 défauts. Les plus instructifs :
+
+- La mesure du temps par image **mesurait la cadence de l'écran**, pas le
+  coût du rendu — et le premier correctif ne réparait qu'un backend GPU sur
+  deux.
+- Le compteur d'images perdues **se figeait précisément quand la sortie
+  décrochait**, c'est-à-dire au moment où il sert.
+- L'alerte « ça se produit maintenant » **ne pouvait plus s'éteindre**.
+- Sur deux images, la « médiane » publiée était la **pire** des deux.
+- Le harnais laissait la **mire de test allumée** après un run : le spectacle
+  suivant aurait projeté un damier.
+- Le dépouillement jetait les points à zéro, donc une **sortie morte
+  ressortait « pas de dégradation »**.
+- `install.sh` et les autres scripts partaient sans **bit d'exécution**
+  (`core.fileMode` était à `true` sur le dépôt) : après un clone sur le Pi,
+  `./install.sh` répondait « Permission denied ».
+
+### Limites assumées
+
+- La mesure de rendu **n'existe pas en mode KMS ni dans le binaire ARM64**
+  officiel (compilé sans fenêtre). L'API renvoie `"rendu": null` et l'UI
+  affiche « n/d » — une absence, pas un faux zéro rassurant.
+- Le **p95 n'a de sens que sur assez d'images**. Au repos, une seconde n'en
+  contient que deux ou trois et il vaut alors le maximum. Le nombre
+  d'échantillons est publié pour qu'on ne s'y trompe pas.
+- Le harnais **ne lit aucune vidéo** : il exerce le rendu et le compositeur,
+  pas le décodage. Un test représentatif demande `--features gstreamer` et un
+  média en boucle.
+
 ## [3.4.1] — 2026-07-29
 
 Relecture **adversariale des correctifs eux-mêmes**. Deux étapes de l'audit
