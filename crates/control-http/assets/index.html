@@ -2827,18 +2827,32 @@ async function loadSystem() {
   // La PIRE image est affichée aussi : le p95 ne bouge pas pour un blocage
   // isolé (une image sur cent ne remplit pas 5 %), donc sans elle un à-coup
   // ponctuel — celui que le spectateur voit — resterait invisible ici.
-  if (sys.rendu && sys.rendu.p95_us > 0) {
-    const p95 = sys.rendu.p95_us / 1000, p50 = sys.rendu.p50_us / 1000,
-          max = sys.rendu.max_us / 1000;
-    html += tile("Temps par image", p95.toFixed(1), "ms (p95)",
-      "habituel " + p50.toFixed(1) + " ms · pire " + max.toFixed(1) + " ms · " +
-      (p95 < 8 ? "grande marge" : p95 < 16 ? "marge correcte"
-        : "trop lent pour du 60 Hz"), p95 >= 16 || max >= 33);
-  }
-  if (sys.rendu && sys.rendu.sautees > 0)
+  if (sys.rendu) {
+    // Arrondi UNE fois, puis comparé sur l'arrondi : sinon 15,96 ms
+    // s'affichait « 16.0 ms » avec le sous-titre « marge correcte » et sans
+    // alerte — la tuile se contredisait elle-même.
+    const p95 = Math.round(sys.rendu.p95_us / 100) / 10,
+          p50 = Math.round(sys.rendu.p50_us / 100) / 10,
+          max = Math.round(sys.rendu.max_us / 100) / 10;
+    if (p95 > 0)
+      html += tile("Temps par image", p95.toFixed(1), "ms (p95)",
+        "habituel " + p50.toFixed(1) + " ms · pire " + max.toFixed(1) + " ms · " +
+        (p95 < 8 ? "grande marge" : p95 < 16 ? "marge correcte"
+          : "trop lent pour du 60 Hz"), p95 >= 16 || max >= 33);
+    else
+      // Au repos, la tuile disparaissait purement et simplement. Un tiret
+      // dit « rien à mesurer », une absence laisse croire à une panne.
+      html += tile("Temps par image", "–", "ms (p95)",
+        "sortie au repos : aucune image peinte en ce moment", false);
+    // L'alerte porte sur les images perdues RÉCENTES, pas sur le cumul :
+    // quelques-unes au démarrage suffisaient à allumer un voyant rouge pour
+    // toute la session.
+    const recentes = sys.rendu.sautees_fenetre || 0;
     html += tile("Images perdues", String(sys.rendu.sautees), "",
-      "depuis le démarrage · quelques-unes au lancement sont normales",
-      sys.rendu.sautees > 100);
+      recentes > 0 ? recentes + " sur la dernière seconde — ça se produit maintenant"
+                   : "depuis le démarrage · quelques-unes au lancement sont normales",
+      recentes > 0);
+  }
   if (sys.temperature_c != null)
     html += tile("Température", sys.temperature_c.toFixed(1), "°C", sys.temperature_c >= 75 ? "surveiller (throttle proche)" : "", sys.temperature_c >= 75);
   if (sys.disk_free_gb != null)

@@ -43,6 +43,13 @@ pub struct RenduMesures {
     /// dépassé, device perdu). En croissance continue = quelque chose ne va
     /// pas.
     pub sautees: u64,
+    /// Frames perdues sur la **dernière seconde** seulement.
+    ///
+    /// Le cumul ci-dessus ne redescend jamais : quelques frames ratées au
+    /// démarrage (le temps que la surface se configure) suffisaient à
+    /// allumer une alerte pour le restant de la session. C'est ce compteur-ci
+    /// qui dit si ça se produit ENCORE.
+    pub sautees_fenetre: u32,
 }
 
 /// Accumulateur de durées de frame. Un seul thread écrit (celui de la
@@ -55,6 +62,7 @@ pub struct Chrono {
     /// d'échantillons valides.
     ecrits: usize,
     sautees: u64,
+    sautees_fenetre: u32,
 }
 
 impl Default for Chrono {
@@ -70,6 +78,7 @@ impl Chrono {
             echantillons: [0; ECHANTILLONS],
             ecrits: 0,
             sautees: 0,
+            sautees_fenetre: 0,
         }
     }
 
@@ -87,6 +96,7 @@ impl Chrono {
     /// Enregistre une frame perdue (rien n'a été présenté).
     pub fn sautee(&mut self) {
         self.sautees = self.sautees.saturating_add(1);
+        self.sautees_fenetre = self.sautees_fenetre.saturating_add(1);
     }
 
     /// Nombre d'échantillons en attente de résumé.
@@ -115,9 +125,11 @@ impl Chrono {
     pub fn resumer(&mut self) -> RenduMesures {
         let n = self.en_attente();
         self.ecrits = 0;
+        let fenetre = std::mem::take(&mut self.sautees_fenetre);
         if n == 0 {
             return RenduMesures {
                 sautees: self.sautees,
+                sautees_fenetre: fenetre,
                 ..RenduMesures::default()
             };
         }
@@ -130,6 +142,7 @@ impl Chrono {
             p95_us: tri[centile(n, 95)],
             max_us: tri[n - 1],
             sautees: self.sautees,
+            sautees_fenetre: fenetre,
         }
     }
 }
@@ -269,10 +282,17 @@ mod tests {
         let mut c = Chrono::new();
         c.sautee();
         c.sautee();
-        assert_eq!(c.resumer().sautees, 2);
+        let r = c.resumer();
+        assert_eq!(r.sautees, 2);
+        assert_eq!(r.sautees_fenetre, 2, "les deux sont de la dernière seconde");
         c.sautee();
-        // Le cumul survit au résumé, contrairement aux percentiles.
-        assert_eq!(c.resumer().sautees, 3);
+        let r = c.resumer();
+        // Le cumul survit au résumé, contrairement aux percentiles…
+        assert_eq!(r.sautees, 3);
+        // …mais le compteur de fenêtre repart, sinon une poignée de frames
+        // ratées au démarrage allumerait une alerte pour toute la session.
+        assert_eq!(r.sautees_fenetre, 1, "seulement la dernière");
+        assert_eq!(c.resumer().sautees_fenetre, 0, "plus rien ne se perd");
     }
 
     #[test]

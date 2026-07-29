@@ -2551,6 +2551,7 @@ mod tests {
             p95_us: 7_500,
             max_us: 12_000,
             sautees: 2,
+            sautees_fenetre: 0,
         });
         let (_fps_tx, fps_rx) = watch::channel(30.0f32);
         bed.app.output.mesures = mesures_rx;
@@ -2878,6 +2879,7 @@ mod tests {
             p95_us: 7_500,
             max_us: 12_000,
             sautees: 2,
+            sautees_fenetre: 0,
         });
         let (_video_tx, video_rx) = watch::channel(None);
         let output = OutputControl {

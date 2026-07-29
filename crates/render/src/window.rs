@@ -683,7 +683,7 @@ impl OutputApp {
         if elapsed >= 1.0 {
             self.fps.send_replace(self.frames_since as f32 / elapsed);
             // Le tri des échantillons ne se paie qu'ici, une fois par seconde.
-            self.mesures.send_replace(self.chrono.resumer());
+            publier_mesures(&mut self.chrono, &self.mesures, false);
             self.derniere_publication = std::time::Instant::now();
             self.frames_since = 0;
             self.fps_window_start = std::time::Instant::now();
@@ -694,13 +694,31 @@ impl OutputApp {
     /// l'UI afficher éternellement ceux de la dernière frame peinte. Le cumul
     /// de frames perdues, lui, survit (c'est un historique d'incidents).
     fn eteindre_mesures(&mut self) {
-        let mut vides = self.chrono.resumer();
-        vides.p50_us = 0;
-        vides.p95_us = 0;
-        vides.max_us = 0;
-        self.mesures.send_replace(vides);
+        publier_mesures(&mut self.chrono, &self.mesures, true);
         self.derniere_publication = std::time::Instant::now();
     }
+}
+
+/// Résume le chrono et l'envoie sur le canal.
+///
+/// `effacer_percentiles` sert quand plus rien n'est peint : on ne veut pas
+/// laisser l'UI afficher éternellement les temps de la dernière frame
+/// réussie. Les compteurs de frames perdues, eux, passent toujours — c'est
+/// même la seule façon dont ils atteignent l'interface quand la sortie a
+/// complètement décroché.
+fn publier_mesures(
+    chrono: &mut Chrono,
+    canal: &watch::Sender<RenduMesures>,
+    effacer_percentiles: bool,
+) -> RenduMesures {
+    let mut mesures = chrono.resumer();
+    if effacer_percentiles {
+        mesures.p50_us = 0;
+        mesures.p95_us = 0;
+        mesures.max_us = 0;
+    }
+    canal.send_replace(mesures);
+    mesures
 }
 
 impl ApplicationHandler<Wake> for OutputApp {
@@ -851,5 +869,53 @@ impl ApplicationHandler<Wake> for OutputApp {
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn publier_transmet_les_percentiles_mesures() {
+        let (tx, rx) = watch::channel(RenduMesures::default());
+        let mut chrono = Chrono::new();
+        for us in [1_000u64, 2_000, 3_000, 40_000] {
+            chrono.ajouter(std::time::Duration::from_micros(us));
+        }
+        let publie = publier_mesures(&mut chrono, &tx, false);
+        assert_eq!(publie.max_us, 40_000);
+        assert!(publie.p50_us > 0, "la médiane doit sortir");
+        // Ce qui compte : la valeur a bien traversé LE CANAL.
+        assert_eq!(*rx.borrow(), publie);
+    }
+
+    /// Le scénario de la sortie qui a décroché : plus une seule frame peinte,
+    /// mais des frames perdues qui s'accumulent. Sans cette transmission, le
+    /// compteur restait en mémoire et l'UI affichait « 0 image perdue » sur
+    /// une sortie noire.
+    #[test]
+    fn publier_transmet_les_frames_perdues_meme_sans_rendu() {
+        let (tx, rx) = watch::channel(RenduMesures::default());
+        let mut chrono = Chrono::new();
+        chrono.sautee();
+        chrono.sautee();
+        chrono.sautee();
+        let publie = publier_mesures(&mut chrono, &tx, true);
+        assert_eq!(publie.sautees, 3, "cumul transmis");
+        assert_eq!(publie.sautees_fenetre, 3, "et le taux courant aussi");
+        assert_eq!(rx.borrow().sautees, 3);
+    }
+
+    #[test]
+    fn effacer_les_percentiles_garde_les_compteurs() {
+        let (tx, _rx) = watch::channel(RenduMesures::default());
+        let mut chrono = Chrono::new();
+        chrono.ajouter(std::time::Duration::from_micros(5_000));
+        chrono.sautee();
+        let publie = publier_mesures(&mut chrono, &tx, true);
+        assert_eq!(publie.p95_us, 0, "percentiles effacés");
+        assert_eq!(publie.max_us, 0, "y compris le max");
+        assert_eq!(publie.sautees, 1, "le compteur d'incidents survit");
     }
 }
