@@ -141,10 +141,16 @@ pub async fn feedback(
             received = events.recv() => match received {
                 Ok(event) => {
                     let Some(message) = event_to_osc(&event) else { continue };
-                    if derniers.get(&message.addr) == Some(&message.args) {
-                        continue; // valeur inchangée : ne pas entretenir de boucle
+                    // Les IMPULSIONS passent toujours : rejouer deux fois la
+                    // même cue doit produire deux tops sur la surface de
+                    // contrôle. Seuls les ÉTATS continus sont dédupliqués —
+                    // ce sont eux, et eux seuls, qui entretiennent une boucle.
+                    if !est_impulsion(&message.addr) {
+                        if derniers.get(&message.addr) == Some(&message.args) {
+                            continue; // valeur inchangée : ne pas entretenir de boucle
+                        }
+                        derniers.insert(message.addr.clone(), message.args.clone());
                     }
-                    derniers.insert(message.addr.clone(), message.args.clone());
                     match rosc::encoder::encode(&OscPacket::Message(message)) {
                         Ok(bytes) => {
                             if let Err(err) = socket.send_to(&bytes, &target).await {
@@ -164,6 +170,27 @@ pub async fn feedback(
     }
     info!("retour d'état OSC arrêté");
     Ok(())
+}
+
+/// Une adresse de retour est-elle une IMPULSION (un déclenchement ponctuel)
+/// plutôt qu'un ÉTAT continu ?
+///
+/// Distinction indispensable au retour d'état : la déduplication anti-boucle
+/// compare la dernière valeur envoyée, ce qui est juste pour un état (le
+/// volume vaut toujours 0,5) mais faux pour un déclenchement — rejouer la
+/// cue « noir » trois fois de suite doit envoyer trois `/cue/go`, sinon la
+/// surface de contrôle et le node divergent en silence.
+fn est_impulsion(addr: &str) -> bool {
+    matches!(
+        addr,
+        "/cue/go"
+            | "/dmx/scene"
+            | "/preset/loaded"
+            | "/preset/fade"
+            | "/mapping/loaded"
+            | "/mapping/fade"
+            | "/sync/scheduled"
+    )
 }
 
 /// Traduit un événement du bus en message OSC — miroir de la grammaire des
@@ -652,6 +679,32 @@ fn string_arg(args: &[OscType], index: usize) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Les déclencheurs ne sont JAMAIS dédupliqués (rejouer la même cue doit
+    /// re-sonner), les états continus le sont (c'est eux qui bouclent).
+    #[test]
+    fn les_impulsions_echappent_a_la_deduplication() {
+        for addr in [
+            "/cue/go",
+            "/dmx/scene",
+            "/preset/loaded",
+            "/preset/fade",
+            "/mapping/loaded",
+            "/mapping/fade",
+        ] {
+            assert!(est_impulsion(addr), "{addr} est un déclencheur");
+        }
+        for addr in ["/volume", "/rate", "/corner/0", "/blackout", "/color/gamma"] {
+            assert!(!est_impulsion(addr), "{addr} est un état continu");
+        }
+        // Cohérence avec la grammaire réelle : l'événement « cue demandée »
+        // produit bien une adresse classée impulsion.
+        let message = event_to_osc(&toolbox_core::Event::CueDemandee {
+            name: "noir".into(),
+        })
+        .expect("cue → OSC");
+        assert!(est_impulsion(&message.addr));
+    }
 
     #[test]
     fn compter_bundles_borne_l_imbrication() {

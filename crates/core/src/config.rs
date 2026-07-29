@@ -167,10 +167,29 @@ where
     match brut.clone().try_into::<Command>() {
         Ok(command) => Ok(Some(command)),
         Err(err) => {
-            tracing::error!(%err, valeur = %brut, "binding MIDI ignoré : commande inconnue");
+            noter(format!(
+                "binding MIDI ignoré : commande inconnue ({err}) dans « {brut} »"
+            ));
             Ok(None)
         }
     }
+}
+
+thread_local! {
+    /// Anomalies relevées pendant la désérialisation. On ne peut pas les
+    /// journaliser sur place (aucun collecteur `tracing` n'existe encore à
+    /// ce stade du démarrage) ni les remonter par le type de retour de
+    /// serde : on les met de côté, et `load` les récolte.
+    static AVERTISSEMENTS: std::cell::RefCell<Vec<String>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn noter(message: String) {
+    AVERTISSEMENTS.with(|v| v.borrow_mut().push(message));
+}
+
+fn recolter_avertissements() -> Vec<String> {
+    AVERTISSEMENTS.with(|v| std::mem::take(&mut *v.borrow_mut()))
 }
 
 /// Signale (sans bloquer) les bindings MIDI structurellement inertes : canal
@@ -182,18 +201,16 @@ fn valider_bindings(bindings: &[MidiBinding]) {
         let n = i + 1;
         if let Some(ch) = b.channel {
             if !(1..=16).contains(&ch) {
-                tracing::warn!(
-                    binding = n,
-                    canal = ch,
-                    "binding MIDI : canal hors 1..=16, ne déclenchera jamais rien"
-                );
+                noter(format!(
+                    "binding MIDI n°{n} : canal {ch} hors 1..=16, il ne déclenchera jamais rien"
+                ));
             }
         }
         if b.note.is_none() && b.cc.is_none() {
-            tracing::warn!(binding = n, "binding MIDI sans note ni cc : inerte");
+            noter(format!("binding MIDI n°{n} sans note ni cc : inerte"));
         }
         if b.command.is_none() && b.scale.is_none() {
-            tracing::warn!(binding = n, "binding MIDI sans command ni scale : inerte");
+            noter(format!("binding MIDI n°{n} sans command ni scale : inerte"));
         }
     }
 }
@@ -453,6 +470,13 @@ pub struct NodeConfig {
     pub telemetrie: Telemetrie,
     pub rtsp: RtspSettings,
     pub ndi: NdiSettings,
+    /// Anomalies relevées pendant le chargement (binding MIDI illisible,
+    /// canal hors bornes, ports en conflit…). Elles ne peuvent PAS être
+    /// journalisées ici : le collecteur `tracing` n'est installé qu'APRÈS
+    /// le chargement de la config. L'appelant les rejoue une fois le
+    /// journal prêt — sinon elles disparaissent purement et simplement.
+    #[serde(skip)]
+    pub avertissements: Vec<String>,
 }
 
 impl NodeConfig {
@@ -464,6 +488,9 @@ impl NodeConfig {
         }
         let text = std::fs::read_to_string(path)
             .map_err(|e| CoreError::io(path.display().to_string(), e))?;
+        // Repart d'un tampon vide : un chargement ne doit pas hériter des
+        // anomalies d'un précédent (tests, rechargement).
+        let _ = recolter_avertissements();
         let mut config: Self =
             toml::from_str(&text).map_err(|e| CoreError::Config(e.to_string()))?;
         // Résolution fixe bornée 64..=8192 : au-delà, les buffers de rendu
@@ -475,6 +502,7 @@ impl NodeConfig {
         }
         valider_bindings(&config.midi.bindings);
         valider_ports(&config.ports);
+        config.avertissements = recolter_avertissements();
         Ok(config)
     }
 }
@@ -484,15 +512,15 @@ impl NodeConfig {
 /// partagent la pile TCP — le même port empêcherait l'un des deux de démarrer.
 fn valider_ports(ports: &Ports) {
     if ports.http == 0 {
-        tracing::warn!(
-            "[ports] http = 0 : l'interface web sera sur un port éphémère, injoignable à une adresse fixe"
+        noter(
+            "[ports] http = 0 : l'interface web sera sur un port éphémère, injoignable à une adresse fixe".into(),
         );
     }
     if ports.http == ports.oscquery {
-        tracing::warn!(
-            port = ports.http,
-            "[ports] http et oscquery partagent le même port TCP : l'un des deux ne démarrera pas"
-        );
+        noter(format!(
+            "[ports] http et oscquery partagent le port {} : l'un des deux ne démarrera pas",
+            ports.http
+        ));
     }
 }
 
@@ -561,6 +589,50 @@ mod tests {
         assert_eq!(cfg.midi.bindings.len(), 2);
         assert!(cfg.midi.bindings[0].command.is_none(), "coquille ignorée");
         assert_eq!(cfg.midi.bindings[1].command, Some(Command::Stop));
+        // …et la coquille est REMONTÉE : émise sur place, elle partirait
+        // dans le vide (le collecteur de logs n'existe pas encore au
+        // chargement de la config), et l'opérateur n'aurait aucune piste.
+        assert!(
+            cfg.avertissements.iter().any(|a| a.contains("paly")),
+            "la commande fautive doit être signalée : {:?}",
+            cfg.avertissements
+        );
+    }
+
+    #[test]
+    fn les_anomalies_de_config_sont_remontees_et_non_perdues() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("node.toml");
+        std::fs::write(
+            &path,
+            r#"
+            [ports]
+            http = 8080
+            oscquery = 8080
+
+            [[midi.bindings]]
+            channel = 0
+            note = 60
+            command = { cmd = "play" }
+            "#,
+        )
+        .expect("write");
+        let cfg = NodeConfig::load(&path).expect("load");
+        let tout = cfg.avertissements.join(" | ");
+        assert!(
+            tout.contains("canal 0"),
+            "canal hors bornes signalé : {tout}"
+        );
+        assert!(tout.contains("8080"), "conflit de ports signalé : {tout}");
+
+        // Un fichier sain ne produit AUCUN bruit (sinon l'opérateur
+        // apprendrait à ignorer ces messages).
+        let sain = dir.path().join("sain.toml");
+        std::fs::write(&sain, "[ports]\nhttp = 8080\n").expect("write");
+        assert!(NodeConfig::load(&sain)
+            .expect("load")
+            .avertissements
+            .is_empty());
     }
 
     #[test]

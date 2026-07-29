@@ -132,6 +132,14 @@ fn bootstrap() -> Result<Bootstrap, Box<dyn std::error::Error>> {
         .with(logs.layer())
         .init();
 
+    // Le journal existe enfin : on rejoue les anomalies relevées pendant la
+    // lecture de node.toml. Émises à leur découverte, elles seraient parties
+    // dans le vide (aucun collecteur installé) et une simple coquille dans
+    // un binding MIDI resterait invisible dans la page Logs.
+    for anomalie in &config.avertissements {
+        warn!(config = %config_path.display(), "{anomalie}");
+    }
+
     Ok((config, config_path, logs, file_guard))
 }
 

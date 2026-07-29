@@ -364,13 +364,23 @@ const ENTETE_JETON_PARC: &str = "x-lanterne-parc";
 /// clients non-navigateur (curl, outils OSC, nodes du parc) n'envoient pas
 /// d'Origin : ils passent — le mot de passe/jeton reste leur barrière.
 async fn verifier_origine(request: Request, next: axum::middleware::Next) -> Response {
-    let mutateur = matches!(
-        *request.method(),
-        axum::http::Method::POST
-            | axum::http::Method::PUT
-            | axum::http::Method::DELETE
-            | axum::http::Method::PATCH
-    );
+    // Une poignée de main WebSocket est un GET, mais /ws accepte ENSUITE des
+    // commandes : c'est donc une route mutatrice. Sans ce test, une page
+    // piégée ouvrait un WebSocket vers le node et pilotait le spectacle —
+    // le trou laissé par la première version de l'anti-CSRF.
+    let websocket = request
+        .headers()
+        .get(axum::http::header::UPGRADE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.eq_ignore_ascii_case("websocket"));
+    let mutateur = websocket
+        || matches!(
+            *request.method(),
+            axum::http::Method::POST
+                | axum::http::Method::PUT
+                | axum::http::Method::DELETE
+                | axum::http::Method::PATCH
+        );
     if mutateur {
         let headers = request.headers();
         let origine = headers
@@ -406,6 +416,14 @@ fn origine_correspond(origine: &str, hote: Option<&str>) -> bool {
     autorite.eq_ignore_ascii_case(hote)
 }
 
+/// Les SEULES routes qu'un jeton de parc ouvre : lister la médiathèque d'un
+/// node et y déposer un média. Tout le reste (commandes du bus, redémarrage,
+/// extinction, mise à jour) exige le mot de passe de l'UI.
+fn route_de_parc(methode: &axum::http::Method, chemin: &str) -> bool {
+    (*methode == axum::http::Method::GET && chemin == "/api/media")
+        || (*methode == axum::http::Method::PUT && chemin.starts_with("/api/media/"))
+}
+
 /// Mot de passe optionnel (HTTP Basic, tout identifiant accepté). Le
 /// navigateur affiche sa boîte de connexion native ; les identifiants
 /// suivent aussi les WebSocket de la même origine. Protection de niveau
@@ -416,13 +434,18 @@ async fn require_password(
     next: axum::middleware::Next,
 ) -> Response {
     // Un node du parc présentant le bon jeton partagé est authentifié sans
-    // le mot de passe de l'UI (échanges de médias serveur-à-serveur).
+    // le mot de passe de l'UI — mais UNIQUEMENT sur les routes d'échange de
+    // médias. Le jeton est commun à toutes les machines et la cible vient du
+    // mDNS (non authentifié) : en faire une clé d'administration donnerait
+    // reboot / extinction / mise à jour à quiconque le détient.
     if let Some(attendu) = &app.fleet_token {
         let porteur = request
             .headers()
             .get(ENTETE_JETON_PARC)
             .and_then(|v| v.to_str().ok());
-        if porteur == Some(attendu.as_str()) {
+        if porteur == Some(attendu.as_str())
+            && route_de_parc(request.method(), request.uri().path())
+        {
             return next.run(request).await;
         }
     }
@@ -1903,6 +1926,59 @@ mod tests {
     use http_body_util::BodyExt;
     use toolbox_core::Bus;
     use tower::ServiceExt;
+
+    #[test]
+    fn le_jeton_de_parc_n_ouvre_que_les_medias() {
+        use axum::http::Method;
+        // Ce pour quoi il existe.
+        assert!(route_de_parc(&Method::GET, "/api/media"));
+        assert!(route_de_parc(&Method::PUT, "/api/media/clip.mp4"));
+        // Tout le reste exige le mot de passe : un jeton de parc ne doit
+        // JAMAIS valoir clé d'administration.
+        assert!(!route_de_parc(&Method::POST, "/api/system/reboot"));
+        assert!(!route_de_parc(&Method::POST, "/api/system/shutdown"));
+        assert!(!route_de_parc(&Method::POST, "/api/update/apply"));
+        assert!(!route_de_parc(&Method::POST, "/api/command"));
+        assert!(!route_de_parc(&Method::DELETE, "/api/media/clip.mp4"));
+        assert!(!route_de_parc(&Method::GET, "/api/state"));
+    }
+
+    /// Une poignée de main WebSocket d'origine étrangère est rejetée : /ws
+    /// accepte des commandes, c'est une route mutatrice déguisée en GET.
+    #[tokio::test]
+    async fn csrf_rejette_le_websocket_cross_site() {
+        let bed = testbed();
+        let piege = bed
+            .router
+            .clone()
+            .oneshot(
+                HttpRequest::get("/ws")
+                    .header("upgrade", "websocket")
+                    .header("origin", "http://pirate.example")
+                    .header("host", "192.168.1.50:8080")
+                    .body(Body::empty())
+                    .expect("req"),
+            )
+            .await
+            .expect("resp");
+        assert_eq!(piege.status(), StatusCode::FORBIDDEN);
+
+        // Même origine : la requête passe le middleware (le refus qui suit
+        // vient d'axum, la poignée de main étant incomplète en test).
+        let legitime = bed
+            .router
+            .oneshot(
+                HttpRequest::get("/ws")
+                    .header("upgrade", "websocket")
+                    .header("origin", "http://192.168.1.50:8080")
+                    .header("host", "192.168.1.50:8080")
+                    .body(Body::empty())
+                    .expect("req"),
+            )
+            .await
+            .expect("resp");
+        assert_ne!(legitime.status(), StatusCode::FORBIDDEN);
+    }
 
     #[test]
     fn origine_correspond_bloque_le_cross_site() {

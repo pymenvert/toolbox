@@ -160,16 +160,19 @@ fn est_port_virtuel(nom: &str) -> bool {
 
 /// Choisit l'index du port d'entrée à ouvrir parmi `noms`.
 ///
-/// - avec un `filtre`, le premier port dont le nom le contient ;
-/// - sans filtre, le premier port NON virtuel (on saute le « Midi Through »
-///   d'ALSA), et seulement s'il n'en existe aucun autre, le premier port.
+/// - avec un `filtre`, le premier port dont le nom le contient (l'opérateur
+///   décide, y compris s'il vise un port virtuel) ;
+/// - sans filtre, le premier port NON virtuel, et RIEN si tous le sont.
+///
+/// Ce dernier point est essentiel : se rabattre sur le « Midi Through »
+/// d'ALSA (toujours présent sur Linux/Pi) donnait une connexion qui
+/// réussit, ne reçoit jamais rien, et surtout ne disparaît jamais — le
+/// superviseur s'y verrouillait et n'ouvrait plus JAMAIS le contrôleur
+/// branché ensuite. Ne rien ouvrir laisse le superviseur retenter.
 pub fn choisir_port(noms: &[String], filtre: Option<&str>) -> Option<usize> {
     match filtre {
         Some(f) => noms.iter().position(|n| n.contains(f)),
-        None => noms
-            .iter()
-            .position(|n| !est_port_virtuel(n))
-            .or(if noms.is_empty() { None } else { Some(0) }),
+        None => noms.iter().position(|n| !est_port_virtuel(n)),
     }
 }
 
@@ -196,13 +199,20 @@ pub fn connect(settings: &MidiSettings, bus: BusHandle) -> Result<MidiService, M
         .iter()
         .map(|p| input.port_name(p).unwrap_or_default())
         .collect();
-    // Journalise ce qui existe : sur site, ça montre d'un coup d'œil quel
-    // contrôleur brancher dans [midi] port.
-    tracing::info!(ports = ?noms, "ports MIDI d'entrée détectés");
+    // En `debug` seulement : cette fonction est rappelée toutes les 3 s par
+    // le superviseur tant qu'aucun contrôleur n'est branché — journaliser à
+    // chaque tour noierait le tampon de logs de l'opérateur.
+    tracing::debug!(ports = ?noms, "ports MIDI d'entrée détectés");
     let index =
         choisir_port(&noms, settings.port.as_deref()).ok_or_else(|| match &settings.port {
             Some(filter) => MidiError::NoPort(format!(" correspondant à {filter:?}")),
-            None => MidiError::NoPort(String::new()),
+            // Distinguer « aucun port » de « que des ports de bouclage » :
+            // le second cas se règle en branchant le contrôleur.
+            None if noms.is_empty() => MidiError::NoPort(String::new()),
+            None => MidiError::NoPort(format!(
+                " (seuls des ports virtuels détectés : {}) — branchez le contrôleur, ou visez-en un avec [midi] port",
+                noms.join(", ")
+            )),
         })?;
     let port = ports[index].clone();
 
@@ -263,10 +273,13 @@ mod tests {
         assert_eq!(choisir_port(&noms, None), Some(1), "on saute le Through");
         // Un filtre explicite prime, même s'il vise le Through.
         assert_eq!(choisir_port(&noms, Some("APC")), Some(1));
+        assert_eq!(choisir_port(&noms, Some("Through")), Some(0));
         assert_eq!(choisir_port(&noms, Some("introuvable")), None);
-        // Si le Through est le SEUL port, on le prend faute de mieux.
+        // Le Through SEUL : on n'ouvre RIEN. S'y accrocher donnait une
+        // connexion muette et définitive (le port ne disparaît jamais, donc
+        // le superviseur ne se reconnectait plus au vrai contrôleur).
         let seul = vec!["Midi Through Port-0".to_string()];
-        assert_eq!(choisir_port(&seul, None), Some(0));
+        assert_eq!(choisir_port(&seul, None), None);
         // Aucun port du tout.
         assert_eq!(choisir_port(&[], None), None);
     }

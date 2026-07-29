@@ -300,10 +300,21 @@ async fn superviser_midi(
     bus: BusHandle,
     mut stop: watch::Receiver<bool>,
 ) {
+    // Journalisation de l'échec BORNÉE. Sans contrôleur branché (profil
+    // « complet » sur une machine qui n'en a pas), cette boucle tourne
+    // indéfiniment : journaliser à chaque tour remplissait le tampon de
+    // logs — seule surface de diagnostic de l'opérateur — en ~25 min, en
+    // évinçant tout le reste. On ne trace donc qu'au premier échec, quand
+    // le motif CHANGE, ou toutes les 5 minutes.
+    const RAPPEL_ECHEC: Duration = Duration::from_secs(300);
+    let mut dernier_motif: Option<String> = None;
+    let mut dernier_log: Option<tokio::time::Instant> = None;
     loop {
         match toolbox_control_midi::connect(&config, bus.clone()) {
             Ok(service) => {
                 let nom = service.port_name.clone();
+                dernier_motif = None;
+                dernier_log = None;
                 info!(port = %nom, "contrôleur MIDI connecté");
                 loop {
                     tokio::select! {
@@ -325,7 +336,14 @@ async fn superviser_midi(
                 drop(service);
             }
             Err(err) => {
-                warn!(%err, "MIDI : port introuvable, nouvelle tentative dans 3 s");
+                let motif = err.to_string();
+                let nouveau = dernier_motif.as_deref() != Some(motif.as_str());
+                let a_expire = dernier_log.is_none_or(|t| t.elapsed() >= RAPPEL_ECHEC);
+                if nouveau || a_expire {
+                    warn!(%err, "MIDI : aucun contrôleur ouvert — nouvelle tentative toutes les 3 s");
+                    dernier_motif = Some(motif);
+                    dernier_log = Some(tokio::time::Instant::now());
+                }
             }
         }
         tokio::select! {
