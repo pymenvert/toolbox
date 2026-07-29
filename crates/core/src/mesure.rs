@@ -50,6 +50,13 @@ pub struct RenduMesures {
     /// allumer une alerte pour le restant de la session. C'est ce compteur-ci
     /// qui dit si ça se produit ENCORE.
     pub sautees_fenetre: u32,
+    /// Images réellement mesurées dans la fenêtre de publication.
+    ///
+    /// Sans ce chiffre, impossible de savoir ce que vaut le p95 : sur trois
+    /// échantillons, il EST le maximum. Une sortie au ralenti (le node ne
+    /// repeint que sur changement d'état) produit donc un « p95 » qui n'a
+    /// aucune valeur statistique, et rien ne le disait.
+    pub echantillons: u32,
 }
 
 /// Accumulateur de durées de frame. Un seul thread écrit (celui de la
@@ -133,6 +140,8 @@ impl Chrono {
                 ..RenduMesures::default()
             };
         }
+        #[allow(clippy::cast_possible_truncation)] // n <= ECHANTILLONS = 256
+        let echantillons = n as u32;
         // Copie sur la pile (1 Ko) puis tri en place : aucune allocation.
         let mut tri = [0u32; ECHANTILLONS];
         tri[..n].copy_from_slice(&self.echantillons[..n]);
@@ -143,6 +152,7 @@ impl Chrono {
             max_us: tri[n - 1],
             sautees: self.sautees,
             sautees_fenetre: fenetre,
+            echantillons,
         }
     }
 }
@@ -192,6 +202,7 @@ mod tests {
         assert_eq!(r.p50_us, 50_000, "médiane");
         assert_eq!(r.p95_us, 95_000, "p95");
         assert_eq!(r.max_us, 100_000, "max");
+        assert_eq!(r.echantillons, 100, "le lecteur doit savoir sur combien");
     }
 
     /// Le cas où l'ancienne formule se trompait le plus : deux frames.
@@ -204,6 +215,10 @@ mod tests {
         let r = c.resumer();
         assert_eq!(r.p50_us, 1_000, "médiane de deux frames");
         assert_eq!(r.max_us, 100_000, "le max reste le max");
+        // Sur deux images, le p95 EST le max : le chiffre d'échantillons est
+        // la seule chose qui permette de ne pas s'y tromper.
+        assert_eq!(r.echantillons, 2);
+        assert_eq!(r.p95_us, r.max_us);
     }
 
     /// Un pic ISOLÉ (1 frame sur 100) ne bouge ni la médiane ni le p95 : seul

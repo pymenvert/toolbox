@@ -298,12 +298,36 @@ function Show-Analyse($fichier) {
         $vmax = ConvertTo-Nombre $l.max_us
         if ($null -ne $vmax -and $vmax -gt 0) { $maxv += $vmax }
     }
+    # REDEMARRAGES. uptime_s ne peut que croitre : une baisse signifie que
+    # le node est reparti (panique + systemd Restart=always, par exemple).
+    # Sans cette detection, la pente memoire etait calculee a travers le
+    # redemarrage -- ce qui aplatit voire inverse une vraie fuite -- et le
+    # delta d'images perdues devenait negatif. Un node qui a plante trois
+    # fois ressortait « stable ».
+    $redemarrages = 0
+    $precedent = $null
+    foreach ($l in $lignes) {
+        $u = ConvertTo-Nombre $l.uptime_s
+        if ($null -ne $u -and $null -ne $precedent -and $u -lt $precedent) {
+            $redemarrages++
+        }
+        if ($null -ne $u) { $precedent = $u }
+    }
+
     $derniere = ConvertTo-Nombre $lignes[-1].secondes
     if ($null -eq $derniere) { $derniere = 0 }
     $duree = $derniere / 3600.0
 
     Write-Host ""
     Write-Host "=== Endurance : $($lignes.Count) points sur $([math]::Round($duree,2)) h ==="
+    if ($redemarrages -gt 0) {
+        Write-Host ""
+        Write-Host "!!! LE NODE A REDEMARRE $redemarrages fois pendant le run !!!"
+        Write-Host "    C'est en soi le resultat le plus important du test : chercher la"
+        Write-Host "    cause dans le journal avant de lire quoi que ce soit d'autre."
+        Write-Host "    Les chiffres ci-dessous couvrent plusieurs vies du process et"
+        Write-Host "    n'ont donc PAS de sens comme tendance."
+    }
 
     # --- Memoire : c'est LA question que le run doit trancher.
     if ($rss.Count -ge 3) {
@@ -347,6 +371,16 @@ function Show-Analyse($fichier) {
         $finMed = Get-Mediane $p95[($p95.Count - $quart)..($p95.Count - 1)]
         $med = Get-Mediane $p95
         Write-Host ""
+        $identiques = 0
+        for ($i = 0; $i -lt $p95.Count -and $i -lt $maxv.Count; $i++) {
+            if ($p95[$i] -eq $maxv[$i]) { $identiques++ }
+        }
+        if ($p95.Count -gt 0 -and ($identiques / $p95.Count) -gt 0.8) {
+            Write-Host ""
+            Write-Host "NOTE : le p95 est egal au maximum sur $([math]::Round(100 * $identiques / $p95.Count)) % des points."
+            Write-Host "  Trop peu d'images mesurees par seconde pour que le p95 ait un sens"
+            Write-Host "  statistique -- augmenter -CadenceCharge, ou lire la colonne max_us."
+        }
         Write-Host "Temps par image (p95) : $([math]::Round($med / 1000, 2)) ms en median sur le run"
         Write-Host "  premier quart $([math]::Round($debutMed / 1000, 2)) ms -> dernier quart $([math]::Round($finMed / 1000, 2)) ms"
         if ($debutMed -gt 0 -and $finMed -gt ($debutMed * 1.3)) {

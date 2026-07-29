@@ -383,6 +383,21 @@ footer { margin-top: 60px; padding-top: 24px; border-top: 1px solid var(--lisere
       (et sur disque : un fichier par jour dans <code>logs/</code>, gardé
       14 jours — lisible même après un crash),
       charge machine, mémoire, température (Pi).</p></div>
+    <div class="carte"><h4>Est-ce que ça tient ?</h4><p>Trois tuiles de la page
+      Système répondent à la question, et il faut les lire ensemble.</p>
+      <p><b>Mémoire de Lanterne</b> : ce que le node occupe pour lui seul.
+      Notez-la au démarrage d'une installation permanente : si elle grimpe
+      sans jamais redescendre sur plusieurs jours, signalez-le.</p>
+      <p><b>Temps par image</b> : le coût de fabrication d'une image. Une
+      sortie 60 Hz dispose de 16 ms par image ; en dessous de 8 ms, la marge
+      est confortable. Le chiffre affiché (p95) décrit une gêne
+      <i>installée</i> — s'il reste bas alors que le rendu saccade, regardez
+      la valeur « pire » à côté : c'est elle qui attrape le blocage isolé.
+      « n/d » signifie que cette sortie ne se mesure pas (mode KMS sur Pi,
+      ou version sans fenêtre) — ce n'est pas une panne.</p>
+      <p><b>Images perdues</b> : le total depuis l'allumage. Quelques-unes au
+      démarrage sont normales. La tuile ne s'alarme que si ça se produit
+      <i>en ce moment</i>.</p></div>
   </div>
 </section>
 

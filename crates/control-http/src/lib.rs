@@ -84,6 +84,15 @@ pub struct OutputControl {
     pub fps: watch::Receiver<f32>,
     /// Coût de production d'une frame (p50/p95/max) et frames perdues.
     pub mesures: watch::Receiver<toolbox_core::mesure::RenduMesures>,
+    /// La mesure de rendu existe-t-elle sur cette machine ?
+    ///
+    /// Elle vit dans la fenêtre de sortie. En mode KMS (le Pi sans bureau) et
+    /// dans un binaire compilé sans la fenêtre — ce qui est le cas de
+    /// l'artefact officiel du Raspberry Pi — personne ne la remplit. Le canal
+    /// rendait alors des zéros, et l'UI affichait un rendu parfait sur une
+    /// machine où rien n'est mesuré. `false` fait dire « non mesuré » au lieu
+    /// de mentir.
+    pub mesure_disponible: bool,
     /// Dernière frame vidéo décodée — pour l'aperçu web de la sortie.
     pub video: watch::Receiver<Option<toolbox_engine::VideoFrame>>,
 }
@@ -102,6 +111,7 @@ impl OutputControl {
             settings: std::sync::Arc::new(settings),
             fps,
             mesures,
+            mesure_disponible: false,
             video,
         }
     }
@@ -758,10 +768,15 @@ async fn system_stats(State(app): State<AppState>) -> Json<serde_json::Value> {
         // Coût réel du rendu : le débit (img/s) dit qu'on tient la cadence,
         // ces chiffres-là disent AVEC QUELLE MARGE. Une machine à 60 img/s
         // dont le p95 frôle les 16 ms est une machine qui va décrocher.
-        objet.insert(
-            "rendu".into(),
-            serde_json::to_value(*app.output.mesures.borrow()).unwrap_or_default(),
-        );
+        // `null` explicite quand la mesure n'existe pas sur cette machine :
+        // des zéros se lisent comme « tout va bien », une absence se lit
+        // comme une absence.
+        let rendu = if app.output.mesure_disponible {
+            serde_json::to_value(*app.output.mesures.borrow()).unwrap_or_default()
+        } else {
+            serde_json::Value::Null
+        };
+        objet.insert("rendu".into(), rendu);
         objet.insert("fps".into(), serde_json::json!(*app.output.fps.borrow()));
     }
     Json(json)
@@ -1590,7 +1605,21 @@ async fn diagnostic_zip(State(app): State<AppState>) -> Result<Response, ApiErro
     zip.add("rapport.txt", rapport.as_bytes());
     zip.add("etat.json", &json(&app.bus.snapshot())?);
     zip.add("journal.json", &json(&app.logs.snapshot())?);
-    zip.add("systeme.json", &json(&stats)?);
+    // Le bloc « rendu » n'est greffe que dans system_stats, APRES collect() :
+    // le ZIP -- celui que le manuel demande d'envoyer quand ca a saccade --
+    // ne contenait donc ni le temps par image, ni les images perdues. C'est
+    // precisement ce qu'on veut lire apres un incident.
+    let mut systeme = serde_json::to_value(&stats).unwrap_or_else(|_| serde_json::json!({}));
+    if let Some(objet) = systeme.as_object_mut() {
+        let rendu = if app.output.mesure_disponible {
+            serde_json::to_value(*app.output.mesures.borrow()).unwrap_or_default()
+        } else {
+            serde_json::Value::Null
+        };
+        objet.insert("rendu".into(), rendu);
+        objet.insert("fps".into(), serde_json::json!(*app.output.fps.borrow()));
+    }
+    zip.add("systeme.json", &json(&systeme)?);
     zip.add("sortie.json", &json(&*app.output.settings.borrow())?);
     zip.add("ecrans.json", &json(&*app.output.monitors.borrow())?);
     zip.add("medias.json", &json(&app.media.list()?)?);
@@ -2552,10 +2581,12 @@ mod tests {
             max_us: 12_000,
             sautees: 2,
             sautees_fenetre: 0,
+            echantillons: 60,
         });
         let (_fps_tx, fps_rx) = watch::channel(30.0f32);
         bed.app.output.mesures = mesures_rx;
         bed.app.output.fps = fps_rx;
+        bed.app.output.mesure_disponible = true;
         let response = router(bed.app.clone())
             .oneshot(
                 HttpRequest::get("/api/system")
@@ -2880,6 +2911,7 @@ mod tests {
             max_us: 12_000,
             sautees: 2,
             sautees_fenetre: 0,
+            echantillons: 60,
         });
         let (_video_tx, video_rx) = watch::channel(None);
         let output = OutputControl {
@@ -2887,6 +2919,7 @@ mod tests {
             settings: std::sync::Arc::new(settings_tx),
             fps: fps_rx,
             mesures: mesures_rx,
+            mesure_disponible: true,
             video: video_rx,
         };
         let app = AppState::new(

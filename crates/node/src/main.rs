@@ -288,6 +288,14 @@ async fn run(mut config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std:
     // Coût de production d'une frame (p50/p95/max) et frames perdues : le
     // pendant qualitatif du compteur img/s ci-dessus.
     let (mesures_tx, mesures_rx) = watch::channel(toolbox_core::mesure::RenduMesures::default());
+    // La mesure de rendu vit dans la FENÊTRE. En mode KMS (le Pi sans
+    // bureau) et dans un binaire sans la feature `render` — l'artefact
+    // officiel du Raspberry Pi est compilé --no-default-features — personne
+    // ne la remplit. Sans ce drapeau, l'API rendait des zéros et la page
+    // Système affichait un rendu impeccable sur une machine où rien n'est
+    // mesuré : le pire des affichages, celui qui rassure à tort.
+    let mesure_disponible =
+        cfg!(feature = "render") && config.output.mode != toolbox_core::SortieMode::Kms;
 
     // Parc mDNS : la liste publiée pour /api/fleet (le service lui-même est
     // démarré/arrêté par le contrôleur de fonctions).
@@ -424,6 +432,7 @@ async fn run(mut config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std:
                 settings: output_settings_tx.clone(),
                 fps: fps_rx.clone(),
                 mesures: mesures_rx.clone(),
+                mesure_disponible,
                 video: video_rx.clone(),
             },
             fleet_rx.clone(),

@@ -2827,18 +2827,28 @@ async function loadSystem() {
   // La PIRE image est affichée aussi : le p95 ne bouge pas pour un blocage
   // isolé (une image sur cent ne remplit pas 5 %), donc sans elle un à-coup
   // ponctuel — celui que le spectateur voit — resterait invisible ici.
-  if (sys.rendu) {
+  if (sys.rendu === null) {
+    // Mode KMS (Pi sans bureau) ou binaire sans fenetre : personne ne
+    // remplit la mesure. Des zeros se liraient « tout va bien ».
+    html += tile("Temps par image", "n/d", "",
+      "non mesuré sur cette sortie (mode KMS ou version sans fenêtre)", false);
+  } else if (sys.rendu) {
     // Arrondi UNE fois, puis comparé sur l'arrondi : sinon 15,96 ms
     // s'affichait « 16.0 ms » avec le sous-titre « marge correcte » et sans
     // alerte — la tuile se contredisait elle-même.
     const p95 = Math.round(sys.rendu.p95_us / 100) / 10,
           p50 = Math.round(sys.rendu.p50_us / 100) / 10,
-          max = Math.round(sys.rendu.max_us / 100) / 10;
+          max = Math.round(sys.rendu.max_us / 100) / 10,
+          n = sys.rendu.echantillons || 0;
     if (p95 > 0)
       html += tile("Temps par image", p95.toFixed(1), "ms (p95)",
         "habituel " + p50.toFixed(1) + " ms · pire " + max.toFixed(1) + " ms · " +
         (p95 < 8 ? "grande marge" : p95 < 16 ? "marge correcte"
-          : "trop lent pour du 60 Hz"), p95 >= 16 || max >= 33);
+          : "trop lent pour du 60 Hz") +
+        // Sur une poignee d'images, le p95 EST le maximum : le dire evite
+        // de prendre un chiffre sans valeur statistique pour un verdict.
+        (n < 20 ? " · sur " + n + " image" + (n > 1 ? "s" : "") + " seulement"
+                : ""), p95 >= 16 || max >= 33);
     else
       // Au repos, la tuile disparaissait purement et simplement. Un tiret
       // dit « rien à mesurer », une absence laisse croire à une panne.

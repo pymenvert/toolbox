@@ -61,6 +61,23 @@ Le CSV a exactement le même format : on le dépouille avec le script
 PowerShell depuis n'importe quelle machine — c'est voulu, pour comparer un
 run de Pi et un run de PC avec la même grille de lecture.
 
+## Ce que ce test ne couvre PAS — à lire avant d'en tirer une conclusion
+
+- **La lecture vidéo n'est pas sollicitée.** La charge ne fait que du
+  mapping, de la couleur et de la mire : aucun `load`, aucun `play`. Or une
+  installation permanente tourne avec une vidéo en boucle 24 h/24, et c'est
+  *cette* configuration qui peut fuir. Pour un test représentatif : lancer un
+  binaire compilé avec `--features gstreamer`, charger un média et le mettre
+  en lecture bouclée **avant** de démarrer le harnais.
+- **Le Raspberry Pi en mode KMS ne mesure pas le rendu.** Le chronomètre vit
+  dans la fenêtre de sortie ; l'artefact ARM64 officiel est compilé sans
+  elle. `/api/system` renvoie alors `"rendu": null` et l'UI affiche « n/d ».
+  La mémoire, elle, reste mesurée — c'est déjà la question principale.
+- **Le p95 n'a de sens que sur assez d'images.** Le node ne repeint que sur
+  changement d'état : si la charge est faible, une seconde ne contient que
+  deux ou trois images et le p95 vaut alors le maximum. Le dépouillement le
+  signale, et le champ `echantillons` de `/api/system` donne le compte exact.
+
 ## Lire le résultat
 
 - **Mémoire** : aucun verdict en dessous de 30 min de run. Les premières
@@ -70,5 +87,9 @@ run de Pi et un run de PC avec la même grille de lecture.
   hausse de plus de 30 % signale une dégradation dans le temps.
 - **Images perdues** : quelques-unes au lancement sont normales. Une
   croissance continue ne l'est pas.
+- **Redémarrages** : si `uptime_s` retombe, le node est reparti (panique +
+  `Restart=always`). Le dépouillement le signale en tête et invalide les
+  tendances — un run traversé par un redémarrage ne dit rien sur une fuite,
+  et le redémarrage lui-même est le vrai résultat du test.
 
 Le CSV utilise le point-virgule : Excel français l'ouvre directement.
