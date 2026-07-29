@@ -76,17 +76,25 @@ function Start-Charge($base, $cadence) {
             '{"cmd":"color_set","param":"gamma","value":1.1}',
             '{"cmd":"color_set","param":"gamma","value":1.0}',
             '{"cmd":"set_test_pattern","pattern":"grid"}',
-            '{"cmd":"set_test_pattern","pattern":"bars"}'
+            '{"cmd":"set_test_pattern","pattern":"checker"}'
         )
         $pause = [math]::Max(1, [int](1000 / [math]::Max(1, $cadence)))
         $i = 0
+        $refus = 0
         while ($true) {
             try {
                 Invoke-RestMethod -Uri "$base/api/command" -Method Post `
                     -ContentType "application/json" `
                     -Body $commandes[$i % $commandes.Count] -TimeoutSec 10 | Out-Null
             } catch {
-                # Un refus ponctuel ne doit pas arreter un run de plusieurs heures.
+                # Un refus ponctuel ne doit pas arreter un run de plusieurs
+                # heures -- mais il ne doit pas non plus passer inapercu :
+                # « bars » n'existait pas et un sixieme de la charge partait
+                # en 422 sans que rien ne le dise.
+                $refus++
+                if ($refus -le 3 -or $refus % 100 -eq 0) {
+                    Write-Warning "commande refusee ($refus) : $($_.Exception.Message)"
+                }
                 Start-Sleep -Seconds 1
             }
             $i++
@@ -105,6 +113,39 @@ function Start-Charge($base, $cadence) {
     return $jobs
 }
 
+# Le node est laisse dans l'etat ou on l'a trouve. Sans ca, la charge
+# laissait la MIRE DE TEST allumee -- et la mire est prioritaire sur la
+# video (engine/raster.rs) : le spectacle suivant projetait un damier. Le
+# coin 0 du mapping, lui, restait a la valeur par defaut, pas a celle de
+# l'operateur : on le sauve avant, on le recharge apres.
+function Save-Etat($base) {
+    try {
+        Invoke-RestMethod -Uri "$base/api/command" -Method Post -TimeoutSec 10 `
+            -ContentType "application/json" `
+            -Body '{"cmd":"mapping_save","name":"__endurance_avant"}' | Out-Null
+        return $true
+    } catch {
+        Write-Warning "mapping non sauvegarde avant la charge : $($_.Exception.Message)"
+        return $false
+    }
+}
+
+function Restore-Etat($base, $sauvegarde) {
+    $commandes = @('{"cmd":"set_test_pattern","pattern":null}')
+    if ($sauvegarde) {
+        $commandes += '{"cmd":"mapping_load","name":"__endurance_avant"}'
+    }
+    foreach ($c in $commandes) {
+        try {
+            Invoke-RestMethod -Uri "$base/api/command" -Method Post -TimeoutSec 10 `
+                -ContentType "application/json" -Body $c | Out-Null
+        } catch {
+            Write-Warning "RESTAURATION INCOMPLETE : $($_.Exception.Message)"
+            Write-Warning "verifier la mire et le mapping dans l'UI avant le prochain spectacle."
+        }
+    }
+}
+
 function Stop-Charge($jobs) {
     foreach ($j in $jobs) {
         try {
@@ -121,6 +162,11 @@ function Stop-Charge($jobs) {
 function Start-Collecte {
     param($base, $minutes, $intervalle, $fichier, $sansCharge, $cadence)
 
+    # Chemin ABSOLU d'abord : [System.IO.File] resout les chemins relatifs
+    # contre le repertoire du processus .NET, que Set-Location ne met PAS a
+    # jour. Avec un chemin relatif, l'en-tete partait dans un fichier et les
+    # lignes dans un autre -- reproduit sur ce poste.
+    $fichier = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($fichier)
     # UTF-8 SANS BOM, comme le collecteur shell : Out-File -Encoding utf8
     # sous PowerShell 5.1 prefixe le fichier d'un BOM, qui colle a l'en-tete
     # de la premiere colonne pour tout lecteur autre qu'Import-Csv.
@@ -136,41 +182,59 @@ function Start-Collecte {
     Write-Host "Endurance : $minutes min sur $base, un point toutes les $intervalle s."
     Write-Host "CSV : $fichier"
     $charge = @()
-    if (-not $sansCharge) {
-        $charge = Start-Charge $base $cadence
-        Write-Host "Charge : ~$cadence commandes/s + client MJPEG."
-    }
+    $sauvegarde = $false
+    # try/finally : sans lui, un Ctrl+C ou une erreur terminante (CSV
+    # verrouille par Excel, par exemple) laissait tourner le job de commandes
+    # ET un curl.exe orphelin qui martelaient le node indefiniment, mire de
+    # test allumee.
+    try {
+        if (-not $sansCharge) {
+            $sauvegarde = Save-Etat $base
+            $charge = Start-Charge $base $cadence
+            Write-Host "Charge : ~$cadence commandes/s + client MJPEG."
+        }
 
-    while ((Get-Date) -lt $fin) {
-        $sys = $null
-        try {
-            $sys = Invoke-RestMethod -Uri "$base/api/system" -TimeoutSec 15
-        } catch {
-            $echecs++
-            Write-Host "  node injoignable ($echecs) : $($_.Exception.Message)"
-        }
-        if ($null -ne $sys) {
-            $secondes = [int]((Get-Date) - $debut).TotalSeconds
-            $ligne = @(
-                $secondes,
-                (Get-Champ $sys "rss_mb"),
-                (Get-Champ $sys "rendu.p50_us"),
-                (Get-Champ $sys "rendu.p95_us"),
-                (Get-Champ $sys "rendu.max_us"),
-                (Get-Champ $sys "rendu.sautees"),
-                (Get-Champ $sys "fps"),
-                (Get-Champ $sys "erreurs_recentes"),
-                (Get-Champ $sys "uptime_s")
-            ) -join ";"
-            Add-Content -Path $fichier -Value $ligne -Encoding utf8
-            $lignes++
-            if ($lignes % 20 -eq 0) {
-                Write-Host "  $lignes points | RSS $(Get-Champ $sys 'rss_mb') Mo | p95 $(Get-Champ $sys 'rendu.p95_us') us"
+        while ((Get-Date) -lt $fin) {
+            $sys = $null
+            try {
+                $sys = Invoke-RestMethod -Uri "$base/api/system" -TimeoutSec 15
+            } catch {
+                $echecs++
+                Write-Host "  node injoignable ($echecs) : $($_.Exception.Message)"
             }
+            if ($null -ne $sys) {
+                $secondes = [int]((Get-Date) - $debut).TotalSeconds
+                $ligne = @(
+                    $secondes,
+                    (Get-Champ $sys "rss_mb"),
+                    (Get-Champ $sys "rendu.p50_us"),
+                    (Get-Champ $sys "rendu.p95_us"),
+                    (Get-Champ $sys "rendu.max_us"),
+                    (Get-Champ $sys "rendu.sautees"),
+                    (Get-Champ $sys "fps"),
+                    (Get-Champ $sys "erreurs_recentes"),
+                    (Get-Champ $sys "uptime_s")
+                ) -join ";"
+                # Ecriture protegee : un CSV ouvert dans Excel rend
+                # Add-Content terminant ($ErrorActionPreference = Stop) et
+                # tuait un run de plusieurs heures a sa derniere minute.
+                try {
+                    Add-Content -Path $fichier -Value $ligne -Encoding utf8
+                    $lignes++
+                } catch {
+                    $echecs++
+                    Write-Warning "ligne non ecrite ($echecs) : $($_.Exception.Message)"
+                }
+                if ($lignes % 20 -eq 0 -and $lignes -gt 0) {
+                    Write-Host "  $lignes points | RSS $(Get-Champ $sys 'rss_mb') Mo | p95 $(Get-Champ $sys 'rendu.p95_us') us"
+                }
+            }
+            Start-Sleep -Seconds $intervalle
         }
-        Start-Sleep -Seconds $intervalle
+    } finally {
+        Stop-Charge $charge
+        if (-not $sansCharge) { Restore-Etat $base $sauvegarde }
     }
-    Stop-Charge $charge
     Write-Host "Collecte terminee : $lignes points, $echecs echec(s) de lecture."
 }
 
@@ -195,12 +259,20 @@ function Get-Pente {
 }
 
 function Get-Mediane($valeurs) {
-    if ($valeurs.Count -eq 0) { return $null }
-    $tri = $valeurs | Sort-Object
-    return $tri[[int]($tri.Count / 2)]
+    # PIEGE : [int] applique l'arrondi BANCAIRE. [int](3/2) = 2, donc
+    # l'ancienne version renvoyait le MAXIMUM d'une serie de 3, pas sa
+    # mediane -- et le decoupage en quarts produit justement des paquets de
+    # 3 elements des 11 points. Division entiere explicite.
+    if ($null -eq $valeurs -or $valeurs.Count -eq 0) { return $null }
+    $tri = @($valeurs | Sort-Object)
+    $n = $tri.Count
+    $m = [int][math]::Floor($n / 2)
+    if ($n % 2 -eq 1) { return $tri[$m] }
+    return ($tri[$m - 1] + $tri[$m]) / 2
 }
 
 function Show-Analyse($fichier) {
+    $fichier = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($fichier)
     if (-not (Test-Path $fichier)) {
         Write-Host "Fichier introuvable : $fichier"
         return
@@ -213,6 +285,7 @@ function Show-Analyse($fichier) {
     $heures = @()
     $rss = @()
     $p95 = @()
+    $maxv = @()
     foreach ($l in $lignes) {
         $memoire = ConvertTo-Nombre $l.rss_mb
         $secondes = ConvertTo-Nombre $l.secondes
@@ -222,6 +295,8 @@ function Show-Analyse($fichier) {
         }
         $val = ConvertTo-Nombre $l.p95_us
         if ($null -ne $val -and $val -gt 0) { $p95 += $val }
+        $vmax = ConvertTo-Nombre $l.max_us
+        if ($null -ne $vmax -and $vmax -gt 0) { $maxv += $vmax }
     }
     $derniere = ConvertTo-Nombre $lignes[-1].secondes
     if ($null -eq $derniere) { $derniere = 0 }
@@ -278,6 +353,23 @@ function Show-Analyse($fichier) {
             Write-Host "  VERDICT : le rendu se degrade avec le temps (+30 % ou plus)."
         } else {
             Write-Host "  VERDICT : pas de degradation."
+        }
+    }
+
+    # LA PIRE IMAGE. Le p95 ne bouge que si l'incident touche au moins 5 %
+    # des images : un blocage isole -- celui que le spectateur VOIT -- lui
+    # est invisible. Cette colonne etait collectee et jamais regardee.
+    if ($maxv.Count -ge 3) {
+        $pire = ($maxv | Measure-Object -Maximum).Maximum
+        $medMax = Get-Mediane $maxv
+        Write-Host ""
+        Write-Host "Pire image du run : $([math]::Round($pire / 1000, 1)) ms (median des pires : $([math]::Round($medMax / 1000, 1)) ms)"
+        if ($pire -ge 100000) {
+            Write-Host "  VERDICT : blocage franc (>= 100 ms) -- visible a l'oeil, a investiguer."
+        } elseif ($pire -ge 33000) {
+            Write-Host "  VERDICT : a-coups perceptibles (>= 33 ms, soit 2 images a 60 Hz)."
+        } else {
+            Write-Host "  VERDICT : aucun a-coup notable."
         }
     }
 
