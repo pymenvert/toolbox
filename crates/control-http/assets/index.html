@@ -2824,11 +2824,16 @@ async function loadSystem() {
       "note-la au démarrage : si elle grimpe sans cesse, signale-le", false);
   // Coût d'une image. Le badge img/s dit qu'on tient la cadence ; le p95 dit
   // avec quelle marge. Au-delà de 16 ms, une sortie 60 Hz commence à sauter.
+  // La PIRE image est affichée aussi : le p95 ne bouge pas pour un blocage
+  // isolé (une image sur cent ne remplit pas 5 %), donc sans elle un à-coup
+  // ponctuel — celui que le spectateur voit — resterait invisible ici.
   if (sys.rendu && sys.rendu.p95_us > 0) {
-    const p95 = sys.rendu.p95_us / 1000, p50 = sys.rendu.p50_us / 1000;
+    const p95 = sys.rendu.p95_us / 1000, p50 = sys.rendu.p50_us / 1000,
+          max = sys.rendu.max_us / 1000;
     html += tile("Temps par image", p95.toFixed(1), "ms (p95)",
-      "habituel " + p50.toFixed(1) + " ms · " + (p95 < 8 ? "grande marge"
-        : p95 < 16 ? "marge correcte" : "trop lent pour du 60 Hz"), p95 >= 16);
+      "habituel " + p50.toFixed(1) + " ms · pire " + max.toFixed(1) + " ms · " +
+      (p95 < 8 ? "grande marge" : p95 < 16 ? "marge correcte"
+        : "trop lent pour du 60 Hz"), p95 >= 16 || max >= 33);
   }
   if (sys.rendu && sys.rendu.sautees > 0)
     html += tile("Images perdues", String(sys.rendu.sautees), "",

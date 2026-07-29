@@ -29,10 +29,15 @@ const ECHANTILLONS: usize = 256;
 pub struct RenduMesures {
     /// Frame médiane, en microsecondes : le régime de croisière.
     pub p50_us: u32,
-    /// 95ᵉ centile : les à-coups. C'est LUI qui fait saccader une projection,
-    /// pas la médiane.
+    /// 95ᵉ centile : ce que subissent les 5 % de frames les plus lentes.
+    ///
+    /// Il révèle une gêne **soutenue** — une machine qui décroche une frame
+    /// sur dix. Un pic ISOLÉ (une frame sur cent) ne le fait pas bouger d'une
+    /// microseconde : c'est `max_us` qui le voit. Les deux sont donc
+    /// complémentaires, et lire l'un sans l'autre induit en erreur.
     pub p95_us: u32,
-    /// Pire frame de la fenêtre.
+    /// Pire frame de la fenêtre — le seul indicateur qui attrape un à-coup
+    /// isolé.
     pub max_us: u32,
     /// Frames non présentées depuis le démarrage (surface occupée, délai
     /// dépassé, device perdu). En croissance continue = quelque chose ne va
@@ -157,16 +162,38 @@ mod tests {
         assert_eq!(r.max_us, 100_000, "max");
     }
 
+    /// Un pic ISOLÉ (1 frame sur 100) ne bouge ni la médiane ni le p95 : seul
+    /// le max le voit. C'est une propriété du p95, pas un défaut — mais elle
+    /// se paie d'un contresens si on lit le p95 tout seul, d'où ce test qui
+    /// la fige.
     #[test]
-    fn le_p95_attrape_l_a_coup_que_la_mediane_ignore() {
-        // 99 frames à 4 ms, une seule à 200 ms : c'est exactement le cas qui
-        // fait saccader une projection sans bouger le badge img/s.
+    fn un_a_coup_isole_ne_bouge_que_le_max() {
         let mut micros = vec![4_000u32; 99];
         micros.push(200_000);
         let mut c = chrono_de(&micros);
         let r = c.resumer();
         assert_eq!(r.p50_us, 4_000, "la médiane reste sereine");
+        assert_eq!(r.p95_us, 4_000, "un pic sur cent ne remplit pas les 5 %");
         assert_eq!(r.max_us, 200_000, "le max voit l'à-coup");
+    }
+
+    /// La gêne SOUTENUE — une frame sur dix qui décroche — est en revanche
+    /// exactement ce que le p95 doit révéler, pendant que la médiane continue
+    /// d'afficher un régime tranquille. C'est le scénario qui fait saccader
+    /// une projection sans faire bouger le badge img/s.
+    ///
+    /// La version précédente de ce test s'appelait « le p95 attrape l'à-coup »
+    /// mais n'assertait JAMAIS le p95 : un p95 calculé par erreur comme la
+    /// médiane passait au travers. Vérifié par injection de faute.
+    #[test]
+    fn une_gene_soutenue_fait_monter_le_p95_sans_la_mediane() {
+        let mut micros = vec![4_000u32; 90];
+        micros.extend_from_slice(&[20_000u32; 10]);
+        let mut c = chrono_de(&micros);
+        let r = c.resumer();
+        assert_eq!(r.p50_us, 4_000, "la médiane ne voit rien");
+        assert_eq!(r.p95_us, 20_000, "le p95 sort la gêne soutenue");
+        assert!(r.p95_us > r.p50_us, "p95 confondu avec la médiane");
     }
 
     #[test]
