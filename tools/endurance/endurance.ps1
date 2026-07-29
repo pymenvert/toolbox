@@ -286,6 +286,8 @@ function Show-Analyse($fichier) {
     $rss = @()
     $p95 = @()
     $maxv = @()
+    $inactifs = 0
+    $sansImage = 0
     foreach ($l in $lignes) {
         $memoire = ConvertTo-Nombre $l.rss_mb
         $secondes = ConvertTo-Nombre $l.secondes
@@ -295,6 +297,9 @@ function Show-Analyse($fichier) {
         }
         $val = ConvertTo-Nombre $l.p95_us
         if ($null -ne $val -and $val -gt 0) { $p95 += $val }
+        elseif ($null -ne $val) { $inactifs++ }
+        $f = ConvertTo-Nombre $l.fps
+        if ($null -ne $f -and $f -le 0.01) { $sansImage++ }
         $vmax = ConvertTo-Nombre $l.max_us
         if ($null -ne $vmax -and $vmax -gt 0) { $maxv += $vmax }
     }
@@ -373,7 +378,12 @@ function Show-Analyse($fichier) {
 
             if ($null -ne $penteFin -and $penteFin -le 1 -and $stableDepuis -ge 20) {
                 Write-Host "  VERDICT : PALIER -- la memoire a fini de monter."
-                Write-Host "  (la tendance globale ci-dessus est un artefact : elle lisse des marches)"
+                # L'avertissement n'a de sens que si les deux chiffres
+                # divergent : sur une courbe reellement plate, il n'y a
+                # aucune marche a lisser.
+                if ([math]::Abs($p) -gt 1) {
+                    Write-Host "  (la tendance globale ci-dessus est un artefact : elle lisse des marches)"
+                }
             } elseif ($p -gt 5 -and ($fin - $debut) -gt 20) {
                 Write-Host "  VERDICT : fuite probable -- a 24 h cela ferait +$([math]::Round($p * 24)) Mo."
             } elseif ($p -gt 1) {
@@ -411,6 +421,31 @@ function Show-Analyse($fichier) {
         } else {
             Write-Host "  VERDICT : pas de degradation."
         }
+        # Le seuil que le README et l'UI annoncent tous les deux, et que le
+        # depouillement n'appliquait nulle part.
+        if ($med -ge 16000) {
+            Write-Host "  ATTENTION : au-dela de 16 ms, une sortie 60 Hz saute des images."
+        }
+    }
+
+    # SORTIE INACTIVE. Les points a zero etaient purement et simplement
+    # JETES du calcul : une sortie morte -- ecran noir, plus une seule image
+    # presentee -- disparaissait de l'analyse, qui concluait alors
+    # « pas de degradation » sur les rares points survivants. C'est le
+    # contraire de ce qu'un test d'endurance doit dire.
+    $total = $lignes.Count
+    if ($total -gt 0 -and $sansImage -gt 0) {
+        $part = [math]::Round(100 * $sansImage / $total)
+        Write-Host ""
+        Write-Host "Sortie sans aucune image : $part % du run ($sansImage points sur $total)"
+        if ($part -ge 50) {
+            Write-Host "  VERDICT : la sortie ne peignait RIEN sur $part % du run."
+            if ($part -lt 100) {
+                Write-Host "  Les chiffres de rendu ci-dessous ne portent que sur le reste."
+            }
+        } elseif ($part -ge 10) {
+            Write-Host "  (normal si la charge est faible : le node ne repeint que sur changement d'etat)"
+        }
     }
 
     # LA PIRE IMAGE. Le p95 ne bouge que si l'incident touche au moins 5 %
@@ -434,10 +469,18 @@ function Show-Analyse($fichier) {
     $sautDebut = ConvertTo-Nombre $lignes[0].sautees
     $sautFin = ConvertTo-Nombre $lignes[-1].sautees
     if ($null -ne $sautDebut -and $null -ne $sautFin) {
-        $delta = [int]($sautFin - $sautDebut)
         Write-Host ""
-        Write-Host "Images perdues pendant le run : $delta"
-        if ($delta -gt 100) { Write-Host "  VERDICT : anormal, a investiguer." }
+        if ($redemarrages -gt 0) {
+            # Le compteur repart de zero a chaque demarrage : la difference
+            # entre le premier et le dernier point n'a plus aucun sens, et
+            # elle sortait NEGATIVE.
+            Write-Host "Images perdues : non calculable ($redemarrages redemarrage(s) ont remis le compteur a zero)"
+            Write-Host "  dernier compteur connu : $([int]$sautFin) depuis le dernier demarrage"
+        } else {
+            $delta = [int]($sautFin - $sautDebut)
+            Write-Host "Images perdues pendant le run : $delta"
+            if ($delta -gt 100) { Write-Host "  VERDICT : anormal, a investiguer." }
+        }
     }
     $errFin = ConvertTo-Nombre $lignes[-1].erreurs
     if ($null -ne $errFin -and $errFin -gt 0) {

@@ -2843,7 +2843,11 @@ async function loadSystem() {
     if (p95 > 0)
       html += tile("Temps par image", p95.toFixed(1), "ms (p95)",
         "habituel " + p50.toFixed(1) + " ms · pire " + max.toFixed(1) + " ms · " +
-        (p95 < 8 ? "grande marge" : p95 < 16 ? "marge correcte"
+        // Le verdict doit tenir compte du MAX, pas seulement du p95 : sinon
+        // la tuile passait au rouge (déclenché par max >= 33) tout en
+        // affichant « grande marge ». Elle se contredisait.
+        (max >= 33 ? "à-coups visibles à l'œil"
+          : p95 < 8 ? "grande marge" : p95 < 16 ? "marge correcte"
           : "trop lent pour du 60 Hz") +
         // Sur une poignee d'images, le p95 EST le maximum : le dire evite
         // de prendre un chiffre sans valeur statistique pour un verdict.
