@@ -347,11 +347,34 @@ function Show-Analyse($fichier) {
             Write-Host "  les premieres minutes sont de la montee en regime. Relancer sur 1 h au moins."
         } elseif ($null -ne $pente) {
             $p = [math]::Round($pente, 2)
-            Write-Host "  tendance : $p Mo/h"
-            # Seuils volontairement larges : le RSS respire (cache, allocateur
-            # qui ne rend pas tout de suite). Ce qui compte est une croissance
-            # SOUTENUE, pas une bosse.
-            if ($p -gt 5 -and ($fin - $debut) -gt 20) {
+            Write-Host "  tendance globale : $p Mo/h"
+
+            # LA PENTE GLOBALE NE SUFFIT PAS. Un allocateur ne rend pas la
+            # memoire au fil de l'eau : il agrandit ses reserves par MARCHES,
+            # puis se stabilise. Une regression lineaire sur un escalier
+            # rapporte une pente qui n'existe pas -- observe en reel :
+            # 373 Mo, palier a 377 pendant cinquante minutes, marche a 383,
+            # palier de nouveau, et la regression annoncait « 6,1 Mo/h,
+            # croissance a surveiller ». Ce qui distingue une fuite d'une
+            # montee en regime, c'est que la fuite ne se stabilise JAMAIS.
+            # On regarde donc le DERNIER TIERS du run, et depuis combien de
+            # temps la valeur ne bouge plus.
+            $tiers = [int]($rss.Count / 3)
+            if ($tiers -lt 3) { $tiers = $rss.Count }
+            $depart = $rss.Count - $tiers
+            $penteFin = Get-Pente $heures[$depart..($rss.Count - 1)] $rss[$depart..($rss.Count - 1)]
+
+            $derniereHausse = 0
+            for ($i = 1; $i -lt $rss.Count; $i++) {
+                if ($rss[$i] -gt $rss[$i - 1]) { $derniereHausse = $i }
+            }
+            $stableDepuis = [math]::Round(($heures[$rss.Count - 1] - $heures[$derniereHausse]) * 60)
+            Write-Host "  derniere hausse il y a $stableDepuis min ; sur le dernier tiers : $([math]::Round($penteFin, 2)) Mo/h"
+
+            if ($null -ne $penteFin -and $penteFin -le 1 -and $stableDepuis -ge 20) {
+                Write-Host "  VERDICT : PALIER -- la memoire a fini de monter."
+                Write-Host "  (la tendance globale ci-dessus est un artefact : elle lisse des marches)"
+            } elseif ($p -gt 5 -and ($fin - $debut) -gt 20) {
                 Write-Host "  VERDICT : fuite probable -- a 24 h cela ferait +$([math]::Round($p * 24)) Mo."
             } elseif ($p -gt 1) {
                 Write-Host "  VERDICT : croissance lente a surveiller sur un run plus long."
