@@ -185,6 +185,7 @@ fn est_impulsion(addr: &str) -> bool {
         addr,
         "/cue/go"
             | "/dmx/scene"
+            | "/dmx/chaser"
             | "/preset/loaded"
             | "/preset/fade"
             | "/mapping/loaded"
@@ -312,6 +313,15 @@ pub fn event_to_osc(event: &toolbox_core::Event) -> Option<OscMessage> {
         Event::DmxSceneDemandee { name } => {
             message("/dmx/scene", vec![OscType::String(name.clone())])
         }
+        // Symétrique de /lut : chaîne vide = arrêt du chaser. Sans cette
+        // branche, le bras fourre-tout avalait l'événement en invoquant
+        // « Chataigne relira la valeur via OSCQuery » — ce qui était faux,
+        // /dmx/chaser n'y figurant pas non plus. Résultat : une scène
+        // rappelée allumait bien le voyant, un chaser lancé n'allumait rien.
+        Event::DmxChaserDemande { name } => message(
+            "/dmx/chaser",
+            vec![OscType::String(name.clone().unwrap_or_default())],
+        ),
         Event::LutChanged { name } => message(
             "/lut",
             vec![OscType::String(name.clone().unwrap_or_default())],
@@ -1050,6 +1060,22 @@ mod tests {
             m.args,
             vec![OscType::String("scene_02".into()), OscType::Float(2.5)]
         );
+
+        // Un chaser qui démarre doit allumer le bouton de la surface, comme
+        // une scène. L'événement tombait auparavant dans le fourre-tout :
+        // /dmx/scene revenait, /dmx/chaser jamais.
+        let m = event_to_osc(&Event::DmxChaserDemande {
+            name: Some("poursuite".into()),
+        })
+        .expect("chaser");
+        assert_eq!(m.addr, "/dmx/chaser");
+        assert_eq!(m.args, vec![OscType::String("poursuite".into())]);
+        // Arrêt : chaîne vide, comme /lut.
+        let m = event_to_osc(&Event::DmxChaserDemande { name: None }).expect("stop chaser");
+        assert_eq!(m.args, vec![OscType::String(String::new())]);
+        // Et c'est un déclencheur : deux départs successifs du même chaser
+        // doivent produire deux messages, pas un seul.
+        assert!(est_impulsion("/dmx/chaser"));
 
         // Pas de retour pour l'état complet remplacé.
         assert!(event_to_osc(&Event::StateReplaced {

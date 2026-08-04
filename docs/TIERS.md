@@ -1,11 +1,12 @@
 # Composants tiers et mentions légales
 
-Lanterne est un logiciel propriétaire de Pym, distribué sous les termes du
-fichier `LICENSE`. Il s'appuie sur des composants tiers dont les licences
-imposent leurs propres mentions. Ce document doit accompagner **toute**
-distribution du logiciel (il est inclus dans chaque archive de release).
+Lanterne est un logiciel de Pym, distribué sous **licence MIT** (voir le
+fichier `LICENSE` à la racine, repris dans `Cargo.toml`). Il s'appuie sur des
+composants tiers dont les licences imposent leurs propres mentions. Ce
+document doit accompagner **toute** distribution du logiciel (il est inclus
+dans chaque archive de release).
 
-Dernière revue : 2026-07-29 (version 3.4.1).
+Dernière revue : 2026-08-04 (version 3.5.0).
 
 ---
 

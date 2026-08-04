@@ -130,7 +130,17 @@ nettoyer() {
 # HUP inclus : une session SSH coupee (le cas normal d'un test lance a
 # distance sur un Pi) envoie SIGHUP, pas SIGTERM — sans lui, la mire de test
 # restait allumee sur le videoprojecteur.
-trap nettoyer EXIT INT TERM HUP
+#
+# DEUX traps, et pas un seul : un gestionnaire de signal qui ne se termine
+# pas par `exit` rend la main au script, qui REPREND ou il en etait. Avec
+# `trap nettoyer EXIT INT TERM HUP`, un Ctrl+C eteignait la charge et
+# restaurait le mapping... puis la boucle continuait a interroger le node
+# pendant les heures restantes, en empilant des lignes dans le meme CSV --
+# et `nettoyer` repassait une seconde fois a la sortie. Reproduit puis
+# verifie corrige sur un cas minimal : sortie immediate, nettoyage une
+# seule fois, code 130.
+trap nettoyer EXIT
+trap 'nettoyer; trap - EXIT; exit 130' INT TERM HUP
 
 # Une commande par tour, au rythme demande — comme une console OSC qui
 # pilote le spectacle en continu. La version precedente n'envoyait que

@@ -24,9 +24,12 @@ player = true      # lecture : GStreamer si le binaire l'embarque (feature `gstr
 http = true        # web UI + API REST/WebSocket
 osc = true         # contrôle OSC (Chataigne…)
 midi = false       # contrôle MIDI (bindings ci-dessous)
-sequencer = false  # phase 3
-sync = false       # phase 2 (multi-device)
-ndi = false        # jamais dans le core (plugin optionnel)
+# Il n'y a PAS de clé ici pour le séquenceur, la synchro ou le NDI :
+#   séquenceur → toujours démarré, se coupe dans l'onglet « Fonctions » ;
+#   synchro    → section [sync] ci-dessous (c'est `role` qui décide) ;
+#   sortie NDI → section [ndi] ci-dessous (`sortie = true`).
+# Ces trois clés ont existé sans jamais être lues : les écrire ne faisait
+# rien du tout. Elles sont désormais ignorées si elles traînent encore.
 
 [ports]
 bind = "0.0.0.0"   # "127.0.0.1" pour restreindre à la machine locale

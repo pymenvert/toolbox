@@ -82,7 +82,19 @@ binaire compilé avec la feature `gstreamer` **et** le runtime GStreamer :
 Sans GStreamer sur la machine, ce binaire se replie automatiquement sur le
 backend simulé (visible dans les logs) : rien ne casse.
 
-## 7. Ce qui arrive ensuite
+## 7. Déjà livré (ne pas refaire à la main)
 
-- Image carte SD prête à flasher (pi-gen) — phase 4.
-- Mise à jour OTA, mot de passe UI, token API — phase 4.
+- **Mise à jour OTA** : onglet Système → Mise à jour. Le binaire précédent
+  est conservé, et un bouton « Revenir à la version précédente » permet de
+  faire marche arrière. Inutile de refaire un `scp` + `systemctl restart`.
+- **Mot de passe de l'UI** : `[security] password` dans `node.toml`
+  (protège la web UI et l'API ; l'OSC en UDP reste ouvert).
+- **Jeton de parc** : `[security] fleet_token`, à mettre IDENTIQUE sur tous
+  les nodes, pour les échanges de médias de machine à machine. Le mot de
+  passe de l'UI n'est jamais transmis à une machine annoncée sur le réseau.
+- **Installateurs à profils** : `install.sh` (Linux/Pi, avec détection du
+  modèle de Pi) et `installer-windows.ps1`.
+
+## 8. Ce qui arrive ensuite
+
+- Image carte SD prête à flasher (pi-gen).

@@ -30,6 +30,13 @@ impl Default for Resolution {
 }
 
 /// Modules activables — c'est ce qui rend l'installeur "à la carte" possible.
+///
+/// Uniquement les quatre interrupteurs RÉELLEMENT lus au démarrage. Il y en a
+/// eu trois autres (`sequencer`, `sync`, `ndi`) que rien ne consultait : les
+/// mettre à `true` n'allumait rien, les laisser à `false` n'éteignait rien.
+/// Le séquenceur démarre toujours (il s'arrête depuis l'onglet Fonctions), la
+/// synchro dépend de `[sync] role`, et la sortie NDI de `[ndi] sortie`. Une
+/// clé restée dans un ancien `node.toml` est ignorée sans bruit.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Modules {
@@ -37,9 +44,6 @@ pub struct Modules {
     pub osc: bool,
     pub midi: bool,
     pub http: bool,
-    pub sequencer: bool,
-    pub sync: bool,
-    pub ndi: bool,
 }
 
 impl Default for Modules {
@@ -49,9 +53,6 @@ impl Default for Modules {
             osc: true,
             midi: false,
             http: true,
-            sequencer: false,
-            sync: false,
-            ndi: false,
         }
     }
 }
@@ -538,7 +539,25 @@ mod tests {
         assert_eq!(cfg, NodeConfig::default());
         assert_eq!(cfg.ports.http, 8080);
         assert!(cfg.modules.player);
-        assert!(!cfg.modules.ndi);
+        assert!(!cfg.modules.midi);
+    }
+
+    /// Les clés `[modules]` supprimées (sequencer, sync, ndi) ne doivent pas
+    /// faire échouer le chargement d'un `node.toml` écrit par une version
+    /// précédente : sinon une mise à jour perdrait TOUTE la configuration.
+    #[test]
+    fn anciennes_cles_modules_ignorees_sans_erreur() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let chemin = dir.path().join("node.toml");
+        std::fs::write(
+            &chemin,
+            "[modules]\nplayer = true\nsequencer = true\nsync = true\nndi = true\n\n\
+             [ports]\nhttp = 9999\n",
+        )
+        .expect("écriture");
+        let cfg = NodeConfig::load(&chemin).expect("un node.toml ancien doit rester lisible");
+        assert!(cfg.modules.player);
+        assert_eq!(cfg.ports.http, 9999);
     }
 
     #[test]

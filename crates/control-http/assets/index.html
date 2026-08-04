@@ -980,7 +980,11 @@ let position = null, duration = null;
 function renderFps(fps) {
   const b = $("#fpsBadge");
   const playing = state && state.player.transport === "playing";
-  if (!playing || fps === undefined) { b.style.display = "none"; return; }
+  // null = il n'y a pas de fenetre pour compter (mode KMS, binaire sans la
+  // feature `render`). Afficher « 0 img/s » ferait croire a une sortie morte
+  // alors que la projection peut etre parfaite : on masque le badge, comme
+  // pour une valeur absente.
+  if (!playing || fps === undefined || fps === null) { b.style.display = "none"; return; }
   b.style.display = "";
   b.textContent = Math.round(fps) + " img/s";
 }
@@ -1102,7 +1106,11 @@ $$("nav a").forEach(a => a.addEventListener("click", () => {
   const p = a.dataset.page;
   $$(".page").forEach(s => s.classList.toggle("visible", s.id === "page-" + p));
   $("#pagetitle").textContent = pageTitles[p];
-  if (p === "mapping") { sizeStage(); renderBlending(); renderMasques(); renderMesh(); }
+  // loadOutputs() : la liste des ecrans n'etait lue qu'au chargement de la
+  // page. Une tablette de regie restee ouverte toute la journee affichait
+  // encore « aucun ecran detecte » apres le branchement du videoprojecteur,
+  // alors que le node l'avait bien detecte a chaud.
+  if (p === "mapping") { sizeStage(); renderBlending(); renderMasques(); renderMesh(); loadOutputs(); }
   if (p === "features") loadFeatures();
   if (p === "lights") loadDmx();
   if (p === "cues") { loadCues(); loadMedia(); loadPresets(); }
@@ -2943,6 +2951,9 @@ function renderSante(sys) {
   } catch (e) { /* localStorage indisponible (navigation privée) : accueil masqué */ }
   // Un fichier copié directement dans media/ apparaît sans recharger la page.
   setInterval(() => { if (!document.hidden && $("#page-media").classList.contains("visible")) { loadMedia(); loadParc(); } }, 5000);
+  // Ecrans branches/debranches a chaud : le node republie la liste, encore
+  // faut-il la relire. Seulement quand la carte « Sortie » est visible.
+  setInterval(() => { if (!document.hidden && $("#page-mapping").classList.contains("visible")) loadOutputs(); }, 5000);
   sizeStage();
   paintSeek();
 })();

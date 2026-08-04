@@ -13,9 +13,9 @@ préfixe historique `toolbox-` (aucun chemin ni contrat ne change).
 > `Toolbox/docs/` du projet — ce repo ne contient que le code.
 > Liste complète des fonctions : en tête de `docs/manuel.html`.
 
-## État — v3.0.0
+## État — v3.5.0
 
-La chaîne complète est fonctionnelle et testée (160+ tests, CI Linux +
+La chaîne complète est fonctionnelle et testée (250+ tests, CI Linux +
 Windows + check ARM64) : **lecture vidéo réelle** (GStreamer, boucle sans
 coupure), **fenêtre de sortie** avec warp/mires/couleur/effets calculés par
 le **GPU** (wgpu/Vulkan, repli CPU automatique), sources externes (capture,
@@ -54,8 +54,14 @@ calibrage pas à pas, référence OSC/MIDI/config, dépannage.
 
 **Binaires prêts** : page **[Releases](https://github.com/pymenvert/toolbox/releases)**
 (sans compte) — `toolbox-node-windows-x64-gstreamer` (pack complet avec
-vidéo, rien à installer), `toolbox-node-windows-x64` (léger),
-`toolbox-node-linux-x64`, `toolbox-node-raspberrypi-arm64`.
+vidéo, rien à installer : **le seul binaire publié qui lit des vidéos**),
+`toolbox-node-windows-x64` et `toolbox-node-linux-x64` (mires, mapping,
+calibrage et OSC/MIDI, sans lecture vidéo), `toolbox-node-raspberrypi-arm64`
+(**pilotage seul — cette archive ne projette rien** : compilée sans fenêtre
+de sortie, sans MIDI et sans GStreamer).
+
+Pour lire des vidéos sur Linux ou projeter depuis un Pi, il faut compiler sur
+place avec `--features gstreamer` — voir le manuel.
 
 ```bash
 # ou compilation locale (Linux : sudo apt install libasound2-dev)

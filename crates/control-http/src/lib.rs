@@ -787,7 +787,20 @@ async fn system_stats(State(app): State<AppState>) -> Json<serde_json::Value> {
             serde_json::Value::Null
         };
         objet.insert("rendu".into(), rendu);
-        objet.insert("fps".into(), serde_json::json!(*app.output.fps.borrow()));
+        // `fps` suit EXACTEMENT la meme regle que `rendu`. Il restait un zero
+        // dur quand la mesure n'existe pas (mode KMS, ou binaire sans la
+        // feature `render` -- c'est-a-dire l'artefact officiel ARM64) : rien
+        // ne peuple le compteur, mais 0 img/s se lit « sortie morte ». Un run
+        // d'endurance parfaitement sain sur un Pi ressortait ainsi « sortie
+        // sans aucune image : 100 % du run ».
+        objet.insert(
+            "fps".into(),
+            if app.output.mesure_disponible {
+                serde_json::json!(*app.output.fps.borrow())
+            } else {
+                serde_json::Value::Null
+            },
+        );
     }
     Json(json)
 }
@@ -1627,7 +1640,20 @@ async fn diagnostic_zip(State(app): State<AppState>) -> Result<Response, ApiErro
             serde_json::Value::Null
         };
         objet.insert("rendu".into(), rendu);
-        objet.insert("fps".into(), serde_json::json!(*app.output.fps.borrow()));
+        // `fps` suit EXACTEMENT la meme regle que `rendu`. Il restait un zero
+        // dur quand la mesure n'existe pas (mode KMS, ou binaire sans la
+        // feature `render` -- c'est-a-dire l'artefact officiel ARM64) : rien
+        // ne peuple le compteur, mais 0 img/s se lit « sortie morte ». Un run
+        // d'endurance parfaitement sain sur un Pi ressortait ainsi « sortie
+        // sans aucune image : 100 % du run ».
+        objet.insert(
+            "fps".into(),
+            if app.output.mesure_disponible {
+                serde_json::json!(*app.output.fps.borrow())
+            } else {
+                serde_json::Value::Null
+            },
+        );
     }
     zip.add("systeme.json", &json(&systeme)?);
     zip.add("sortie.json", &json(&*app.output.settings.borrow())?);
@@ -1847,7 +1873,12 @@ async fn outputs_get(State(app): State<AppState>) -> Json<serde_json::Value> {
     Json(serde_json::json!({
         "monitors": *app.output.monitors.borrow(),
         "settings": *app.output.settings.borrow(),
-        "fps": *app.output.fps.borrow(),
+        // null (et non 0) quand aucune fenetre ne peut alimenter le compteur.
+        "fps": if app.output.mesure_disponible {
+            serde_json::json!(*app.output.fps.borrow())
+        } else {
+            serde_json::Value::Null
+        },
     }))
 }
 
@@ -1935,8 +1966,14 @@ async fn ws_events(mut socket: WebSocket, app: AppState) {
                         "event": "position",
                         "position": p.position,
                         "duration": p.duration,
-                        // Fluidité de la fenêtre de sortie (0 = pas de rendu).
-                        "fps": *app.output.fps.borrow(),
+                        // Fluidite de la fenetre de sortie : 0 = la fenetre
+                        // existe mais ne dessine pas ; null = il n'y a pas de
+                        // fenetre du tout (mode KMS, binaire sans `render`).
+                        "fps": if app.output.mesure_disponible {
+                            serde_json::json!(*app.output.fps.borrow())
+                        } else {
+                            serde_json::Value::Null
+                        },
                     });
                     if socket.send(Message::Text(message.to_string().into())).await.is_err() {
                         break;
