@@ -336,7 +336,17 @@ pub fn router(app: AppState) -> Router {
         .route("/api/chataigne", get(chataigne_get))
         .route("/api/chataigne/lancer", post(chataigne_lancer))
         .route("/api/luts", get(luts_list))
-        .route("/api/luts/{name}", put(lut_upload).delete(lut_delete))
+        // axum plafonne le corps des extracteurs (`Bytes`) à 2 Mo par défaut :
+        // sans ce relèvement, le garde « 64 Mo max » de lut_upload était du
+        // code mort et une LUT 64 points (~7 Mo, taille courante d'un pack
+        // d'étalonnage) était refusée par un 413 sans corps JSON — l'UI
+        // n'affichait alors qu'une erreur générique.
+        .route(
+            "/api/luts/{name}",
+            put(lut_upload)
+                .delete(lut_delete)
+                .layer(axum::extract::DefaultBodyLimit::max(64 * 1024 * 1024)),
+        )
         .route("/api/reglages", get(reglages_get).post(reglages_set))
         .route("/api/ndi/sources", get(ndi_sources))
         .route("/api/preview.png", get(preview_png))
@@ -2384,6 +2394,36 @@ mod tests {
                 .expect("resp");
             assert_eq!(response.status(), expected, "uri: {uri}");
         }
+    }
+
+    /// Une LUT d'étalonnage réaliste (64 points ≈ 7 Mo) doit atteindre le
+    /// parseur. Sans `DefaultBodyLimit` relevé sur la route, axum coupait à
+    /// 2 Mo et répondait 413 SANS corps JSON : le garde « 64 Mo max » de
+    /// `lut_upload` ne servait à rien et l'UI n'affichait qu'une erreur
+    /// générique. On envoie 3 Mo de contenu invalide : le refus doit venir du
+    /// parseur (400), pas du cadre (413).
+    #[tokio::test]
+    async fn depot_de_lut_depasse_la_limite_de_corps_par_defaut() {
+        let bed = testbed();
+        let gros = "x".repeat(3 * 1024 * 1024);
+        let response = bed
+            .router
+            .clone()
+            .oneshot(
+                HttpRequest::put("/api/luts/etalon.cube")
+                    .header("origin", "http://192.168.1.50:8080")
+                    .header("host", "192.168.1.50:8080")
+                    .body(Body::from(gros))
+                    .expect("requête"),
+            )
+            .await
+            .expect("réponse");
+        assert_ne!(
+            response.status(),
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "le corps a été coupé par axum avant d'atteindre lut_upload"
+        );
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

@@ -1842,9 +1842,12 @@ function renderParcMedia() {
     sel.appendChild(o);
     return;
   }
-  mediaList.forEach(m => {
+  // /api/media renvoie des MediaInfo { path, bytes } — jamais `name`.
+  // Et un envoi de parc exige un nom PLAT (validate_upload_name refuse les
+  // sous-dossiers) : inutile de proposer ce que le serveur rejettera.
+  mediaList.filter(m => !m.path.includes("/")).forEach(m => {
     const o = document.createElement("option");
-    o.value = o.textContent = m.name;
+    o.value = o.textContent = m.path;
     sel.appendChild(o);
   });
   if ([...sel.options].some(o => o.value === old)) sel.value = old;
@@ -1870,7 +1873,7 @@ function renderParcNodes() {
       try {
         const liste = await api("/api/fleet/media?url=" + encodeURIComponent(n.url)) || [];
         detail.textContent = liste.length
-          ? liste.map(m => m.name).join("  ·  ")
+          ? liste.map(m => m.path).join("  ·  ")
           : "(médiathèque vide)";
       } catch (e) { detail.textContent = "Node injoignable."; }
     });
@@ -2229,7 +2232,10 @@ async function majChampsAction() {
   $("#cueActDmx").style.display = (type === "dmxscene" || type === "dmxchaser") ? "block" : "none";
   if (type === "load") {
     const sel = $("#cueActMedia"); sel.innerHTML = "";
-    mediaList.forEach(m => { const o = document.createElement("option"); o.value = o.textContent = m.name; sel.appendChild(o); });
+    // `m.path` : MediaInfo n'a pas de champ `name`. Avec m.name, la cue
+    // enregistrait « load undefined » — accepté sans broncher, et découvert
+    // le soir venu, à l'heure du spectacle.
+    mediaList.forEach(m => { const o = document.createElement("option"); o.value = o.textContent = m.path; sel.appendChild(o); });
   }
   if (type === "preset" || type === "fade") {
     const sel = $("#cueActPreset"); sel.innerHTML = "";
