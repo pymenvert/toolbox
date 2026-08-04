@@ -38,6 +38,19 @@ done
 say()  { printf '\033[1;36m>>\033[0m %s\n' "$*"; }
 fail() { printf '\033[1;31m!!\033[0m %s\n' "$*" >&2; exit 1; }
 
+# systemd EXIGE un chemin absolu dans WorkingDirectory= et ExecStart=. Or
+# mkdir, install et chown acceptent parfaitement un préfixe relatif : sans
+# cette normalisation, `--prefix lanterne` déroulait toute l'installation
+# sans le moindre message, et seul `systemctl start` échouait ensuite, sur
+# une unité que systemd refusait de charger.
+case "$PREFIX" in
+    /*) ;;
+    *)  PREFIX="$(mkdir -p "$PREFIX" 2> /dev/null; cd "$PREFIX" 2> /dev/null && pwd)" \
+            || fail "préfixe inutilisable : $PREFIX"
+        [ -n "$PREFIX" ] || fail "impossible de rendre le préfixe absolu"
+        say "Préfixe relatif converti en chemin absolu : $PREFIX" ;;
+esac
+
 # Échappe une valeur pour le REMPLACEMENT d'un sed dont le délimiteur est
 # « | » : & (rappel du motif), | (délimiteur) et \ doivent être protégés,
 # sinon un préfixe contenant l'un d'eux produirait une unité systemd cassée.
@@ -197,7 +210,7 @@ if { [ -d "$PREFIX" ] && [ ! -w "$PREFIX" ]; } || { [ ! -d "$PREFIX" ] && [ ! -w
     say "Le préfixe demande les droits administrateur (sudo)."
 fi
 
-run mkdir -p "$PREFIX" "$PREFIX/media" "$PREFIX/presets" "$PREFIX/logs" "$PREFIX/shaders"
+run mkdir -p "$PREFIX" "$PREFIX/media" "$PREFIX/presets" "$PREFIX/logs" "$PREFIX/luts"
 run install -m 755 "$BINARY" "$PREFIX/toolbox-node"
 
 TMP_CONF="$(mktemp)"
@@ -267,7 +280,18 @@ if command -v systemctl > /dev/null 2>&1; then
             | sudo tee /etc/systemd/system/toolbox-node.service > /dev/null
         sudo systemctl daemon-reload
         sudo systemctl enable toolbox-node.service
-        say "Service installé. Démarrage : sudo systemctl start toolbox-node"
+        # Réinstallation par-dessus un node qui tourne : `install` a remplacé
+        # le binaire, mais le processus en cours exécute toujours l'ANCIEN
+        # code (l'inode d'origine survit tant qu'il est ouvert). Sans ce
+        # redémarrage, le script concluait « Installation terminée » et le
+        # conseil `systemctl start` ne faisait rien — le service étant déjà
+        # actif. La mise à jour semblait faite et ne l'était pas.
+        if sudo systemctl is-active --quiet toolbox-node.service; then
+            say "Service déjà actif : redémarrage sur le nouveau binaire."
+            sudo systemctl restart toolbox-node.service
+        else
+            say "Service installé. Démarrage : sudo systemctl start toolbox-node"
+        fi
         say "Logs : journalctl -u toolbox-node -f  (ou la page Logs de la web UI)"
     fi
 fi

@@ -25,10 +25,16 @@ jobs:
             **Quel fichier télécharger ?**
             - Windows : `toolbox-node-windows-x64-gstreamer.zip` — pack
               complet avec la vidéo, dézipper et lancer, rien à installer.
+              **C'est le seul binaire publié qui lit des vidéos.**
             - Windows sans vidéo (léger) : `toolbox-node-windows-x64.zip`.
-            - Ubuntu/Debian : `toolbox-node-linux-x64.tar.gz`
-              (+ paquets gstreamer1.0-*, voir le manuel).
-            - Raspberry Pi 4/5 : `toolbox-node-raspberrypi-arm64.tar.gz`.
+            - Ubuntu/Debian : `toolbox-node-linux-x64.tar.gz` — mires,
+              mapping, calibrage et OSC/MIDI, **sans lecture vidéo** (les
+              paquets `gstreamer1.0-*` n'y changent rien : pour lire des
+              vidéos, recompiler avec `--features gstreamer`).
+            - Raspberry Pi 4/5 : `toolbox-node-raspberrypi-arm64.tar.gz` —
+              **pilotage seul, cette archive ne projette rien** (compilée
+              sans fenêtre de sortie, sans MIDI et sans GStreamer). Pour
+              projeter depuis un Pi, compiler sur le Pi — voir le manuel.
 
             Manuel : `docs/manuel.html` du dépôt. Journal des changements :
             `CHANGELOG.md`.

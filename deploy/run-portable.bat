@@ -5,6 +5,6 @@ cd /d "%~dp0"
 if not exist media mkdir media
 if not exist presets mkdir presets
 if not exist logs mkdir logs
-if not exist shaders mkdir shaders
+if not exist luts mkdir luts
 toolbox-node.exe %*
 pause

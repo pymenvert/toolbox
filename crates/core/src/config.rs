@@ -430,12 +430,18 @@ impl Default for Limits {
 }
 
 /// Chemins des données. Relatifs au dossier de travail → portable par défaut.
+///
+/// Pas de champ `shaders` : les shaders sont embarqués dans le binaire par
+/// `include_str!`. Le réglage a existé, n'a jamais été lu par personne, et
+/// laissait croire qu'on pouvait déposer des shaders dans un dossier. Un
+/// `shaders = …` resté dans un ancien `node.toml` est simplement ignoré
+/// (aucun `deny_unknown_fields` ici). Le dossier `luts/`, lui, est bien réel
+/// mais vit toujours à côté du binaire — il n'est pas déplaçable.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Paths {
     pub media: PathBuf,
     pub presets: PathBuf,
-    pub shaders: PathBuf,
     pub logs: PathBuf,
 }
 
@@ -444,7 +450,6 @@ impl Default for Paths {
         Self {
             media: PathBuf::from("media"),
             presets: PathBuf::from("presets"),
-            shaders: PathBuf::from("shaders"),
             logs: PathBuf::from("logs"),
         }
     }

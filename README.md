@@ -98,21 +98,37 @@ tests) ; événements temps réel sur `GET /ws`.
 
 ```
 crates/core/          bus de commandes, état validé, presets, médiathèque,
+                      séquenceur, fondus, interrupteurs de fonctions,
                       ring buffer de logs, config           [fait, testé]
 crates/engine/        homographie (validée vs référence Python), paramètres
-                      de rendu (rotation/flip/crop/couleur), player + backend
-                      simulé ; GStreamer à venir            [fait, testé]
-crates/control-http/  REST + WebSocket + web UI embarquée + monitoring
+                      de rendu (rotation/flip/crop/couleur), LUT .cube,
+                      compositeur, player + backend simulé  [fait, testé]
+crates/render/        fenêtre de sortie (winit) : rendu GPU wgpu avec repli
+                      automatique sur le peintre CPU        [fait, testé]
+crates/gst/           backend vidéo GStreamer (playbin3), sortie RTSP,
+                      sortie DRM/KMS — feature `gstreamer`  [fait, testé]
+crates/artnet/        console lumières Art-Net (faders, scènes, chasers)
                                                             [fait, testé]
+crates/ndi/           entrée et sortie NDI (SDK chargé à l'exécution)
+                                                            [fait, testé]
+crates/control-http/  REST + WebSocket + web UI embarquée + OSCQuery +
+                      monitoring + mise à jour OTA          [fait, testé]
 crates/control-osc/   OSC UDP (Chataigne)                   [fait, testé]
 crates/control-midi/  notes/CC → commandes (bindings TOML)  [fait, testé*]
 crates/node/          binaire : assemble les modules        [fait]
-deploy/               installeur, systemd, portable         [fait]
+deploy/               installeurs à profils, systemd, portable
+                                                            [fait]
+docs/                 manuel utilisateur, composants tiers  [fait]
 tools/bench/          bench décodage à lancer sur les Pi    [fait]
-webui/                (réservé : UI Svelte phase suivante — l'UI V1 vanilla
-                      est embarquée dans control-http)
+tools/endurance/      harnais d'endurance (collecteurs + dépouillement)
+                                                            [fait]
+tools/mapping/        référence Python de l'homographie     [fait]
 ```
 \* la traduction MIDI est testée ; l'ouverture du port reste à valider sur matériel.
+
+L'UI web est un **fichier unique** embarqué dans le binaire
+(`crates/control-http/assets/index.html`) — pas de build front, pas de
+dossier `webui/`.
 
 ## Développement
 
