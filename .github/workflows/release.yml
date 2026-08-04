@@ -47,7 +47,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Dépendances système (ALSA)
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+        run: |
+          set -o pipefail
+          # Les images GitHub embarquent des depots tiers (packages.microsoft.com)
+          # dont la signature expire : `apt-get update` sort alors en 100 et
+          # casse un job qui n'a besoin que du depot Ubuntu.
+          sudo rm -f /etc/apt/sources.list.d/microsoft*.list /etc/apt/sources.list.d/microsoft*.sources
+          sudo apt-get update 2>&1 | tail -1
+          sudo apt-get install -y libasound2-dev 2>&1 | tail -1
       - name: Build + archive
         run: |
           cargo build --release -p toolbox-node
@@ -137,7 +144,14 @@ jobs:
           targets: aarch64-unknown-linux-gnu
       - uses: Swatinem/rust-cache@v2
       - name: Linker croisé ARM64
-        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+        run: |
+          set -o pipefail
+          # Les images GitHub embarquent des depots tiers (packages.microsoft.com)
+          # dont la signature expire : `apt-get update` sort alors en 100 et
+          # casse un job qui n'a besoin que du depot Ubuntu.
+          sudo rm -f /etc/apt/sources.list.d/microsoft*.list /etc/apt/sources.list.d/microsoft*.sources
+          sudo apt-get update 2>&1 | tail -1
+          sudo apt-get install -y gcc-aarch64-linux-gnu 2>&1 | tail -1
       - name: Build + archive (sans MIDI/fenêtre — voir install.sh pour le Pi)
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
