@@ -640,6 +640,28 @@ mod tests {
         .is_ok());
     }
 
+    /// Attend qu'une condition sur l'état publié devienne vraie, ou abandonne.
+    ///
+    /// Les tests de ce module dormaient une durée FIXE, calculée avec une
+    /// marge de quelques dizaines de ms sur l'échéance réelle. Sur un runner
+    /// Windows chargé — où chaque enregistrement de cue passe par un fsync de
+    /// sequences.json — la marge est parfois dépassée, et deux tests
+    /// différents ont échoué tour à tour sans qu'aucun code soit en cause.
+    /// On attend donc l'événement au lieu de le parier ; la limite reste
+    /// large, et un vrai défaut la dépasse de toute façon.
+    async fn attendre<F>(etat: &watch::Receiver<EtatSequenceur>, mut pret: F)
+    where
+        F: FnMut(&EtatSequenceur) -> bool,
+    {
+        let limite = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::time::Instant::now() < limite {
+            if pret(&etat.borrow()) {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    }
+
     /// Supprimer la cue A pendant que B(après) attend ne doit PAS faire
     /// jouer C à la place : l'enchaînement suit le NOM, pas l'index.
     #[tokio::test]
@@ -695,12 +717,7 @@ mod tests {
         // ne soit plus « A » : A est la cue lancée à la main, elle devient
         // `derniere` immédiatement. Attendre simplement « une cue a joué »
         // sortirait de la boucle sur A, avant même l'enchaînement.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while etat_rx.borrow().derniere.as_deref() == Some("A")
-            && std::time::Instant::now() < deadline
-        {
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
+        attendre(&etat_rx, |e| e.derniere.as_deref() != Some("A")).await;
         // B (0.5) doit avoir joué, PAS C (0.9).
         assert_eq!(
             etat_rx.borrow().derniere.as_deref(),
@@ -834,7 +851,7 @@ mod tests {
             .expect("go");
 
         // La cue « un » est jouée tout de suite…
-        tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+        attendre(&etat_rx, |e| e.derniere.as_deref() == Some("un")).await;
         assert!((handle.snapshot().player.volume - 0.25).abs() < 1e-6);
         assert_eq!(
             etat_rx.borrow().en_attente.as_ref().map(|(n, _)| n.clone()),
@@ -842,18 +859,29 @@ mod tests {
             "l'enchaînement doit être annoncé"
         );
         // … et « deux » s'enchaîne ~300 ms plus tard.
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        attendre(&etat_rx, |e| e.derniere.as_deref() == Some("deux")).await;
         assert!((handle.snapshot().player.volume - 0.75).abs() < 1e-6);
         assert_eq!(etat_rx.borrow().derniere.as_deref(), Some("deux"));
 
-        // Stop annule un enchaînement en attente.
+        // Stop annule un enchaînement en attente. Ici on affirme qu'il ne se
+        // passe RIEN : une attente ne peut pas remplacer le délai, mais elle
+        // peut garantir l'état de DÉPART. Dormir 100 ms en espérant que
+        // l'enchaînement soit armé, c'était risquer d'envoyer Stop avant même
+        // qu'il y ait quelque chose à annuler — le test aurait alors réussi
+        // sans rien prouver.
         cmd_tx
             .send(CommandeSequenceur::Go { nom: "un".into() })
             .await
             .expect("re-go");
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        attendre(&etat_rx, |e| e.en_attente.is_some()).await;
+        assert!(
+            etat_rx.borrow().en_attente.is_some(),
+            "l'enchaînement doit être armé AVANT d'être annulé, sinon le test ne prouve rien"
+        );
         cmd_tx.send(CommandeSequenceur::Stop).await.expect("stop");
-        tokio::time::sleep(std::time::Duration::from_millis(450)).await;
+        attendre(&etat_rx, |e| e.en_attente.is_none()).await;
+        // Au-delà de l'échéance de « deux » (300 ms) : elle ne doit pas jouer.
+        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
         assert!(
             (handle.snapshot().player.volume - 0.25).abs() < 1e-6,
             "la cue deux ne doit PAS avoir été jouée après Stop"

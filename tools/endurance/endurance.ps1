@@ -66,6 +66,10 @@ function ConvertTo-Nombre($texte) {
 #     pilote le spectacle en continu -- chacune traverse le bus, republie
 #     l'etat et declenche un redessin ;
 #   - un client MJPEG permanent, qui fait tourner le compositeur partage.
+# Etat du client MJPEG, renseigne par Start-Charge et lu par Start-Collecte
+# pour annoncer la charge REELLE.
+$script:MjpegEtat = "sans client MJPEG"
+
 function Start-Charge($base, $cadence) {
     $jobs = @()
     $jobs += Start-Job -ArgumentList $base, $cadence -ScriptBlock {
@@ -125,12 +129,16 @@ function Start-Charge($base, $cadence) {
             $p = Start-Process -FilePath "curl.exe" -PassThru -WindowStyle Hidden `
                 -ArgumentList "-s", "-o", $nul, "$base/flux.mjpg?fps=15"
             $jobs += $p
+            $script:MjpegEtat = "+ client MJPEG"
         } else {
-            Write-Host "  (flux MJPEG indisponible - HTTP $code : charge reduite,"
-            Write-Host "   le compositeur partage n'est pas sollicite)"
+            # Drapeau de portee script : l'annonce de la charge est imprimee
+            # par Start-Collecte, ailleurs. Sans cela, la sonde etait bien
+            # faite mais le message « + client MJPEG » restait inconditionnel
+            # -- le collecteur shell disait la verite, celui-ci non.
+            $script:MjpegEtat = "SANS client MJPEG (HTTP $code) - charge reduite"
         }
     } else {
-        Write-Host "  (curl.exe absent : pas de client MJPEG dans la charge)"
+        $script:MjpegEtat = "SANS client MJPEG (curl.exe absent)"
     }
     return $jobs
 }
@@ -213,7 +221,7 @@ function Start-Collecte {
         if (-not $sansCharge) {
             $sauvegarde = Save-Etat $base
             $charge = Start-Charge $base $cadence
-            Write-Host "Charge : ~$cadence commandes/s + client MJPEG."
+            Write-Host "Charge : ~$cadence commandes/s $script:MjpegEtat."
         }
 
         while ((Get-Date) -lt $fin) {

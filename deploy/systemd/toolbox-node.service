@@ -20,7 +20,8 @@
 # Pour un kiosque en mode fenêtre sur Raspberry Pi OS Desktop, décommenter
 # le bloc ci-dessous ET la ligne graphical.target, après avoir vérifié la
 # session réellement utilisée (X11 ou Wayland) et l'UID du compte :
-#   loginctl show-user @USER@ -p RuntimeMax  →  XDG_RUNTIME_DIR=/run/user/<uid>
+#   loginctl show-user @USER@ -p RuntimePath  →  XDG_RUNTIME_DIR=<valeur>
+#   (ou simplement : id -u @USER@  →  /run/user/<uid>)
 #   echo $DISPLAY / $WAYLAND_DISPLAY dans une session ouverte
 # Non activé par défaut : le passage à graphical.target empêcherait le
 # service de démarrer sur une machine sans bureau (Pi OS Lite), et ces

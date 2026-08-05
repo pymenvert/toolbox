@@ -94,6 +94,28 @@ jobs:
             }
           }
           if ($fautifs.Count -gt 0) { throw "$($fautifs.Count) script(s) PowerShell invalides" }
+      # ET avec Windows PowerShell 5.1 : c'est LUI qu'obtient un double-clic
+      # ou la ligne `powershell -ExecutionPolicy Bypass -File …` imprimee en
+      # tete de l'installateur. Une syntaxe acceptee par pwsh 7 mais inconnue
+      # de 5.1 (l'operateur `??`, par exemple) passerait sinon la CI et
+      # echouerait sur le poste de l'utilisateur.
+      - name: Analyse des scripts PowerShell (Windows PowerShell 5.1)
+        shell: powershell
+        run: |
+          $fautifs = @()
+          Get-ChildItem -Recurse -Filter *.ps1 | ForEach-Object {
+            $erreurs = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              $_.FullName, [ref]$null, [ref]$erreurs) | Out-Null
+            if ($erreurs -and $erreurs.Count -gt 0) {
+              $fautifs += $_.FullName
+              Write-Host "== $($_.FullName)"
+              $erreurs | ForEach-Object { Write-Host "   $($_.Extent.StartLineNumber): $($_.Message)" }
+            } else {
+              Write-Host "ok  $($_.Name)"
+            }
+          }
+          if ($fautifs.Count -gt 0) { throw "$($fautifs.Count) script(s) invalides en PowerShell 5.1" }
       - name: Tests (Windows)
         shell: bash
         run: |

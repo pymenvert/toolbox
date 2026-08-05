@@ -43,11 +43,20 @@ fail() { printf '\033[1;31m!!\033[0m %s\n' "$*" >&2; exit 1; }
 # cette normalisation, `--prefix lanterne` déroulait toute l'installation
 # sans le moindre message, et seul `systemctl start` échouait ensuite, sur
 # une unité que systemd refusait de charger.
+# Un préfixe VIDE ne correspond pas à `/*` : il tomberait dans la conversion,
+# où `cd ""` réussit sans changer de répertoire — l'installation se déroulait
+# alors dans le répertoire courant, sans un mot. Le cas arrive pour de bon :
+# `--prefix "$DEST"` avec DEST oublié dans un script de provisionnement.
+[ -n "$PREFIX" ] || fail "préfixe vide : passez un chemin à --prefix"
 case "$PREFIX" in
     /*) ;;
-    *)  PREFIX="$(mkdir -p "$PREFIX" 2> /dev/null; cd "$PREFIX" 2> /dev/null && pwd)" \
-            || fail "préfixe inutilisable : $PREFIX"
-        [ -n "$PREFIX" ] || fail "impossible de rendre le préfixe absolu"
+    *)  # Simple préfixage par le répertoire courant : on ne CRÉE rien ici
+        # (`mkdir` poserait le dossier avant de savoir sous quelle identité,
+        # et fausserait le chown de fin d'installation) et on n'exige pas que
+        # le parent existe — `mkdir -p`, plus bas, sait le créer, et l'exiger
+        # refuserait `--prefix sous/lanterne`, que l'ancienne version
+        # acceptait.
+        PREFIX="$(pwd)/${PREFIX#./}"
         say "Préfixe relatif converti en chemin absolu : $PREFIX" ;;
 esac
 
@@ -124,8 +133,13 @@ case "$MATERIEL" in
         echo "  Déconseillé : sortie RTSP au-delà de 720p (encodage au CPU)." ;;
     pi3)
         say "Matériel détecté : Raspberry Pi 3 / Zero 2 — VERSION ALLÉGÉE conseillée"
-        echo "  Conseillé   : profil « lecteur » (lecture + mapping), rendu CPU en"
-        echo "                960×540 en sortie sans bureau (KMS), aperçu web coupé."
+        echo "  Conseillé   : profil « lecteur » (lecture + mapping), rendu CPU,"
+        echo "                aperçu web coupé."
+        echo "  À FAIRE À LA MAIN : sur Pi OS Lite (sans bureau), ajouter"
+        echo "                [output] mode = \"kms\" dans node.toml — ce script ne"
+        echo "                l'écrit pas, et le mode KMS exige un binaire compilé"
+        echo "                avec --features gstreamer. C'est là que la résolution"
+        echo "                960×540 des réglages de performance s'applique."
         echo "  Déconseillé : rendu GPU (puce GLES 2.0 trop ancienne), sortie RTSP,"
         echo "                flux MJPEG au-delà de 480p, effets lourds." ;;
     pi_ancien)
@@ -288,7 +302,14 @@ if command -v systemctl > /dev/null 2>&1; then
         # actif. La mise à jour semblait faite et ne l'était pas.
         if sudo systemctl is-active --quiet toolbox-node.service; then
             say "Service déjà actif : redémarrage sur le nouveau binaire."
-            sudo systemctl restart toolbox-node.service
+            # NON fatal : sous `set -e`, un restart refusé (binaire de la
+            # mauvaise architecture, archive tronquée…) tuait le script AVANT
+            # le chown du préfixe — l'installation repartait donc avec des
+            # fichiers appartenant à root, et le node ne pouvait plus rien
+            # enregistrer. Exactement la panne que le chown existe pour éviter.
+            if ! sudo systemctl restart toolbox-node.service; then
+                say "ATTENTION : redémarrage refusé — voir journalctl -u toolbox-node"
+            fi
         else
             say "Service installé. Démarrage : sudo systemctl start toolbox-node"
         fi
