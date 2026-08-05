@@ -421,13 +421,19 @@ impl OutputApp {
     /// la sortie en plein écran avec F11 sur la machine, puis changer d'écran
     /// depuis une tablette, la faisait sortir du plein écran toute seule.
     fn publier_plein_ecran(&mut self, plein: bool) {
-        let Some(nouveaux) = publication_plein_ecran(*self.settings.borrow(), plein) else {
+        if publication_plein_ecran(*self.settings.borrow(), plein).is_none() {
             return;
-        };
-        // Marqué comme appliqué AVANT la publication : l'événement qui nous
-        // reviendra par le relais sera alors reconnu comme notre propre écho.
-        self.applique = Some(nouveaux);
-        self.settings_tx.send_replace(nouveaux);
+        }
+        // `send_modify` et non `send_replace` : la lecture-modification-
+        // écriture est ATOMIQUE sous le verrou du canal. Publier une copie
+        // lue plus tôt écraserait un changement d'écran cible venu de l'UI
+        // entre-temps — F11 sur la machine pendant qu'on change d'écran
+        // depuis la tablette ramènerait la sortie sur l'ancien écran.
+        self.settings_tx.send_modify(|s| s.fullscreen = plein);
+        // Marqué appliqué APRÈS la publication, à partir de la valeur
+        // RÉELLEMENT retenue : l'écho qui nous revient par le relais est
+        // alors reconnu comme le nôtre, et n'est pas rejoué.
+        self.applique = Some(*self.settings.borrow());
     }
 
     fn toggle_fullscreen(&mut self) {
