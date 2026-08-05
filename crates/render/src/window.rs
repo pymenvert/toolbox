@@ -193,13 +193,21 @@ fn run_event_loop(config: WindowConfig, channels: OutputChannels) {
 ///
 /// Séparé de la fenêtre pour être testable : le reste demande un event loop
 /// winit, donc un serveur graphique.
-fn publication_plein_ecran(courant: OutputSettings, plein: bool) -> Option<OutputSettings> {
-    if courant.fullscreen == plein {
+fn publication_plein_ecran(
+    publie: OutputSettings,
+    applique: Option<OutputSettings>,
+    plein: bool,
+) -> Option<OutputSettings> {
+    if publie.fullscreen == plein {
         return None;
     }
+    // La base est ce que la FENÊTRE a appliqué, pas le contenu du canal : un
+    // réglage de l'UI peut y être sans que l'event loop l'ait traité, et le
+    // recopier le ferait passer pour notre propre écho — donc ignorer à
+    // jamais l'écran cible choisi depuis la tablette.
     Some(OutputSettings {
         fullscreen: plein,
-        ..courant
+        ..applique.unwrap_or(publie)
     })
 }
 
@@ -421,9 +429,10 @@ impl OutputApp {
     /// la sortie en plein écran avec F11 sur la machine, puis changer d'écran
     /// depuis une tablette, la faisait sortir du plein écran toute seule.
     fn publier_plein_ecran(&mut self, plein: bool) {
-        if publication_plein_ecran(*self.settings.borrow(), plein).is_none() {
+        let Some(cible) = publication_plein_ecran(*self.settings.borrow(), self.applique, plein)
+        else {
             return;
-        }
+        };
         // `send_modify` et non `send_replace` : la lecture-modification-
         // écriture est ATOMIQUE sous le verrou du canal. Publier une copie
         // lue plus tôt écraserait un changement d'écran cible venu de l'UI
@@ -435,8 +444,6 @@ impl OutputApp {
         // frame). Recopier le canal ferait passer ce réglage-là pour notre
         // propre écho, et il serait ignoré pour toujours — l'écran cible
         // choisi depuis la tablette ne serait jamais appliqué.
-        let mut cible = self.applique.unwrap_or(*self.settings.borrow());
-        cible.fullscreen = plein;
         self.settings_tx.send_modify(|s| s.fullscreen = plein);
         self.applique = Some(cible);
     }
@@ -998,22 +1005,43 @@ mod tests {
             fullscreen: false,
         };
         // F11 depuis l'état fenêtré : on publie, en gardant l'écran cible.
-        let publie = publication_plein_ecran(fenetre, true).expect("doit publier");
+        let publie = publication_plein_ecran(fenetre, None, true).expect("doit publier");
         assert!(publie.fullscreen);
         assert_eq!(publie.monitor, 1, "l'écran cible ne doit pas bouger");
 
         // Échap depuis le plein écran : on publie le retour en fenêtré.
-        let publie = publication_plein_ecran(publie, false).expect("doit publier");
+        let publie = publication_plein_ecran(publie, None, false).expect("doit publier");
         assert!(!publie.fullscreen);
 
         // Déjà dans l'état demandé : rien à publier (sinon on réveille
         // l'event loop pour rien, et on relance un cycle d'écho).
-        assert_eq!(publication_plein_ecran(fenetre, false), None);
+        assert_eq!(publication_plein_ecran(fenetre, None, false), None);
         let plein = OutputSettings {
             monitor: 0,
             fullscreen: true,
         };
-        assert_eq!(publication_plein_ecran(plein, true), None);
+        assert_eq!(publication_plein_ecran(plein, None, true), None);
+
+        // LE CAS QUI COMPTE, et que la production retient vraiment : un
+        // réglage de l'UI est déjà dans le canal (écran 1) mais la fenêtre
+        // n'a pas encore eu le temps de l'appliquer (elle en est à l'écran
+        // 0). Un F11 ne doit PAS s'attribuer l'écran 1, sinon le changement
+        // venu de la tablette passerait pour notre écho et serait ignoré.
+        let en_attente = OutputSettings {
+            monitor: 1,
+            fullscreen: false,
+        };
+        let deja_applique = OutputSettings {
+            monitor: 0,
+            fullscreen: false,
+        };
+        let retenu =
+            publication_plein_ecran(en_attente, Some(deja_applique), true).expect("doit publier");
+        assert!(retenu.fullscreen);
+        assert_eq!(
+            retenu.monitor, 0,
+            "le marqueur d'écho part de ce que la FENÊTRE a appliqué, pas du canal"
+        );
     }
 
     #[test]

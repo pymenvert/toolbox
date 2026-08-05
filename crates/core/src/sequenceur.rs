@@ -145,6 +145,17 @@ where
     Ok(cues)
 }
 
+/// Combien de cues le fichier contenait-il de plus que ce qu'on a relu ?
+/// `None` si le compte est le même (cas nominal) ou si le fichier ne se
+/// laisse pas inspecter — on ne veut surtout pas transformer une lecture
+/// réussie en échec pour un dénombrement.
+fn cues_ecartees(path: &std::path::Path, relues: usize) -> Option<usize> {
+    let octets = std::fs::read(path).ok()?;
+    let brut: serde_json::Value = serde_json::from_slice(&octets).ok()?;
+    let ecrites = brut.get("cues")?.as_array()?.len();
+    ecrites.checked_sub(relues).filter(|n| *n > 0)
+}
+
 /// L'état du séquenceur, publié à l'UI et persisté (sans le transitoire).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct EtatSequenceur {
@@ -162,6 +173,25 @@ pub struct EtatSequenceur {
 impl EtatSequenceur {
     pub fn load(path: &std::path::Path) -> Option<Self> {
         let mut etat: Self = crate::charger_ou_mettre_de_cote(path, "séquences")?;
+        // Une cue écartée par `cues_tolerantes` disparaîtrait DÉFINITIVEMENT
+        // à la première réécriture du fichier. Le filet qui existait avant
+        // (échec de lecture → `sequences.json.corrompu`, tout le fichier
+        // conservé) ne joue plus, puisqu'on lit désormais avec succès. On
+        // garde donc une copie de l'original AVANT que la conduite ne soit
+        // réenregistrée amputée — le cas visé est le retour arrière après
+        // une mise à jour, où les cues perdues sont parfaitement valides
+        // pour la version qui les a écrites.
+        if let Some(ecartees) = cues_ecartees(path, etat.cues.len()) {
+            let copie = path.with_extension("json.incomplet");
+            match std::fs::copy(path, &copie) {
+                Ok(_) => tracing::warn!(
+                    ecartees,
+                    copie = %copie.display(),
+                    "cues illisibles écartées — conduite d'origine conservée"
+                ),
+                Err(err) => tracing::error!(%err, ecartees, "cues écartées ET copie impossible"),
+            }
+        }
         // Le transitoire ne survit pas au redémarrage.
         etat.en_attente = None;
         etat.derniere = None;
@@ -524,6 +554,56 @@ fn publier(
 mod tests {
     use super::*;
     use crate::Bus;
+
+    /// La cue écartée ne doit pas disparaître SANS TRACE : avant le filet
+    /// tolérant, un fichier illisible partait en `.corrompu` et restait
+    /// récupérable en entier. Maintenant qu'on le lit avec succès, la
+    /// première réécriture l'amputerait définitivement — on en garde donc
+    /// une copie.
+    #[test]
+    fn une_cue_ecartee_laisse_l_original_recuperable() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let chemin = dir.path().join("sequences.json");
+        std::fs::write(
+            &chemin,
+            r#"{"cues":[
+                {"nom":"ouverture","declencheur":{"type":"manuel"},"actions":[]},
+                {"nom":"venue_du_futur","declencheur":{"type":"au_lever_du_jour"},"actions":[]}
+            ]}"#,
+        )
+        .expect("écriture");
+
+        let etat = EtatSequenceur::load(&chemin).expect("la conduite doit se relire");
+        assert_eq!(etat.cues.len(), 1, "la cue incomprise est écartée");
+
+        // L'original est conservé À CÔTÉ, avec ses DEUX cues.
+        let copie = chemin.with_extension("json.incomplet");
+        assert!(copie.exists(), "l'original doit être conservé : {copie:?}");
+        let garde: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&copie).expect("copie")).expect("json");
+        assert_eq!(
+            garde["cues"].as_array().expect("cues").len(),
+            2,
+            "la copie doit porter la conduite ENTIÈRE, cue incomprise incluse"
+        );
+    }
+
+    /// Cas nominal : aucune cue écartée, donc aucune copie parasite.
+    #[test]
+    fn une_conduite_saine_ne_laisse_pas_de_copie() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let chemin = dir.path().join("sequences.json");
+        std::fs::write(
+            &chemin,
+            r#"{"cues":[{"nom":"ouverture","declencheur":{"type":"manuel"},"actions":[]}]}"#,
+        )
+        .expect("écriture");
+        EtatSequenceur::load(&chemin).expect("relecture");
+        assert!(
+            !chemin.with_extension("json.incomplet").exists(),
+            "pas de copie quand rien n'a été écarté"
+        );
+    }
 
     /// Scénario réel : une version plus récente a écrit une conduite avec un
     /// déclencheur qu'on ne connaît pas (retour arrière après mise à jour).

@@ -1852,11 +1852,13 @@ let pendingDeleteMedia = null;
 async function loadMedia() {
   try { mediaList = await api("/api/media") || []; } catch (e) { return; }
   renderMediaTable(); renderPlAdd(); renderParcMedia();
-  // majChampsAction : « Charger un media » est le type d'action par DEFAUT,
-  // et son selecteur n'etait rempli qu'a l'evaluation du script -- donc avant
-  // que la mediatheque n'arrive. En ouvrant l'onglet Sequences, on trouvait
-  // un menu vide et il fallait changer de type puis revenir pour le peupler.
-  majChampsAction();
+  // « Charger un media » est le type d'action par DEFAUT, et son selecteur
+  // n'etait rempli qu'a l'evaluation du script -- donc avant que la
+  // mediatheque n'arrive. En ouvrant l'onglet Sequences on trouvait un menu
+  // vide, et il fallait changer de type puis revenir pour le peupler.
+  // Uniquement si le type courant en depend : majChampsAction lance sinon un
+  // GET /api/dmx, qui n'a rien a faire dans un sondage a 5 s.
+  if ($("#cueActType") && $("#cueActType").value === "load") majChampsAction();
 }
 
 /* ===================== Fichiers du parc ===================== */
@@ -2279,15 +2281,26 @@ async function majChampsAction() {
   $("#cueActPattern").style.display = type === "pattern" ? "block" : "none";
   $("#cueActDmx").style.display = (type === "dmxscene" || type === "dmxchaser") ? "block" : "none";
   if (type === "load") {
-    const sel = $("#cueActMedia"); sel.innerHTML = "";
+    const sel = $("#cueActMedia");
+    // La SELECTION EN COURS est preservee : loadMedia rappelle cette
+    // fonction, et il est sonde toutes les 5 s tant que la page Medias est
+    // visible. Reconstruire sans precaution effacerait en silence le media
+    // choisi par l'operateur, qui enregistrerait alors le premier de la
+    // liste sans s'en apercevoir. Meme precaution que renderParcMedia.
+    const choisi = sel.value;
+    sel.innerHTML = "";
     // `m.path` : MediaInfo n'a pas de champ `name`. Avec m.name, la cue
     // enregistrait « load undefined » — accepté sans broncher, et découvert
     // le soir venu, à l'heure du spectacle.
     mediaList.forEach(m => { const o = document.createElement("option"); o.value = o.textContent = m.path; sel.appendChild(o); });
+    if ([...sel.options].some(o => o.value === choisi)) sel.value = choisi;
   }
   if (type === "preset" || type === "fade") {
-    const sel = $("#cueActPreset"); sel.innerHTML = "";
+    const sel = $("#cueActPreset");
+    const choisi = sel.value;
+    sel.innerHTML = "";
     presets.forEach(n => { const o = document.createElement("option"); o.value = o.textContent = n; sel.appendChild(o); });
+    if ([...sel.options].some(o => o.value === choisi)) sel.value = choisi;
   }
   if (type === "dmxscene" || type === "dmxchaser") {
     const sel = $("#cueActDmx"); sel.innerHTML = "";
