@@ -677,20 +677,25 @@ fn int_arg(args: &[OscType], index: usize) -> Option<i64> {
 
 /// Niveau lumière 0..=255, tolérant comme le reste du parseur.
 ///
-/// Accepte un entier (0..255, la convention de la console) ET un flottant
-/// NON entier interprété comme 0..1 — beaucoup de surfaces OSC envoient
-/// leurs faders normalisés. Un `0.5` deviendrait sinon `0`, c'est-à-dire un
-/// noir au lieu d'un demi-niveau. Hors bornes : refusé, jamais tronqué en
-/// silence.
+/// C'est le TYPE de l'argument qui décide, jamais sa valeur :
+/// - **entier** (Int/Long) = niveau DMX brut, 0..=255 — ce que déclare
+///   OSCQuery, donc ce que Chataigne envoie ;
+/// - **flottant** (Float/Double) = fader NORMALISÉ 0..1 — la convention de
+///   la plupart des surfaces OSC.
+///
+/// La première version distinguait les deux sur `fract() != 0.0`, ce qui
+/// créait une discontinuité absurde exactement là où on l'attend le moins :
+/// `0.999` donnait 255 mais `1.0` donnait **1**, parce que 1.0 n'a pas de
+/// partie fractionnaire et repartait sur le chemin entier. Un fader normalisé
+/// poussé À FOND rendait donc la sortie quasi noire. Vérifié sur le parseur
+/// réel avant correction.
+///
+/// Hors bornes : refusé, jamais tronqué en silence.
 fn octet_arg(args: &[OscType], index: usize) -> Option<u8> {
+    let normalise = |v: f64| (0.0..=1.0).contains(&v).then(|| (v * 255.0).round() as u8);
     match args.get(index)? {
-        // Flottant fractionnaire = fader normalisé 0..1.
-        OscType::Float(f) if f.fract() != 0.0 => {
-            (*f >= 0.0 && *f <= 1.0).then(|| (f * 255.0).round() as u8)
-        }
-        OscType::Double(d) if d.fract() != 0.0 => {
-            (*d >= 0.0 && *d <= 1.0).then(|| (d * 255.0).round() as u8)
-        }
+        OscType::Float(f) => normalise(f64::from(*f)),
+        OscType::Double(d) => normalise(*d),
         _ => u8::try_from(int_arg(args, index)?).ok(),
     }
 }
@@ -1110,12 +1115,26 @@ mod tests {
             Ok(Command::DmxMaster { valeur: 200 })
         );
         // Fader normalisé 0..1 d'une surface OSC : converti, pas tronqué à 0.
+        // C'est le TYPE qui décide, pas la partie fractionnaire : une première
+        // version testait `fract() != 0.0` et rendait 255 pour 0.999 mais 1
+        // pour 1.0 — un fader poussé À FOND donnait une sortie quasi noire.
         assert_eq!(
             map_message("/dmx/master", &[OscType::Float(0.5)]),
             Ok(Command::DmxMaster { valeur: 128 })
         );
+        assert_eq!(
+            map_message("/dmx/master", &[OscType::Float(1.0)]),
+            Ok(Command::DmxMaster { valeur: 255 }),
+            "un fader normalisé à fond doit donner le niveau maximum"
+        );
+        assert_eq!(
+            map_message("/dmx/master", &[OscType::Float(0.0)]),
+            Ok(Command::DmxMaster { valeur: 0 })
+        );
         // Hors bornes : refusé, jamais tronqué en silence.
         assert!(map_message("/dmx/master", &[OscType::Int(300)]).is_err());
+        assert!(map_message("/dmx/master", &[OscType::Int(-1)]).is_err());
+        assert!(map_message("/dmx/master", &[OscType::Float(1.5)]).is_err());
         assert_eq!(
             map_message(
                 "/dmx/fader",
