@@ -15,7 +15,7 @@ préfixe historique `toolbox-` (aucun chemin ni contrat ne change).
 
 ## État — v3.5.0
 
-La chaîne complète est fonctionnelle et testée (250+ tests, CI Linux +
+La chaîne complète est fonctionnelle et testée (261 tests, CI Linux +
 Windows + check ARM64) : **lecture vidéo réelle** (GStreamer, boucle sans
 coupure), **fenêtre de sortie** avec warp/mires/couleur/effets calculés par
 le **GPU** (wgpu/Vulkan, repli CPU automatique), sources externes (capture,

@@ -2,11 +2,20 @@
 
 ## 1. Récupérer un binaire
 
-- **Sans compiler** : GitHub → onglet *Actions* → dernier run vert →
-  *Artifacts* : `toolbox-node-linux-x64`, `toolbox-node-windows-x64`,
-  `toolbox-node-raspberrypi-arm64` (login GitHub requis).
+- **Binaires publics, sans compte GitHub** : page
+  [Releases](https://github.com/pymenvert/toolbox/releases). C'est la voie
+  normale. Attention à ce que contient chaque archive :
+  `toolbox-node-windows-x64-gstreamer` est **le seul binaire publié qui lit
+  des vidéos** ; `…-windows-x64` et `…-linux-x64` font mires, mapping,
+  calibrage et OSC/MIDI sans lecture vidéo ; `…-raspberrypi-arm64` est
+  **du pilotage seul — il ne projette rien** (compilé sans fenêtre de
+  sortie, sans MIDI et sans GStreamer).
+- **Builds de développement** : GitHub → onglet *Actions* → dernier run vert
+  → *Artifacts* (login GitHub requis).
 - **En compilant** : `cargo build --release -p toolbox-node`
-  (Linux : `sudo apt install libasound2-dev` pour le MIDI).
+  (Linux : `sudo apt install libasound2-dev` pour le MIDI). **C'est le seul
+  moyen d'avoir la vidéo sur Linux, et de projeter depuis un Pi** : ajouter
+  `--features gstreamer` (voir §6).
 
 ## 2. Version portable (P1.10)
 

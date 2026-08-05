@@ -125,7 +125,7 @@ case "$MATERIEL" in
     pi3)
         say "Matériel détecté : Raspberry Pi 3 / Zero 2 — VERSION ALLÉGÉE conseillée"
         echo "  Conseillé   : profil « lecteur » (lecture + mapping), rendu CPU en"
-        echo "                960×540, aperçu web coupé (onglet Fonctions)."
+        echo "                960×540 en sortie sans bureau (KMS), aperçu web coupé."
         echo "  Déconseillé : rendu GPU (puce GLES 2.0 trop ancienne), sortie RTSP,"
         echo "                flux MJPEG au-delà de 480p, effets lourds." ;;
     pi_ancien)

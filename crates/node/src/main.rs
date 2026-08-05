@@ -147,13 +147,33 @@ async fn run(mut config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std:
     // Réglages de performance (carte « Réglages » de l'UI, reglages.json) :
     // appliqués par-dessus node.toml, comme sortie.json.
     if let Some(reglages) = toolbox_core::Reglages::load(std::path::Path::new("reglages.json")) {
-        info!(
-            profil = %reglages.profil,
-            largeur = reglages.largeur,
-            hauteur = reglages.hauteur,
-            gpu = reglages.gpu,
-            "réglages de performance appliqués (reglages.json)"
-        );
+        // La résolution de rendu n'est lue QUE par la sortie DRM/KMS. En mode
+        // fenêtre — le défaut, et le seul que pose install.sh — la fenêtre
+        // rend à la taille de sa surface : la valeur est ignorée. L'annoncer
+        // « appliquée » faisait croire à un Pi 3 allégé en 960×540 alors que
+        // rien n'avait changé, et l'installateur promet précisément cela.
+        let resolution_utilisee = config.output.mode == toolbox_core::SortieMode::Kms;
+        if resolution_utilisee {
+            info!(
+                profil = %reglages.profil,
+                largeur = reglages.largeur,
+                hauteur = reglages.hauteur,
+                gpu = reglages.gpu,
+                "réglages de performance appliqués (reglages.json)"
+            );
+        } else {
+            info!(
+                profil = %reglages.profil,
+                gpu = reglages.gpu,
+                "réglages de performance appliqués (reglages.json)"
+            );
+            warn!(
+                largeur = reglages.largeur,
+                hauteur = reglages.hauteur,
+                "résolution de rendu IGNORÉE : elle ne s'applique qu'à la sortie KMS \
+                 ([output] mode = \"kms\") — en mode fenêtre, le rendu suit la taille de la fenêtre"
+            );
+        }
         config.resolution = toolbox_core::Resolution::Fixed {
             width: reglages.largeur,
             height: reglages.hauteur,

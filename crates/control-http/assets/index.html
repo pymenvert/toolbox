@@ -861,10 +861,10 @@
         <button id="regSave" class="primary">Enregistrer</button>
       </div>
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px">
-        <label style="font-size:12px;color:var(--muted)">Largeur
-          <input type="number" id="regLargeur" min="64" max="3840" step="2" style="width:100%" title="R&eacute;solution interne du rendu — plus petit = plus fluide sur les petites machines"></label>
-        <label style="font-size:12px;color:var(--muted)">Hauteur
-          <input type="number" id="regHauteur" min="64" max="2160" step="2" style="width:100%"></label>
+        <label style="font-size:12px;color:var(--muted)">Largeur <span class="muted" style="font-size:10px">(KMS)</span>
+          <input type="number" id="regLargeur" min="64" max="3840" step="2" style="width:100%" title="R&eacute;solution interne du rendu — s'applique UNIQUEMENT à la sortie sans bureau ([output] mode = kms). En mode fen&ecirc;tre, le rendu suit la taille de la fen&ecirc;tre."></label>
+        <label style="font-size:12px;color:var(--muted)">Hauteur <span class="muted" style="font-size:10px">(KMS)</span>
+          <input type="number" id="regHauteur" min="64" max="2160" step="2" style="width:100%" title="Voir Largeur : s'applique uniquement &agrave; la sortie sans bureau (KMS)."></label>
         <label style="font-size:12px;color:var(--muted)">Cadence KMS
           <input type="number" id="regFps" min="1" max="60" style="width:100%" title="Frames par seconde de la sortie sans bureau (Pi Lite)"></label>
       </div>
@@ -873,7 +873,11 @@
       <div id="regConseil" class="hint" style="margin-top:6px"></div>
       <div class="hint">Enregistr&eacute; dans <code>reglages.json</code> et appliqu&eacute; au
       <b>prochain lancement</b> du logiciel (la r&eacute;solution de rendu et le GPU ne
-      se changent pas &agrave; chaud).</div>
+      se changent pas &agrave; chaud).<br>
+      <b>Largeur et hauteur ne servent qu'&agrave; la sortie sans bureau</b>
+      (<code>[output] mode = "kms"</code>, Raspberry Pi OS Lite). En mode
+      fen&ecirc;tre — le d&eacute;faut — le rendu suit la taille de la fen&ecirc;tre et ces
+      deux valeurs sont ignor&eacute;es ; le journal le dit au d&eacute;marrage.</div>
     </div>
     <div class="card" style="margin-top:14px;max-width:720px">
       <h3>Chataigne</h3>
@@ -2711,7 +2715,7 @@ const REG_PROFILS = {
   pi4:  { largeur: 1920, hauteur: 1080, gpu: true,  kms_fps: 30,
           conseil: "Pi 4 : 1080p OK (décodage H.264 matériel jusqu'en 1080p). Si ça rame avec beaucoup d'effets, passe en 1280×720." },
   pi3:  { largeur: 960,  hauteur: 540,  gpu: false, kms_fps: 20,
-          conseil: "Pi 3 (allégé) : lecture + mapping en 960×540, rendu processeur (la puce graphique est trop ancienne pour le rendu GPU). Conseillé : couper l'aperçu et le parc dans Fonctions ; éviter la sortie RTSP." },
+          conseil: "Pi 3 (allégé) : rendu processeur (la puce graphique est trop ancienne pour le rendu GPU), et 960×540 SI la sortie sans bureau (KMS) est utilisée. Conseillé : couper l'aperçu et le parc dans Fonctions ; éviter la sortie RTSP." },
   perso: { conseil: "Personnalisé : règle les champs à la main." },
 };
 function renderReglages(r) {

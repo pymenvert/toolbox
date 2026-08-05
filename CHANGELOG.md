@@ -3,7 +3,65 @@
 Évolutions notables du node Toolbox. Format inspiré de
 [Keep a Changelog](https://keepachangelog.com/fr/), versionnage SemVer.
 
-## [Non publié]
+## [3.5.0] — 2026-08-04
+
+Deux chantiers : la **mesure de performance** (ce qu'on peut enfin voir), et
+un **audit des zones qu'aucune passe précédente n'avait couvertes** — la
+cohérence entre ce que Lanterne *dit* et ce qu'il *fait*.
+
+### L'audit : dire la vérité sur ce que les binaires savent faire
+
+Six dimensions jamais auditées (dérive doc/réalité, complétude des contrats
+de contrôle, cohérence UI ↔ serveur, démarrage à froid, troisième passe sur
+la mesure, mise à jour d'une installation existante), chaque lot repassé par
+une relecture adversariale.
+
+- **Les binaires publiés ne lisent pas tous des vidéos**, et le manuel disait
+  le contraire. `gstreamer` n'est pas une feature par défaut : seuls les packs
+  Windows `…-gstreamer` décodent. L'archive **Raspberry Pi officielle ne
+  projette rien du tout** (compilée `--no-default-features` : ni fenêtre de
+  sortie, ni MIDI, ni GStreamer) alors que le manuel invitait à installer des
+  paquets `gstreamer1.0-*` et à brancher le vidéoprojecteur. Manuel, README et
+  notes de release disent maintenant ce que chaque archive sait faire.
+- **Aucune archive publique ne portait les mentions légales.** `docs/TIERS.md`
+  affirme deux fois être « inclus dans chaque archive de release » ; le
+  correctif de la 3.4.1 n'avait été posé que sur les artefacts de l'onglet
+  Actions. La mention IJG — que la licence de `jpeg-encoder` exige de faire
+  accompagner le logiciel — ne partait avec aucun binaire publié, pas même le
+  pack qui embarque les DLL LGPL et les plugins GPL de GStreamer.
+- **Mettre à jour retirait des fonctions.** L'OTA choisissait l'archive sur la
+  seule plateforme : une machine Windows installée avec le pack vidéo se
+  voyait proposer le binaire léger, et « Mettre à jour » lui retirait la
+  lecture vidéo. Le node déclare désormais ses capacités réelles, et refuse la
+  mise à jour quand aucune archive publiée ne fait autant que lui.
+- **Chataigne ne voyait ni la vitesse, ni la régie.** `/rate`, `/blending`,
+  `/cue/go`, `/dmx/scene` et `/dmx/chaser` fonctionnaient en OSC sans être
+  publiées dans OSCQuery — donc introuvables. `/transport` et `/media` sont
+  désormais déclarés en lecture seule : le node les émettait déjà en retour,
+  sans que rien ne les recueille.
+- **La conduite du spectacle pouvait enregistrer `load "undefined"`.** L'UI
+  lisait un champ inexistant sur les médias : la cue partait sans broncher, et
+  la panne n'apparaissait que le soir, à l'heure dite.
+- **Un Pi qui projette parfaitement était déclaré « sortie morte ».** Le
+  garde-fou « une absence, pas un faux zéro » ne protégeait que la moitié des
+  chiffres : `fps` restait un zéro dur là où `rendu` devenait `null`.
+- Démarrage à froid et mise à jour : préfixe relatif produisant une unité
+  systemd invalide, ancien binaire laissé en marche après réinstallation,
+  `lib\lib` imbriqué à la deuxième installation Windows, trois fichiers d'état
+  qui auraient rejeté le premier champ ajouté, une cue au déclencheur inconnu
+  qui faisait perdre toute la conduite, `Ctrl+C` qui n'arrêtait pas le harnais
+  d'endurance, réglages morts (`[paths] shaders`, trois clés `[modules]`).
+
+### Limites assumées de l'audit
+
+- L'unité systemd **ne projette toujours pas en mode fenêtre** (ni `DISPLAY`,
+  ni ordonnancement graphique). Le fait est désormais écrit dans l'unité, avec
+  le bloc à décommenter — mais l'activer par défaut casserait les
+  installations sans bureau, et cela demande un Pi réel.
+- Le réglage de **résolution de rendu ne s'applique qu'à la sortie KMS** ; en
+  mode fenêtre il est ignoré (voir ci-dessous).
+
+### La mesure de performance : ce qu'on peut enfin voir
 
 Lanterne savait dire combien d'images par seconde il présentait, jamais
 combien de temps chacune coûtait ni combien de mémoire il occupait. Deux
@@ -11,7 +69,7 @@ machines très différentes — l'une à l'aise, l'autre au bord du décrochage 
 affichaient donc le même « 60 img/s ». Cette section comble ce trou, et
 rend compte des deux relectures adversariales qui ont suivi.
 
-### Ce qu'on peut enfin voir
+#### Ce que la mesure apporte
 
 - **Temps par image** (p50 / p95 / pire image) et **images perdues**, mesurés
   sans allocation ni verrou sur le chemin chaud. Le p95 révèle une gêne
@@ -27,7 +85,7 @@ rend compte des deux relectures adversariales qui ont suivi.
 - `tools/endurance/` : deux collecteurs (Windows, Linux/Pi) au même format,
   un dépouillement commun, et une charge continue réaliste.
 
-### Ce que les relectures ont corrigé
+#### Ce que les relectures de la mesure ont corrigé
 
 Deux passes multi-agents, la seconde portant sur les correctifs de la
 première. Elles ont trouvé 29 puis 41 défauts. Les plus instructifs :
@@ -47,11 +105,13 @@ première. Elles ont trouvé 29 puis 41 défauts. Les plus instructifs :
   (`core.fileMode` était à `true` sur le dépôt) : après un clone sur le Pi,
   `./install.sh` répondait « Permission denied ».
 
-### Limites assumées
+#### Limites assumées de la mesure
 
 - La mesure de rendu **n'existe pas en mode KMS ni dans le binaire ARM64**
   officiel (compilé sans fenêtre). L'API renvoie `"rendu": null` et l'UI
-  affiche « n/d » — une absence, pas un faux zéro rassurant.
+  affiche « n/d » — une absence, pas un faux zéro rassurant. `fps` suit la
+  même règle depuis l'audit ci-dessus : il restait un zéro dur, et faisait
+  passer un Pi parfaitement sain pour une sortie morte.
 - Le **p95 n'a de sens que sur assez d'images**. Au repos, une seconde n'en
   contient que deux ou trois et il vaut alors le maximum. Le nombre
   d'échantillons est publié pour qu'on ne s'y trompe pas.
