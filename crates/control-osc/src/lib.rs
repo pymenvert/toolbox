@@ -538,9 +538,13 @@ pub fn map_message(addr: &str, args: &[OscType]) -> Result<Command, MapError> {
         "/dmx/scene" => string_arg(args, 0)
             .map(|name| Command::DmxScene { name })
             .ok_or_else(|| bad("attendu : nom de scène (string)")),
-        // Sans argument : stop du chaser en cours.
+        // Sans argument OU chaine VIDE : stop du chaser en cours. La chaine
+        // vide compte, exactement comme pour /lut : le retour d'etat emet ""
+        // pour un arret, la feuille OSCQuery est typee "s", et vider le champ
+        // est le seul geste d'arret possible depuis Chataigne -- qui ne sait
+        // pas envoyer un message sans argument sur un parametre typé.
         "/dmx/chaser" => Ok(Command::DmxChaser {
-            name: string_arg(args, 0),
+            name: string_arg(args, 0).filter(|n| !n.is_empty()),
         }),
         // Grand master et faders : 0..255, comme la console. Un float est
         // accepte (les surfaces OSC envoient souvent 0..1 mis a l'echelle
@@ -677,25 +681,43 @@ fn int_arg(args: &[OscType], index: usize) -> Option<i64> {
 
 /// Niveau lumière 0..=255, tolérant comme le reste du parseur.
 ///
-/// C'est le TYPE de l'argument qui décide, jamais sa valeur :
-/// - **entier** (Int/Long) = niveau DMX brut, 0..=255 — ce que déclare
-///   OSCQuery, donc ce que Chataigne envoie ;
-/// - **flottant** (Float/Double) = fader NORMALISÉ 0..1 — la convention de
-///   la plupart des surfaces OSC.
+/// Deux conventions coexistent chez les émetteurs, il faut vivre avec :
+/// - un **entier** 0..=255 est un niveau DMX brut (ce que déclare OSCQuery) ;
+/// - un flottant **fractionnaire** de 0 à 1 est un fader NORMALISÉ, la
+///   convention de la plupart des surfaces OSC (`0.5` → 128) ;
+/// - un flottant à **valeur entière** est un niveau DMX : `int_arg`, dix
+///   lignes plus haut, documente que « Chataigne envoie volontiers 90.0
+///   pour 90 » — refuser `90.0` casserait l'émetteur le plus courant du
+///   projet.
 ///
-/// La première version distinguait les deux sur `fract() != 0.0`, ce qui
-/// créait une discontinuité absurde exactement là où on l'attend le moins :
-/// `0.999` donnait 255 mais `1.0` donnait **1**, parce que 1.0 n'a pas de
-/// partie fractionnaire et repartait sur le chemin entier. Un fader normalisé
-/// poussé À FOND rendait donc la sortie quasi noire. Vérifié sur le parseur
-/// réel avant correction.
+/// Reste UNE ambiguïté irréductible, `1.0` : niveau DMX 1, ou fader poussé à
+/// fond ? Tranchée en faveur du **fader à fond (255)**. Un master à 1/255
+/// est un noir que personne ne vise à la main, et qui reste atteignable en
+/// envoyant un entier ; un fader normalisé poussé à fond, lui, est un geste
+/// permanent en régie.
+///
+/// Deux versions se sont trompées ici avant celle-ci. La première décidait
+/// sur `fract() != 0.0` : `0.999` donnait 255 mais `1.0` donnait 1, un fader
+/// à fond rendant la sortie quasi noire. La seconde décidait sur le seul
+/// TYPE : elle refusait alors `90.0`, que Chataigne envoie pour 90. Les deux
+/// ont été mesurées sur le parseur réel, pas déduites.
 ///
 /// Hors bornes : refusé, jamais tronqué en silence.
 fn octet_arg(args: &[OscType], index: usize) -> Option<u8> {
-    let normalise = |v: f64| (0.0..=1.0).contains(&v).then(|| (v * 255.0).round() as u8);
+    let flottant = |v: f64| {
+        if !v.is_finite() || !(0.0..=255.0).contains(&v) {
+            return None;
+        }
+        // Fader à fond, ou valeur fractionnaire : convention normalisée.
+        if v == 1.0 || v.fract() != 0.0 {
+            return (v <= 1.0).then(|| (v * 255.0).round() as u8);
+        }
+        // Valeur entière (0.0, 2.0, 90.0…) : niveau DMX.
+        Some(v as u8)
+    };
     match args.get(index)? {
-        OscType::Float(f) => normalise(f64::from(*f)),
-        OscType::Double(d) => normalise(*d),
+        OscType::Float(f) => flottant(f64::from(*f)),
+        OscType::Double(d) => flottant(*d),
         _ => u8::try_from(int_arg(args, index)?).ok(),
     }
 }
@@ -1131,8 +1153,20 @@ mod tests {
             map_message("/dmx/master", &[OscType::Float(0.0)]),
             Ok(Command::DmxMaster { valeur: 0 })
         );
+        // Chataigne « envoie volontiers 90.0 pour 90 » (cf. int_arg) : un
+        // flottant À VALEUR ENTIÈRE reste un niveau DMX. Une version de ce
+        // parseur décidait sur le seul TYPE et refusait ce message.
+        assert_eq!(
+            map_message("/dmx/master", &[OscType::Float(90.0)]),
+            Ok(Command::DmxMaster { valeur: 90 })
+        );
+        assert_eq!(
+            map_message("/dmx/master", &[OscType::Float(200.0)]),
+            Ok(Command::DmxMaster { valeur: 200 })
+        );
         // Hors bornes : refusé, jamais tronqué en silence.
         assert!(map_message("/dmx/master", &[OscType::Int(300)]).is_err());
+        assert!(map_message("/dmx/master", &[OscType::Float(300.0)]).is_err());
         assert!(map_message("/dmx/master", &[OscType::Int(-1)]).is_err());
         assert!(map_message("/dmx/master", &[OscType::Float(1.5)]).is_err());
         assert_eq!(
@@ -1161,6 +1195,23 @@ mod tests {
         // Et c'est un déclencheur : deux départs successifs du même chaser
         // doivent produire deux messages, pas un seul.
         assert!(est_impulsion("/dmx/chaser"));
+        // La chaîne VIDE arrête le chaser, comme pour /lut. C'est le seul
+        // geste d'arrêt possible depuis Chataigne, qui ne sait pas envoyer
+        // un message sans argument sur un paramètre typé « s ».
+        assert_eq!(
+            map_message("/dmx/chaser", &[OscType::String(String::new())]),
+            Ok(Command::DmxChaser { name: None })
+        );
+        assert_eq!(
+            map_message("/dmx/chaser", &[]),
+            Ok(Command::DmxChaser { name: None })
+        );
+        assert_eq!(
+            map_message("/dmx/chaser", &[OscType::String("poursuite".into())]),
+            Ok(Command::DmxChaser {
+                name: Some("poursuite".into())
+            })
+        );
 
         // Pas de retour pour l'état complet remplacé.
         assert!(event_to_osc(&Event::StateReplaced {

@@ -85,8 +85,8 @@ pub enum TestPattern {
 /// | `cue_go`           | `/cue/go <nom>`              |
 /// | `dmx_scene`        | `/dmx/scene <nom>`           |
 /// | `dmx_chaser`       | `/dmx/chaser [nom]` (rien = stop) |
-/// | `dmx_master`       | `/dmx/master <0..255>`       |
-/// | `dmx_fader`        | `/dmx/fader <id> <0..255>`   |
+/// | `dmx_master`       | `/dmx/master <0..255 ou 0..1>` |
+/// | `dmx_fader`        | `/dmx/fader <id> <0..255 ou 0..1>` |
 /// | `mesh_set`         | — (UI/REST)                  |
 /// | `mesh_reset`       | — (UI/REST)                  |
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

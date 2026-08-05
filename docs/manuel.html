@@ -545,7 +545,7 @@ footer { margin-top: 60px; padding-top: 24px; border-top: 1px solid var(--lisere
       <tr><td><code>/dmx/scene</code></td><td>nom</td><td>Rappelle une scène de la console lumières</td></tr>
       <tr><td><code>/dmx/chaser</code></td><td>nom (ou rien)</td><td>Lance un chaser ; sans argument, arrête celui en cours</td></tr>
       <tr><td><code>/dmx/master</code></td><td>entier 0..255 <i>ou</i> flottant 0..1</td><td>Grand master lumières. C'est le <b>type</b> qui décide : un entier est un niveau DMX, un flottant est un fader normalisé (0.5 = mi-course, 1.0 = plein)</td></tr>
-      <tr><td><code>/dmx/fader</code></td><td>id, 0..255</td><td>Niveau d'un fader lumières, par identifiant</td></tr>
+      <tr><td><code>/dmx/fader</code></td><td>id, puis entier 0..255 <i>ou</i> flottant 0..1</td><td>Niveau d'un fader lumières, par identifiant. Même règle que <code>/dmx/master</code></td></tr>
     </tbody>
   </table></div>
   <h3>Auto-découverte OSCQuery (Chataigne)</h3>

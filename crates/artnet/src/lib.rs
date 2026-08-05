@@ -493,7 +493,14 @@ pub async fn service(
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 };
                 if let Some(commande) = commande {
-                    appliquer(&mut etat, commande);
+                    // MEME traitement que le bras `commandes` : sans le
+                    // `a_sauver`, un master pose par OSC, par un fader MIDI
+                    // ou par une cue vivait en memoire et disparaissait au
+                    // redemarrage -- alors que le meme geste depuis la web UI
+                    // etait bien persiste. Deux entrees, deux comportements.
+                    if appliquer(&mut etat, commande) {
+                        a_sauver = true;
+                    }
                     etat_tx.send_replace(etat.clone());
                 }
             }

@@ -140,6 +140,32 @@ pub enum ScaleTarget {
     DmxMaster,
 }
 
+impl ScaleTarget {
+    /// Les cibles, telles qu'on les écrit dans `node.toml`. Recopier cette
+    /// liste à la main dans le message d'erreur l'avait déjà laissée en
+    /// arrière d'une version : `dmx_master` existait et fonctionnait, mais
+    /// la seule liste que l'opérateur voit au démarrage l'ignorait. Un test
+    /// vérifie qu'elle reste alignée sur l'énumération.
+    pub const NOMS: &'static [&'static str] = &[
+        "volume",
+        "brightness",
+        "contrast",
+        "gamma",
+        "saturation",
+        "hue",
+        "gain_r",
+        "gain_g",
+        "gain_b",
+        "pixelate",
+        "posterize",
+        "noise",
+        "sharpen",
+        "mirror",
+        "rate",
+        "dmx_master",
+    ];
+}
+
 /// Un binding MIDI : note ou CC → commande fixe ou paramètre continu.
 ///
 /// ```toml
@@ -206,9 +232,8 @@ where
         Ok(cible) => Ok(Some(cible)),
         Err(err) => {
             noter(format!(
-                "binding MIDI ignoré : cible « {brut} » inconnue ({err}). Cibles possibles : \
-                 volume, brightness, contrast, gamma, saturation, hue, gain_r, gain_g, gain_b, \
-                 pixelate, posterize, noise, sharpen, mirror, rate"
+                "binding MIDI ignoré : cible « {brut} » inconnue ({err}). Cibles possibles : {}",
+                ScaleTarget::NOMS.join(", ")
             ));
             Ok(None)
         }
@@ -626,6 +651,45 @@ mod tests {
         assert!(cfg.modules.midi);
         assert!(cfg.modules.player);
         assert_eq!(cfg.ports.osc, 9000);
+    }
+
+    #[test]
+    fn la_liste_des_cibles_reste_alignee_sur_l_enum() {
+        // Recopier la liste à la main l'avait déjà laissée en arrière :
+        // `dmx_master` fonctionnait mais n'était nulle part annoncé.
+        for nom in ScaleTarget::NOMS {
+            let valeur: ScaleTarget = toml::Value::String((*nom).to_string())
+                .try_into()
+                .unwrap_or_else(|e| panic!("cible « {nom} » annoncée mais illisible : {e}"));
+            // Aller-retour : le nom annoncé est bien celui que serde produit.
+            let round = toml::Value::try_from(valeur).expect("sérialisation");
+            assert_eq!(round.as_str(), Some(*nom));
+        }
+        // Et l'inverse : aucune variante ne doit manquer à l'appel. On compte
+        // les variantes via le nombre de cibles distinctes acceptées.
+        let variantes = [
+            ScaleTarget::Volume,
+            ScaleTarget::Brightness,
+            ScaleTarget::Contrast,
+            ScaleTarget::Gamma,
+            ScaleTarget::Saturation,
+            ScaleTarget::Hue,
+            ScaleTarget::GainR,
+            ScaleTarget::GainG,
+            ScaleTarget::GainB,
+            ScaleTarget::Pixelate,
+            ScaleTarget::Posterize,
+            ScaleTarget::Noise,
+            ScaleTarget::Sharpen,
+            ScaleTarget::Mirror,
+            ScaleTarget::Rate,
+            ScaleTarget::DmxMaster,
+        ];
+        assert_eq!(
+            variantes.len(),
+            ScaleTarget::NOMS.len(),
+            "une cible a été ajoutée à l'enum sans rejoindre NOMS (ou l'inverse)"
+        );
     }
 
     #[test]
