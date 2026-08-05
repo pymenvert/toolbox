@@ -1722,6 +1722,44 @@ async fn diagnostic_zip(State(app): State<AppState>) -> Result<Response, ApiErro
     );
     zip.add("fleet.json", &json(&*app.fleet.borrow())?);
 
+    // CONTENU des presets, pas seulement leurs noms. C'est le seul export
+    // que le produit propose, donc la seule sauvegarde qu'un opérateur non
+    // développeur puisse faire avant une mise à jour — et il ne contenait
+    // que la liste. En meilleur effort : un preset illisible ne doit pas
+    // faire échouer tout l'export (c'est justement quand ça va mal qu'on le
+    // demande).
+    for nom in app.presets.list().unwrap_or_default() {
+        if let Ok(preset) = app.presets.load(&nom) {
+            if let Ok(octets) = serde_json::to_vec_pretty(&preset) {
+                zip.add(&format!("presets/{nom}.json"), &octets);
+            }
+        }
+    }
+    for nom in app.mapping_presets.list().unwrap_or_default() {
+        if let Ok(preset) = app.mapping_presets.load(&nom) {
+            if let Ok(octets) = serde_json::to_vec_pretty(&preset) {
+                zip.add(&format!("presets/mapping/{nom}.json"), &octets);
+            }
+        }
+    }
+
+    // Fichiers d'état bruts : la conduite du spectacle, la console lumières,
+    // les bascules de fonctions, les réglages et l'état de démarrage. Aucun
+    // n'y figurait, et ce sont eux qu'on ne reconstitue pas de mémoire.
+    // Lecture brute (et non re-sérialisation) : si le fichier est corrompu,
+    // on veut justement l'original tel qu'il est sur le disque.
+    for fichier in [
+        "lumieres.json",
+        "sequences.json",
+        "fonctions.json",
+        "reglages.json",
+        "demarrage.json",
+    ] {
+        if let Ok(octets) = std::fs::read(fichier) {
+            zip.add(&format!("etat/{fichier}"), &octets);
+        }
+    }
+
     let filename = format!("diagnostic-{}.zip", app.node_name);
     Ok((
         StatusCode::OK,

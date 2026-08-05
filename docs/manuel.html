@@ -566,8 +566,17 @@ footer { margin-top: 60px; padding-top: 24px; border-top: 1px solid var(--lisere
   <h3>Demander de l'aide : l'export diagnostic</h3>
   <p>Système → « Exporter le diagnostic (ZIP) » (ou
   <code>GET /api/diagnostic.zip</code>) : une archive avec l'état complet, le
-  journal, les infos système, les écrans, les médias et les presets — tout ce
-  qu'il faut pour comprendre un node à distance, sans aucun secret dedans.</p>
+  journal, les infos système (dont le temps par image et la mémoire), les
+  écrans, les médias, le <b>contenu</b> de chaque preset
+  (<code>presets/</code>) et les fichiers d'état du node
+  (<code>etat/</code> : conduite du séquenceur, console lumières, réglages,
+  bascules de fonctions) — tout ce qu'il faut pour comprendre un node à
+  distance, sans aucun secret dedans.</p>
+  <div class="encart"><b>Sauvegarde</b>
+  Comme l'archive contient le contenu des presets et les fichiers d'état,
+  c'est aussi la <b>sauvegarde à faire avant une mise à jour</b> : scènes
+  lumières, conduite et calibrages y sont, et ce sont eux qu'on ne
+  reconstitue pas de mémoire.</div>
   <p>Après un crash, le node écrit aussi <code>logs/crash.txt</code>
   (panic, version, nom du node). En option — et seulement si
   <code>[telemetrie] url</code> est configurée dans <code>node.toml</code> —
