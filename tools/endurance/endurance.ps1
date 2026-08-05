@@ -104,9 +104,31 @@ function Start-Charge($base, $cadence) {
     # Client MJPEG permanent : curl.exe est livre avec Windows 10+.
     if (Get-Command curl.exe -ErrorAction SilentlyContinue) {
         $nul = if ($IsLinux -or $IsMacOS) { "/dev/null" } else { "NUL" }
-        $p = Start-Process -FilePath "curl.exe" -PassThru -WindowStyle Hidden `
-            -ArgumentList "-s", "-o", $nul, "$base/flux.mjpg?fps=15"
-        $jobs += $p
+        # Sonder AVANT d'annoncer : /flux.mjpg repond 404 si la fonction
+        # « Apercu » est coupee (le profil Pi 3 conseille de la couper),
+        # 503 au-dela de 4 clients, 401 si un mot de passe est pose. Sans
+        # cette verification, curl mourait aussitot, le compositeur partage
+        # n'etait pas sollicite de tout le run, et le script annoncait
+        # quand meme un client MJPEG.
+        # Un flux MJPEG ne se termine JAMAIS : la sonde sort forcement en
+        # timeout (curl code 28) apres avoir ecrit « 200 ». Or ce script
+        # tourne sous $ErrorActionPreference = "Stop", et depuis PowerShell
+        # 7.4 un code de retour non nul d'une commande native est une erreur
+        # TERMINANTE : la sonde tuerait le run qu'elle est censee preparer.
+        # On neutralise ce comportement le temps de l'appel (la variable
+        # n'existe pas en 5.1, l'affectation y est sans effet).
+        $ancienNatif = $PSNativeCommandUseErrorActionPreference
+        $PSNativeCommandUseErrorActionPreference = $false
+        $code = & curl.exe -s -m 3 -o $nul -w "%{http_code}" "$base/flux.mjpg?fps=15" 2>$null
+        $PSNativeCommandUseErrorActionPreference = $ancienNatif
+        if ("$code" -match "^2") {
+            $p = Start-Process -FilePath "curl.exe" -PassThru -WindowStyle Hidden `
+                -ArgumentList "-s", "-o", $nul, "$base/flux.mjpg?fps=15"
+            $jobs += $p
+        } else {
+            Write-Host "  (flux MJPEG indisponible - HTTP $code : charge reduite,"
+            Write-Host "   le compositeur partage n'est pas sollicite)"
+        }
     } else {
         Write-Host "  (curl.exe absent : pas de client MJPEG dans la charge)"
     }
@@ -347,7 +369,17 @@ function Show-Analyse($fichier) {
         # ne rend rien tout de suite). Extrapoler ces 6 Mo-la donnerait
         # "110 Mo/h" et un faux cri a la fuite. Il faut au moins 30 min.
         $DUREE_MINIMALE_H = 0.5
-        if ($duree -lt $DUREE_MINIMALE_H) {
+        if ($redemarrages -gt 0) {
+            # Un redemarrage remet la RSS a zero : la regression traverse
+            # alors DEUX vies du process et sort negative, ce qui imprimait
+            # « VERDICT : stable. » sur un run pourtant traverse par un
+            # plantage. Le bandeau du haut annoncait deja que les tendances
+            # sont sans valeur -- seules les images perdues en tenaient
+            # compte, quarante lignes plus bas la memoire l'ignorait.
+            Write-Host "  VERDICT : non calculable ($redemarrages redemarrage(s) pendant le run)."
+            Write-Host "  La memoire repart de zero a chaque redemarrage : la pente melangerait"
+            Write-Host "  deux vies du process. Relancer un run sans plantage pour conclure."
+        } elseif ($duree -lt $DUREE_MINIMALE_H) {
             Write-Host "  run trop court ($([math]::Round($duree * 60)) min) pour conclure :"
             Write-Host "  les premieres minutes sont de la montee en regime. Relancer sur 1 h au moins."
         } elseif ($null -ne $pente) {

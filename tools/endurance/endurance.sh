@@ -196,9 +196,27 @@ if [ "$CHARGE" = "1" ]; then
   fi
   charge_continue &
   boucle_pid=$!
-  curl -s -o /dev/null "$URL/flux.mjpg?fps=15" &
-  mjpeg_pid=$!
-  echo "Charge : ~$CADENCE commandes/s + client MJPEG."
+  # Le client MJPEG etait lance sans jamais verifier qu'il tenait : or
+  # /flux.mjpg repond 404 si la fonction « Apercu » est coupee (le profil
+  # Pi 3 conseille justement de la couper), 503 au-dela de 4 clients, et
+  # 401 si un mot de passe est pose. curl rendait alors la main en
+  # quelques millisecondes, le compositeur partage n'etait sollicite de
+  # tout le run... et le script annoncait « + client MJPEG » quand meme.
+  # `|| true` SEUL (pas de `|| echo 000`) : un flux MJPEG ne se termine
+  # jamais, donc la sonde sort forcement en timeout (code 28) tout en ayant
+  # deja ecrit « 200 ». Ajouter un echo de repli concatenait « 200 » et
+  # « 000 » en « 200000 ». Un node injoignable donne bien « 000 ».
+  code_mjpeg=$(curl -s -m 3 -o /dev/null -w '%{http_code}' "$URL/flux.mjpg?fps=15" || true)
+  case "$code_mjpeg" in
+    2*)
+      curl -s -o /dev/null "$URL/flux.mjpg?fps=15" &
+      mjpeg_pid=$!
+      MJPEG_ETAT="+ client MJPEG" ;;
+    *)
+      MJPEG_ETAT="SANS client MJPEG (HTTP $code_mjpeg) - charge reduite,"
+      MJPEG_ETAT="$MJPEG_ETAT le compositeur partage n'est pas sollicite" ;;
+  esac
+  echo "Charge : ~$CADENCE commandes/s $MJPEG_ETAT."
 fi
 
 while [ "$(maintenant)" -lt "$fin" ]; do

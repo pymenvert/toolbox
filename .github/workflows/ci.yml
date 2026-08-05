@@ -73,6 +73,27 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      # Les scripts PowerShell n'étaient vérifiés NULLE PART : shellcheck ne
+      # couvre que les .sh, et l'installateur Windows comme le collecteur
+      # d'endurance ne tournent jamais en CI. Une coquille de syntaxe n'y
+      # était découverte que par l'utilisateur, sur sa machine.
+      - name: Analyse des scripts PowerShell
+        shell: pwsh
+        run: |
+          $fautifs = @()
+          Get-ChildItem -Recurse -Filter *.ps1 | ForEach-Object {
+            $erreurs = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              $_.FullName, [ref]$null, [ref]$erreurs) | Out-Null
+            if ($erreurs -and $erreurs.Count -gt 0) {
+              $fautifs += $_.FullName
+              Write-Host "== $($_.FullName)"
+              $erreurs | ForEach-Object { Write-Host "   $($_.Extent.StartLineNumber): $($_.Message)" }
+            } else {
+              Write-Host "ok  $($_.Name)"
+            }
+          }
+          if ($fautifs.Count -gt 0) { throw "$($fautifs.Count) script(s) PowerShell invalides" }
       - name: Tests (Windows)
         shell: bash
         run: |
