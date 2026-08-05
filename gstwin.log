@@ -1,0 +1,11 @@
+Need to add specific handling for exception type NuGetResolverInputException
+Unable to find package 'gstreamer-devel'. Existing packages must be restored before performing an install or update.
+
+Chocolatey installed 0/0 packages. 
+ See the log for details (C:\ProgramData\chocolatey\logs\chocolatey.log).
+Need to add specific handling for exception type NuGetResolverInputException
+Unable to find package 'pkgconfiglite'. Existing packages must be restored before performing an install or update.
+
+Chocolatey installed 0/0 packages. 
+ See the log for details (C:\ProgramData\chocolatey\logs\chocolatey.log).
+dossier GStreamer : INTROUVABLE
