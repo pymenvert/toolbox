@@ -13,9 +13,9 @@ préfixe historique `toolbox-` (aucun chemin ni contrat ne change).
 > `Toolbox/docs/` du projet — ce repo ne contient que le code.
 > Liste complète des fonctions : en tête de `docs/manuel.html`.
 
-## État — v3.0.0
+## État — v3.5.0
 
-La chaîne complète est fonctionnelle et testée (160+ tests, CI Linux +
+La chaîne complète est fonctionnelle et testée (269 tests, CI Linux +
 Windows + check ARM64) : **lecture vidéo réelle** (GStreamer, boucle sans
 coupure), **fenêtre de sortie** avec warp/mires/couleur/effets calculés par
 le **GPU** (wgpu/Vulkan, repli CPU automatique), sources externes (capture,
@@ -54,8 +54,14 @@ calibrage pas à pas, référence OSC/MIDI/config, dépannage.
 
 **Binaires prêts** : page **[Releases](https://github.com/pymenvert/toolbox/releases)**
 (sans compte) — `toolbox-node-windows-x64-gstreamer` (pack complet avec
-vidéo, rien à installer), `toolbox-node-windows-x64` (léger),
-`toolbox-node-linux-x64`, `toolbox-node-raspberrypi-arm64`.
+vidéo, rien à installer : **le seul binaire publié qui lit des vidéos**),
+`toolbox-node-windows-x64` et `toolbox-node-linux-x64` (mires, mapping,
+calibrage et OSC/MIDI, sans lecture vidéo), `toolbox-node-raspberrypi-arm64`
+(**pilotage seul — cette archive ne projette rien** : compilée sans fenêtre
+de sortie, sans MIDI et sans GStreamer).
+
+Pour lire des vidéos sur Linux ou projeter depuis un Pi, il faut compiler sur
+place avec `--features gstreamer` — voir le manuel.
 
 ```bash
 # ou compilation locale (Linux : sudo apt install libasound2-dev)
@@ -98,21 +104,37 @@ tests) ; événements temps réel sur `GET /ws`.
 
 ```
 crates/core/          bus de commandes, état validé, presets, médiathèque,
+                      séquenceur, fondus, interrupteurs de fonctions,
                       ring buffer de logs, config           [fait, testé]
 crates/engine/        homographie (validée vs référence Python), paramètres
-                      de rendu (rotation/flip/crop/couleur), player + backend
-                      simulé ; GStreamer à venir            [fait, testé]
-crates/control-http/  REST + WebSocket + web UI embarquée + monitoring
+                      de rendu (rotation/flip/crop/couleur), LUT .cube,
+                      compositeur, player + backend simulé  [fait, testé]
+crates/render/        fenêtre de sortie (winit) : rendu GPU wgpu avec repli
+                      automatique sur le peintre CPU        [fait, testé]
+crates/gst/           backend vidéo GStreamer (playbin3), sortie RTSP,
+                      sortie DRM/KMS — feature `gstreamer`  [fait, testé]
+crates/artnet/        console lumières Art-Net (faders, scènes, chasers)
                                                             [fait, testé]
+crates/ndi/           entrée et sortie NDI (SDK chargé à l'exécution)
+                                                            [fait, testé]
+crates/control-http/  REST + WebSocket + web UI embarquée + OSCQuery +
+                      monitoring + mise à jour OTA          [fait, testé]
 crates/control-osc/   OSC UDP (Chataigne)                   [fait, testé]
 crates/control-midi/  notes/CC → commandes (bindings TOML)  [fait, testé*]
 crates/node/          binaire : assemble les modules        [fait]
-deploy/               installeur, systemd, portable         [fait]
+deploy/               installeurs à profils, systemd, portable
+                                                            [fait]
+docs/                 manuel utilisateur, composants tiers  [fait]
 tools/bench/          bench décodage à lancer sur les Pi    [fait]
-webui/                (réservé : UI Svelte phase suivante — l'UI V1 vanilla
-                      est embarquée dans control-http)
+tools/endurance/      harnais d'endurance (collecteurs + dépouillement)
+                                                            [fait]
+tools/mapping/        référence Python de l'homographie     [fait]
 ```
 \* la traduction MIDI est testée ; l'ouverture du port reste à valider sur matériel.
+
+L'UI web est un **fichier unique** embarqué dans le binaire
+(`crates/control-http/assets/index.html`) — pas de build front, pas de
+dossier `webui/`.
 
 ## Développement
 

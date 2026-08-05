@@ -861,10 +861,10 @@
         <button id="regSave" class="primary">Enregistrer</button>
       </div>
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px">
-        <label style="font-size:12px;color:var(--muted)">Largeur
-          <input type="number" id="regLargeur" min="64" max="3840" step="2" style="width:100%" title="R&eacute;solution interne du rendu — plus petit = plus fluide sur les petites machines"></label>
-        <label style="font-size:12px;color:var(--muted)">Hauteur
-          <input type="number" id="regHauteur" min="64" max="2160" step="2" style="width:100%"></label>
+        <label style="font-size:12px;color:var(--muted)">Largeur <span class="muted" style="font-size:10px">(KMS)</span>
+          <input type="number" id="regLargeur" min="64" max="3840" step="2" style="width:100%" title="R&eacute;solution interne du rendu — s'applique UNIQUEMENT à la sortie sans bureau ([output] mode = kms). En mode fen&ecirc;tre, le rendu suit la taille de la fen&ecirc;tre."></label>
+        <label style="font-size:12px;color:var(--muted)">Hauteur <span class="muted" style="font-size:10px">(KMS)</span>
+          <input type="number" id="regHauteur" min="64" max="2160" step="2" style="width:100%" title="Voir Largeur : s'applique uniquement &agrave; la sortie sans bureau (KMS)."></label>
         <label style="font-size:12px;color:var(--muted)">Cadence KMS
           <input type="number" id="regFps" min="1" max="60" style="width:100%" title="Frames par seconde de la sortie sans bureau (Pi Lite)"></label>
       </div>
@@ -873,7 +873,11 @@
       <div id="regConseil" class="hint" style="margin-top:6px"></div>
       <div class="hint">Enregistr&eacute; dans <code>reglages.json</code> et appliqu&eacute; au
       <b>prochain lancement</b> du logiciel (la r&eacute;solution de rendu et le GPU ne
-      se changent pas &agrave; chaud).</div>
+      se changent pas &agrave; chaud).<br>
+      <b>Largeur et hauteur ne servent qu'&agrave; la sortie sans bureau</b>
+      (<code>[output] mode = "kms"</code>, Raspberry Pi OS Lite). En mode
+      fen&ecirc;tre — le d&eacute;faut — le rendu suit la taille de la fen&ecirc;tre et ces
+      deux valeurs sont ignor&eacute;es ; le journal le dit au d&eacute;marrage.</div>
     </div>
     <div class="card" style="margin-top:14px;max-width:720px">
       <h3>Chataigne</h3>
@@ -980,7 +984,11 @@ let position = null, duration = null;
 function renderFps(fps) {
   const b = $("#fpsBadge");
   const playing = state && state.player.transport === "playing";
-  if (!playing || fps === undefined) { b.style.display = "none"; return; }
+  // null = il n'y a pas de fenetre pour compter (mode KMS, binaire sans la
+  // feature `render`). Afficher « 0 img/s » ferait croire a une sortie morte
+  // alors que la projection peut etre parfaite : on masque le badge, comme
+  // pour une valeur absente.
+  if (!playing || fps === undefined || fps === null) { b.style.display = "none"; return; }
   b.style.display = "";
   b.textContent = Math.round(fps) + " img/s";
 }
@@ -1102,7 +1110,11 @@ $$("nav a").forEach(a => a.addEventListener("click", () => {
   const p = a.dataset.page;
   $$(".page").forEach(s => s.classList.toggle("visible", s.id === "page-" + p));
   $("#pagetitle").textContent = pageTitles[p];
-  if (p === "mapping") { sizeStage(); renderBlending(); renderMasques(); renderMesh(); }
+  // loadOutputs() : la liste des ecrans n'etait lue qu'au chargement de la
+  // page. Une tablette de regie restee ouverte toute la journee affichait
+  // encore « aucun ecran detecte » apres le branchement du videoprojecteur,
+  // alors que le node l'avait bien detecte a chaud.
+  if (p === "mapping") { sizeStage(); renderBlending(); renderMasques(); renderMesh(); loadOutputs(); }
   if (p === "features") loadFeatures();
   if (p === "lights") loadDmx();
   if (p === "cues") { loadCues(); loadMedia(); loadPresets(); }
@@ -1675,20 +1687,37 @@ $("#mapPresetDelete").addEventListener("click", async () => {
 });
 
 /* Sortie : écran cible + plein écran, appliqués à chaud. */
+/* Derniere liste d'ecrans affichee : evite de reconstruire le menu (et donc
+   de le refermer sous la souris) a chaque sondage. */
+let ecransSignature = null;
 async function loadOutputs() {
   let data;
   try { data = await api("/api/outputs"); } catch (e) { return; }
   const monitors = data.monitors || [], st = data.settings || { monitor: 0, fullscreen: false };
   const sel = $("#outMonitor");
-  sel.innerHTML = monitors.length ? "" : '<option value="">(aucun écran détecté)</option>';
-  monitors.forEach(m => {
-    const o = document.createElement("option");
-    o.value = m.index;
-    o.textContent = "Écran " + (m.index + 1) + " · " + m.name + " (" + m.width + "×" + m.height + ")";
-    sel.appendChild(o);
-  });
-  if (monitors.length) sel.value = st.monitor;
-  $("#outFullscreen").checked = !!st.fullscreen;
+  // La liste n'est RECONSTRUITE que si elle a change. Depuis qu'un sondage
+  // rappelle loadOutputs toutes les 5 s, la reconstruire a chaque passage
+  // fermerait le menu deroulant ouvert par l'operateur et ecraserait sa
+  // selection en cours -- une carte « Sortie » inutilisable a la souris.
+  const signature = JSON.stringify(monitors);
+  if (signature !== ecransSignature) {
+    ecransSignature = signature;
+    sel.innerHTML = monitors.length ? "" : '<option value="">(aucun écran détecté)</option>';
+    monitors.forEach(m => {
+      const o = document.createElement("option");
+      o.value = m.index;
+      o.textContent = "Écran " + (m.index + 1) + " · " + m.name + " (" + m.width + "×" + m.height + ")";
+      sel.appendChild(o);
+    });
+    if (monitors.length) sel.value = st.monitor;
+  } else if (monitors.length && sel !== document.activeElement) {
+    // Liste inchangee : on suit quand meme l'ecran courant, sauf si
+    // l'operateur a le menu sous le doigt.
+    sel.value = st.monitor;
+  }
+  if ($("#outFullscreen") !== document.activeElement) {
+    $("#outFullscreen").checked = !!st.fullscreen;
+  }
 }
 async function pushOutput() {
   const body = { monitor: +$("#outMonitor").value || 0, fullscreen: $("#outFullscreen").checked };
@@ -1823,9 +1852,20 @@ let pendingDeleteMedia = null;
 async function loadMedia() {
   try { mediaList = await api("/api/media") || []; } catch (e) { return; }
   renderMediaTable(); renderPlAdd(); renderParcMedia();
+  // « Charger un media » est le type d'action par DEFAUT, et son selecteur
+  // n'etait rempli qu'a l'evaluation du script -- donc avant que la
+  // mediatheque n'arrive. En ouvrant l'onglet Sequences on trouvait un menu
+  // vide, et il fallait changer de type puis revenir pour le peupler.
+  // Uniquement si le type courant en depend : majChampsAction lance sinon un
+  // GET /api/dmx, qui n'a rien a faire dans un sondage a 5 s.
+  if ($("#cueActType") && $("#cueActType").value === "load") majChampsAction();
 }
 
 /* ===================== Fichiers du parc ===================== */
+/* Miroir de validate_upload_name (crates/core/src/media.rs) : nom PLAT, jeu
+   de caracteres restreint, et pas de point en tete. Proposer autre chose
+   revient a promettre un envoi que le serveur refusera. */
+const NOM_PARC = /^(?!\.)[A-Za-z0-9._ ()-]+$/;
 let parcNodes = [];
 async function loadParc() {
   try { parcNodes = (await api("/api/fleet") || []).filter(n => !n.soi_meme); } catch (e) { return; }
@@ -1842,9 +1882,22 @@ function renderParcMedia() {
     sel.appendChild(o);
     return;
   }
-  mediaList.forEach(m => {
+  // /api/media renvoie des MediaInfo { path, bytes } — jamais `name`.
+  // Et un envoi de parc exige un nom que validate_upload_name accepte
+  // (crates/core/src/media.rs) : plat ET restreint a un jeu de caracteres.
+  // Ne filtrer que les sous-dossiers laissait proposer « été.mp4 », que le
+  // serveur refuse ensuite avec un message technique.
+  const plats = mediaList.filter(m => NOM_PARC.test(m.path));
+  if (!plats.length) {
     const o = document.createElement("option");
-    o.value = o.textContent = m.name;
+    o.disabled = true;
+    o.textContent = "— aucun media eligible (sous-dossier ou nom accentue) —";
+    sel.appendChild(o);
+    return;
+  }
+  plats.forEach(m => {
+    const o = document.createElement("option");
+    o.value = o.textContent = m.path;
     sel.appendChild(o);
   });
   if ([...sel.options].some(o => o.value === old)) sel.value = old;
@@ -1870,7 +1923,7 @@ function renderParcNodes() {
       try {
         const liste = await api("/api/fleet/media?url=" + encodeURIComponent(n.url)) || [];
         detail.textContent = liste.length
-          ? liste.map(m => m.name).join("  ·  ")
+          ? liste.map(m => m.path).join("  ·  ")
           : "(médiathèque vide)";
       } catch (e) { detail.textContent = "Node injoignable."; }
     });
@@ -2228,12 +2281,26 @@ async function majChampsAction() {
   $("#cueActPattern").style.display = type === "pattern" ? "block" : "none";
   $("#cueActDmx").style.display = (type === "dmxscene" || type === "dmxchaser") ? "block" : "none";
   if (type === "load") {
-    const sel = $("#cueActMedia"); sel.innerHTML = "";
-    mediaList.forEach(m => { const o = document.createElement("option"); o.value = o.textContent = m.name; sel.appendChild(o); });
+    const sel = $("#cueActMedia");
+    // La SELECTION EN COURS est preservee : loadMedia rappelle cette
+    // fonction, et il est sonde toutes les 5 s tant que la page Medias est
+    // visible. Reconstruire sans precaution effacerait en silence le media
+    // choisi par l'operateur, qui enregistrerait alors le premier de la
+    // liste sans s'en apercevoir. Meme precaution que renderParcMedia.
+    const choisi = sel.value;
+    sel.innerHTML = "";
+    // `m.path` : MediaInfo n'a pas de champ `name`. Avec m.name, la cue
+    // enregistrait « load undefined » — accepté sans broncher, et découvert
+    // le soir venu, à l'heure du spectacle.
+    mediaList.forEach(m => { const o = document.createElement("option"); o.value = o.textContent = m.path; sel.appendChild(o); });
+    if ([...sel.options].some(o => o.value === choisi)) sel.value = choisi;
   }
   if (type === "preset" || type === "fade") {
-    const sel = $("#cueActPreset"); sel.innerHTML = "";
+    const sel = $("#cueActPreset");
+    const choisi = sel.value;
+    sel.innerHTML = "";
     presets.forEach(n => { const o = document.createElement("option"); o.value = o.textContent = n; sel.appendChild(o); });
+    if ([...sel.options].some(o => o.value === choisi)) sel.value = choisi;
   }
   if (type === "dmxscene" || type === "dmxchaser") {
     const sel = $("#cueActDmx"); sel.innerHTML = "";
@@ -2642,6 +2709,12 @@ $("#majVerifie").addEventListener("click", async () => {
     if (etat.plus_recente && etat.asset) {
       $("#majEtat").textContent = "v" + etat.version_disponible + " disponible (actuelle : v" + etat.version_courante + ")";
       $("#majTelecharge").style.display = "inline-block";
+    } else if (etat.plus_recente && etat.raison) {
+      // Une version PLUS RECENTE existe, mais aucune archive ne convient a ce
+      // binaire. Dire « A jour » ici serait un mensonge : on donne la raison.
+      $("#majEtat").textContent = "v" + etat.version_disponible + " existe, mais : " + etat.raison;
+      $("#majTelecharge").style.display = "none";
+      $("#majApplique").style.display = "none";
     } else {
       $("#majEtat").textContent = "À jour (v" + etat.version_courante + ")";
       $("#majTelecharge").style.display = "none";
@@ -2697,7 +2770,7 @@ const REG_PROFILS = {
   pi4:  { largeur: 1920, hauteur: 1080, gpu: true,  kms_fps: 30,
           conseil: "Pi 4 : 1080p OK (décodage H.264 matériel jusqu'en 1080p). Si ça rame avec beaucoup d'effets, passe en 1280×720." },
   pi3:  { largeur: 960,  hauteur: 540,  gpu: false, kms_fps: 20,
-          conseil: "Pi 3 (allégé) : lecture + mapping en 960×540, rendu processeur (la puce graphique est trop ancienne pour le rendu GPU). Conseillé : couper l'aperçu et le parc dans Fonctions ; éviter la sortie RTSP." },
+          conseil: "Pi 3 (allégé) : rendu processeur (la puce graphique est trop ancienne pour le rendu GPU), et 960×540 SI la sortie sans bureau (KMS) est utilisée. Conseillé : couper l'aperçu et le parc dans Fonctions ; éviter la sortie RTSP." },
   perso: { conseil: "Personnalisé : règle les champs à la main." },
 };
 function renderReglages(r) {
@@ -2776,11 +2849,25 @@ async function loadFleet() {
       li.appendChild(open);
     }
     const ident = document.createElement("button"); ident.className = "mini"; ident.textContent = "Identifier";
-    ident.addEventListener("click", () => {
-      // no-cors : requête envoyée au node cible sans lire la réponse
-      // (suffisant pour un déclencheur, et licite entre origines).
-      fetch(n.url + "api/identify", { method: "POST", mode: "no-cors" }).catch(() => {});
-      toast("Mire coins envoyée à " + n.name);
+    ident.addEventListener("click", async () => {
+      // Le node cible est vise par un RELAIS serveur-a-serveur, pas
+      // directement : un POST inter-origines porte toujours un en-tete
+      // Origin, que l'anti-CSRF de la cible refuse (403). En no-cors la
+      // reponse etait opaque, donc le .catch ne se declenchait jamais et
+      // l'UI annoncait « Mire envoyee » alors que rien n'etait parti.
+      // api() affiche DEJA le message d'erreur : ne pas en remettre un
+      // second ici (les doubles toasts ont ete traques en v3.3.0).
+      ident.disabled = true;
+      try {
+        if (n.soi_meme) {
+          await api("/api/identify", { method: "POST" });
+          toast("Mire coins affichée ici");
+        } else {
+          await api("/api/fleet/identify?url=" + encodeURIComponent(n.url), { method: "POST" });
+          toast("Mire coins envoyée à " + n.name);
+        }
+      } catch (e) { /* message deja affiche par api() */ }
+      finally { ident.disabled = false; }
     });
     li.appendChild(ident);
     ul.appendChild(li);
@@ -2937,6 +3024,12 @@ function renderSante(sys) {
   } catch (e) { /* localStorage indisponible (navigation privée) : accueil masqué */ }
   // Un fichier copié directement dans media/ apparaît sans recharger la page.
   setInterval(() => { if (!document.hidden && $("#page-media").classList.contains("visible")) { loadMedia(); loadParc(); } }, 5000);
+  // Ecrans branches/debranches a chaud : le node republie la liste, encore
+  // faut-il la relire. Seulement quand la carte « Sortie » est visible.
+  setInterval(() => { if (!document.hidden && $("#page-mapping").classList.contains("visible")) loadOutputs(); }, 5000);
+  // (loadOutputs ne reconstruit le menu que si la liste a change : voir
+  //  ecransSignature — sinon un sondage toutes les 5 s ecraserait la
+  //  selection en cours de l'operateur.)
   sizeStage();
   paintSeek();
 })();

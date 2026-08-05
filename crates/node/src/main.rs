@@ -147,13 +147,38 @@ async fn run(mut config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std:
     // Réglages de performance (carte « Réglages » de l'UI, reglages.json) :
     // appliqués par-dessus node.toml, comme sortie.json.
     if let Some(reglages) = toolbox_core::Reglages::load(std::path::Path::new("reglages.json")) {
-        info!(
-            profil = %reglages.profil,
-            largeur = reglages.largeur,
-            hauteur = reglages.hauteur,
-            gpu = reglages.gpu,
-            "réglages de performance appliqués (reglages.json)"
-        );
+        // La résolution de rendu n'est lue QUE par la sortie DRM/KMS. En mode
+        // fenêtre — le défaut, et le seul que pose install.sh — la fenêtre
+        // rend à la taille de sa surface : la valeur est ignorée. L'annoncer
+        // « appliquée » faisait croire à un Pi 3 allégé en 960×540 alors que
+        // rien n'avait changé, et l'installateur promet précisément cela.
+        // La feature compte AUTANT que le mode : `config.resolution` n'est lu
+        // que par la sortie KMS, elle-même sous `#[cfg(feature = "gstreamer")]`.
+        // Sans ce terme, un binaire sans GStreamer configuré en mode « kms »
+        // annonçait la résolution comme appliquée alors que rien ne la lit.
+        let resolution_utilisee =
+            cfg!(feature = "gstreamer") && config.output.mode == toolbox_core::SortieMode::Kms;
+        if resolution_utilisee {
+            info!(
+                profil = %reglages.profil,
+                largeur = reglages.largeur,
+                hauteur = reglages.hauteur,
+                gpu = reglages.gpu,
+                "réglages de performance appliqués (reglages.json)"
+            );
+        } else {
+            info!(
+                profil = %reglages.profil,
+                gpu = reglages.gpu,
+                "réglages de performance appliqués (reglages.json)"
+            );
+            warn!(
+                largeur = reglages.largeur,
+                hauteur = reglages.hauteur,
+                "résolution de rendu IGNORÉE : elle ne s'applique qu'à la sortie KMS \
+                 ([output] mode = \"kms\") — en mode fenêtre, le rendu suit la taille de la fenêtre"
+            );
+        }
         config.resolution = toolbox_core::Resolution::Fixed {
             width: reglages.largeur,
             height: reglages.hauteur,
@@ -193,6 +218,16 @@ async fn run(mut config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std:
     if let Err(err) = std::fs::create_dir_all("luts") {
         warn!(%err, "dossier luts/ non créé");
     }
+
+    // Ce que CE binaire sait faire : l'OTA en a besoin pour choisir l'archive
+    // correspondante. Sans cela il visait l'archive de la plateforme et rien
+    // d'autre — une machine Windows installée avec le pack vidéo se voyait
+    // proposer le binaire léger, et « Mettre à jour » lui retirait la lecture
+    // vidéo. Le node est le seul à connaître ses propres features.
+    toolbox_control_http::ota::declarer_capacites(toolbox_control_http::ota::Capacites {
+        video: cfg!(feature = "gstreamer"),
+        fenetre: cfg!(feature = "render"),
+    });
 
     // Reste d'une mise à jour OTA réussie (ancien binaire, script) : nettoyé.
     toolbox_control_http::ota::nettoyer_apres_demarrage();
@@ -600,6 +635,7 @@ async fn run(mut config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std:
                 state: handle.state_watch(),
                 video: video_rx,
                 settings: output_settings_rx,
+                settings_tx: output_settings_tx.clone(),
                 monitors: monitors_tx,
                 fps: fps_tx,
                 mesures: mesures_tx,

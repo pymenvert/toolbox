@@ -28,6 +28,10 @@ jobs:
       - name: Dépendances système (ALSA pour le MIDI)
         run: |
           set -o pipefail
+          # Les images GitHub embarquent des depots tiers (packages.microsoft.com)
+          # dont la signature expire : `apt-get update` sort alors en 100 et
+          # casse un job qui n'a besoin que du depot Ubuntu.
+          sudo rm -f /etc/apt/sources.list.d/microsoft*.list /etc/apt/sources.list.d/microsoft*.sources
           sudo apt-get update 2>&1 | tail -1
           sudo apt-get install -y libasound2-dev 2>&1 | tail -1
       - name: Format
@@ -69,6 +73,49 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      # Les scripts PowerShell n'étaient vérifiés NULLE PART : shellcheck ne
+      # couvre que les .sh, et l'installateur Windows comme le collecteur
+      # d'endurance ne tournent jamais en CI. Une coquille de syntaxe n'y
+      # était découverte que par l'utilisateur, sur sa machine.
+      - name: Analyse des scripts PowerShell
+        shell: pwsh
+        run: |
+          $fautifs = @()
+          Get-ChildItem -Recurse -Filter *.ps1 | ForEach-Object {
+            $erreurs = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              $_.FullName, [ref]$null, [ref]$erreurs) | Out-Null
+            if ($erreurs -and $erreurs.Count -gt 0) {
+              $fautifs += $_.FullName
+              Write-Host "== $($_.FullName)"
+              $erreurs | ForEach-Object { Write-Host "   $($_.Extent.StartLineNumber): $($_.Message)" }
+            } else {
+              Write-Host "ok  $($_.Name)"
+            }
+          }
+          if ($fautifs.Count -gt 0) { throw "$($fautifs.Count) script(s) PowerShell invalides" }
+      # ET avec Windows PowerShell 5.1 : c'est LUI qu'obtient un double-clic
+      # ou la ligne `powershell -ExecutionPolicy Bypass -File …` imprimee en
+      # tete de l'installateur. Une syntaxe acceptee par pwsh 7 mais inconnue
+      # de 5.1 (l'operateur `??`, par exemple) passerait sinon la CI et
+      # echouerait sur le poste de l'utilisateur.
+      - name: Analyse des scripts PowerShell (Windows PowerShell 5.1)
+        shell: powershell
+        run: |
+          $fautifs = @()
+          Get-ChildItem -Recurse -Filter *.ps1 | ForEach-Object {
+            $erreurs = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              $_.FullName, [ref]$null, [ref]$erreurs) | Out-Null
+            if ($erreurs -and $erreurs.Count -gt 0) {
+              $fautifs += $_.FullName
+              Write-Host "== $($_.FullName)"
+              $erreurs | ForEach-Object { Write-Host "   $($_.Extent.StartLineNumber): $($_.Message)" }
+            } else {
+              Write-Host "ok  $($_.Name)"
+            }
+          }
+          if ($fautifs.Count -gt 0) { throw "$($fautifs.Count) script(s) invalides en PowerShell 5.1" }
       - name: Tests (Windows)
         shell: bash
         run: |
@@ -146,6 +193,10 @@ jobs:
       - name: Dépendances système (GStreamer dev + plugins + rtsp-server)
         run: |
           set -o pipefail
+          # Les images GitHub embarquent des depots tiers (packages.microsoft.com)
+          # dont la signature expire : `apt-get update` sort alors en 100 et
+          # casse un job qui n'a besoin que du depot Ubuntu.
+          sudo rm -f /etc/apt/sources.list.d/microsoft*.list /etc/apt/sources.list.d/microsoft*.sources
           sudo apt-get update 2>&1 | tail -1
           sudo apt-get install -y libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
             gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
@@ -185,7 +236,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Dépendances système (ALSA pour le MIDI)
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+        run: |
+          set -o pipefail
+          # Les images GitHub embarquent des depots tiers (packages.microsoft.com)
+          # dont la signature expire : `apt-get update` sort alors en 100 et
+          # casse un job qui n'a besoin que du depot Ubuntu.
+          sudo rm -f /etc/apt/sources.list.d/microsoft*.list /etc/apt/sources.list.d/microsoft*.sources
+          sudo apt-get update 2>&1 | tail -1
+          sudo apt-get install -y libasound2-dev 2>&1 | tail -1
       - name: cargo-deny (licences des dépendances)
         run: |
           set -o pipefail
@@ -203,6 +261,11 @@ jobs:
       - name: Shellcheck des scripts
         run: |
           set -o pipefail
+          # Les images GitHub embarquent des depots tiers (packages.microsoft.com)
+          # dont la signature expire : `apt-get update` sort alors en 100 et
+          # casse un job qui n'a besoin que du depot Ubuntu.
+          sudo rm -f /etc/apt/sources.list.d/microsoft*.list /etc/apt/sources.list.d/microsoft*.sources
+          sudo apt-get update 2>&1 | tail -1
           sudo apt-get install -y shellcheck 2>&1 | tee apt.log
           shellcheck tools/bench/*.sh tools/endurance/*.sh deploy/*.sh 2>&1 | tee sc.log
       - name: Publier les logs en cas d'échec
@@ -239,7 +302,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Dépendances système (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+        run: |
+          set -o pipefail
+          # Les images GitHub embarquent des depots tiers (packages.microsoft.com)
+          # dont la signature expire : `apt-get update` sort alors en 100 et
+          # casse un job qui n'a besoin que du depot Ubuntu.
+          sudo rm -f /etc/apt/sources.list.d/microsoft*.list /etc/apt/sources.list.d/microsoft*.sources
+          sudo apt-get update 2>&1 | tail -1
+          sudo apt-get install -y libasound2-dev 2>&1 | tail -1
       - name: Build release
         shell: bash
         run: cargo build --release -p toolbox-node
@@ -269,9 +339,24 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          # pkgconfiglite : les paquets GStreamer MSVC n'embarquent pas
-          # pkg-config.exe, requis par les crates *-sys.
-          choco install -y gstreamer gstreamer-devel pkgconfiglite --no-progress 2>&1 | tail -5 | tee gstwin.log
+          # DEUX installations SEPAREES, et c'est important : chocolatey
+          # traite une commande comme UNE transaction, donc un seul paquet
+          # introuvable annule TOUS les autres. Le 2026-08-05, pkgconfiglite
+          # a disparu du depot communautaire (« Unable to find package ») et
+          # a emporte gstreamer avec lui : « Chocolatey installed 0/0
+          # packages », puis « dossier GStreamer : INTROUVABLE » -- alors que
+          # GStreamer, lui, etait parfaitement disponible.
+          choco install -y gstreamer gstreamer-devel --no-progress 2>&1 | tail -5 | tee gstwin.log
+          # pkg-config.exe : absent des paquets GStreamer MSVC, requis par les
+          # crates *-sys. Non bloquant ici pour que le diagnostic soit lisible
+          # (l'etape suivante dira precisement ce qui manque) au lieu d'un
+          # « INTROUVABLE » qui accuse GStreamer a tort.
+          if ! choco install -y pkgconfiglite --no-progress 2>&1 | tail -5 | tee -a gstwin.log; then
+            echo "pkgconfiglite indisponible : voir l'etape suivante" | tee -a gstwin.log
+          fi
+          if ! command -v pkg-config > /dev/null 2>&1; then
+            echo "ATTENTION : pkg-config absent du runner -- le pack video ne peut pas etre construit." | tee -a gstwin.log
+          fi
       - name: Build release (feature gstreamer)
         shell: bash
         run: |
@@ -334,7 +419,14 @@ jobs:
           targets: aarch64-unknown-linux-gnu
       - uses: Swatinem/rust-cache@v2
       - name: Linker croisé ARM64
-        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+        run: |
+          set -o pipefail
+          # Les images GitHub embarquent des depots tiers (packages.microsoft.com)
+          # dont la signature expire : `apt-get update` sort alors en 100 et
+          # casse un job qui n'a besoin que du depot Ubuntu.
+          sudo rm -f /etc/apt/sources.list.d/microsoft*.list /etc/apt/sources.list.d/microsoft*.sources
+          sudo apt-get update 2>&1 | tail -1
+          sudo apt-get install -y gcc-aarch64-linux-gnu 2>&1 | tail -1
       - name: Build release ARM64 (sans MIDI — ALSA croisé indisponible)
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc

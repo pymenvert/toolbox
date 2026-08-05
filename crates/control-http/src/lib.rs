@@ -336,7 +336,17 @@ pub fn router(app: AppState) -> Router {
         .route("/api/chataigne", get(chataigne_get))
         .route("/api/chataigne/lancer", post(chataigne_lancer))
         .route("/api/luts", get(luts_list))
-        .route("/api/luts/{name}", put(lut_upload).delete(lut_delete))
+        // axum plafonne le corps des extracteurs (`Bytes`) à 2 Mo par défaut :
+        // sans ce relèvement, le garde « 64 Mo max » de lut_upload était du
+        // code mort et une LUT 64 points (~7 Mo, taille courante d'un pack
+        // d'étalonnage) était refusée par un 413 sans corps JSON — l'UI
+        // n'affichait alors qu'une erreur générique.
+        .route(
+            "/api/luts/{name}",
+            put(lut_upload)
+                .delete(lut_delete)
+                .layer(axum::extract::DefaultBodyLimit::max(64 * 1024 * 1024)),
+        )
         .route("/api/reglages", get(reglages_get).post(reglages_set))
         .route("/api/ndi/sources", get(ndi_sources))
         .route("/api/preview.png", get(preview_png))
@@ -344,6 +354,7 @@ pub fn router(app: AppState) -> Router {
         .route("/api/diagnostic.zip", get(diagnostic_zip))
         .route("/api/features", get(features_get).post(features_set))
         .route("/api/fleet/media", get(fleet_media))
+        .route("/api/fleet/identify", post(fleet_identify))
         .route("/api/fleet/push", post(fleet_push))
         .route("/api/dmx", get(dmx_get).post(dmx_commande))
         .route("/api/cues", get(cues_get).post(cues_commande))
@@ -777,7 +788,20 @@ async fn system_stats(State(app): State<AppState>) -> Json<serde_json::Value> {
             serde_json::Value::Null
         };
         objet.insert("rendu".into(), rendu);
-        objet.insert("fps".into(), serde_json::json!(*app.output.fps.borrow()));
+        // `fps` suit EXACTEMENT la meme regle que `rendu`. Il restait un zero
+        // dur quand la mesure n'existe pas (mode KMS, ou binaire sans la
+        // feature `render` -- c'est-a-dire l'artefact officiel ARM64) : rien
+        // ne peuple le compteur, mais 0 img/s se lit « sortie morte ». Un run
+        // d'endurance parfaitement sain sur un Pi ressortait ainsi « sortie
+        // sans aucune image : 100 % du run ».
+        objet.insert(
+            "fps".into(),
+            if app.output.mesure_disponible {
+                serde_json::json!(*app.output.fps.borrow())
+            } else {
+                serde_json::Value::Null
+            },
+        );
     }
     Json(json)
 }
@@ -1383,6 +1407,59 @@ async fn fleet_media(
     Ok(Json(json))
 }
 
+/// Fait clignoter la mire « coins » sur un AUTRE node du parc.
+///
+/// L'UI visait la cible directement, en `mode: "no-cors"`. Depuis la v3.4.0,
+/// toute requête mutatrice dont l'`Origin` ne correspond pas au `Host` est
+/// refusée — et le navigateur JOINT toujours `Origin` sur un POST
+/// inter-origines. La cible répondait donc 403, tracé dans SON journal (que
+/// personne ne regarde), pendant que l'UI annonçait « Mire envoyée » : le
+/// bouton n'a jamais fonctionné entre deux machines. Un relais
+/// serveur-à-serveur contourne le problème sans affaiblir l'anti-CSRF, sur
+/// le modèle de `fleet_media` : la cible doit être un node connu du parc, et
+/// c'est le jeton de parc — jamais le mot de passe de l'UI — qui authentifie.
+async fn fleet_identify(
+    State(app): State<AppState>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Result<StatusCode, ApiError> {
+    let url = params
+        .get("url")
+        .ok_or_else(|| CoreError::InvalidCommand("paramètre url manquant".into()))?;
+    if !urls_du_parc(&app).iter().any(|u| u == url) {
+        return Err(CoreError::InvalidCommand(format!("node inconnu du parc : {url}")).into());
+    }
+    let mut requete = client_http()?.post(format!("{url}api/identify"));
+    if let Some(jeton) = &app.fleet_token {
+        requete = requete.header(ENTETE_JETON_PARC, jeton.clone());
+    }
+    let reponse = requete
+        .send()
+        .await
+        .map_err(|e| CoreError::InvalidCommand(format!("node injoignable : {e}")))?;
+    if !reponse.status().is_success() {
+        let statut = reponse.status();
+        // Message SPÉCIFIQUE : le jeton de parc n'ouvre volontairement que
+        // les échanges de médias. Renvoyer ici le conseil « posez le même
+        // fleet_token » enverrait l'utilisateur régler un paramètre qui ne
+        // changerait rien — l'identification restera refusée par un node
+        // protégé par mot de passe, et c'est voulu : la mire « coins »
+        // couvre la sortie pendant 4 s, donc en plein spectacle.
+        let message = if statut == reqwest::StatusCode::UNAUTHORIZED
+            || statut == reqwest::StatusCode::FORBIDDEN
+        {
+            "node refusé (HTTP 401/403) : il est protégé par un mot de passe d'interface. \
+             L'identification à distance n'est pas couverte par le jeton de parc (elle \
+             couvrirait la sortie d'une mire pendant 4 s). Ouvrez l'UI de ce node pour \
+             l'identifier."
+                .to_string()
+        } else {
+            format!("refusé par le node : HTTP {statut}")
+        };
+        return Err(CoreError::InvalidCommand(message).into());
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
 #[derive(Deserialize)]
 struct PushRequest {
     /// Média LOCAL à envoyer (nom plat, déjà dans `media/`).
@@ -1590,7 +1667,13 @@ async fn diagnostic_zip(State(app): State<AppState>) -> Result<Response, ApiErro
          Contenu : etat.json (etat complet), journal.json (dernieres lignes\n\
          de log), systeme.json (CPU, memoire, disque, Tailscale),\n\
          sortie.json (ecran/plein ecran), ecrans.json, medias.json,\n\
-         presets.json, fleet.json (nodes decouverts en mDNS).\n",
+         presets.json (la LISTE des noms), fleet.json (nodes decouverts en\n\
+         mDNS), presets/<nom>.json et presets/mapping/<nom>.json (le CONTENU\n\
+         de chaque preset, octets bruts), etat/*.json (fichiers d'etat bruts :\n\
+         console lumieres, conduite du sequenceur, fonctions, reglages,\n\
+         demarrage).\n\n\
+         Cette archive sert AUSSI de sauvegarde avant une mise a jour : les\n\
+         dossiers presets/ et etat/ suffisent a remonter un node.\n",
         app.node_name,
         app.version,
         std::env::consts::OS,
@@ -1617,7 +1700,20 @@ async fn diagnostic_zip(State(app): State<AppState>) -> Result<Response, ApiErro
             serde_json::Value::Null
         };
         objet.insert("rendu".into(), rendu);
-        objet.insert("fps".into(), serde_json::json!(*app.output.fps.borrow()));
+        // `fps` suit EXACTEMENT la meme regle que `rendu`. Il restait un zero
+        // dur quand la mesure n'existe pas (mode KMS, ou binaire sans la
+        // feature `render` -- c'est-a-dire l'artefact officiel ARM64) : rien
+        // ne peuple le compteur, mais 0 img/s se lit « sortie morte ». Un run
+        // d'endurance parfaitement sain sur un Pi ressortait ainsi « sortie
+        // sans aucune image : 100 % du run ».
+        objet.insert(
+            "fps".into(),
+            if app.output.mesure_disponible {
+                serde_json::json!(*app.output.fps.borrow())
+            } else {
+                serde_json::Value::Null
+            },
+        );
     }
     zip.add("systeme.json", &json(&systeme)?);
     zip.add("sortie.json", &json(&*app.output.settings.borrow())?);
@@ -1631,6 +1727,45 @@ async fn diagnostic_zip(State(app): State<AppState>) -> Result<Response, ApiErro
         }))?,
     );
     zip.add("fleet.json", &json(&*app.fleet.borrow())?);
+
+    // CONTENU des presets, pas seulement leurs noms. C'est le seul export
+    // que le produit propose, donc la seule sauvegarde qu'un opérateur non
+    // développeur puisse faire avant une mise à jour — et il ne contenait
+    // que la liste. En meilleur effort : un preset illisible ne doit pas
+    // faire échouer tout l'export (c'est justement quand ça va mal qu'on le
+    // demande).
+    // Octets BRUTS, comme les fichiers d'état plus bas : passer par `load`
+    // validerait le preset et le re-sérialiserait. Un preset abîmé — celui
+    // qu'on veut justement récupérer — serait alors le seul absent de la
+    // sauvegarde, et un champ écrit par une version plus récente
+    // disparaîtrait sans bruit.
+    for nom in app.presets.list().unwrap_or_default() {
+        if let Ok(octets) = app.presets.octets(&nom) {
+            zip.add(&format!("presets/{nom}.json"), &octets);
+        }
+    }
+    for nom in app.mapping_presets.list().unwrap_or_default() {
+        if let Ok(octets) = app.mapping_presets.octets(&nom) {
+            zip.add(&format!("presets/mapping/{nom}.json"), &octets);
+        }
+    }
+
+    // Fichiers d'état bruts : la conduite du spectacle, la console lumières,
+    // les bascules de fonctions, les réglages et l'état de démarrage. Aucun
+    // n'y figurait, et ce sont eux qu'on ne reconstitue pas de mémoire.
+    // Lecture brute (et non re-sérialisation) : si le fichier est corrompu,
+    // on veut justement l'original tel qu'il est sur le disque.
+    for fichier in [
+        "lumieres.json",
+        "sequences.json",
+        "fonctions.json",
+        "reglages.json",
+        "demarrage.json",
+    ] {
+        if let Ok(octets) = std::fs::read(fichier) {
+            zip.add(&format!("etat/{fichier}"), &octets);
+        }
+    }
 
     let filename = format!("diagnostic-{}.zip", app.node_name);
     Ok((
@@ -1837,7 +1972,12 @@ async fn outputs_get(State(app): State<AppState>) -> Json<serde_json::Value> {
     Json(serde_json::json!({
         "monitors": *app.output.monitors.borrow(),
         "settings": *app.output.settings.borrow(),
-        "fps": *app.output.fps.borrow(),
+        // null (et non 0) quand aucune fenetre ne peut alimenter le compteur.
+        "fps": if app.output.mesure_disponible {
+            serde_json::json!(*app.output.fps.borrow())
+        } else {
+            serde_json::Value::Null
+        },
     }))
 }
 
@@ -1925,8 +2065,14 @@ async fn ws_events(mut socket: WebSocket, app: AppState) {
                         "event": "position",
                         "position": p.position,
                         "duration": p.duration,
-                        // Fluidité de la fenêtre de sortie (0 = pas de rendu).
-                        "fps": *app.output.fps.borrow(),
+                        // Fluidite de la fenetre de sortie : 0 = la fenetre
+                        // existe mais ne dessine pas ; null = il n'y a pas de
+                        // fenetre du tout (mode KMS, binaire sans `render`).
+                        "fps": if app.output.mesure_disponible {
+                            serde_json::json!(*app.output.fps.borrow())
+                        } else {
+                            serde_json::Value::Null
+                        },
                     });
                     if socket.send(Message::Text(message.to_string().into())).await.is_err() {
                         break;
@@ -2384,6 +2530,99 @@ mod tests {
                 .expect("resp");
             assert_eq!(response.status(), expected, "uri: {uri}");
         }
+    }
+
+    /// `fps` doit suivre EXACTEMENT la règle de `rendu` : `null` quand rien
+    /// ne peut le peupler. Il restait un zéro dur, et un run d'endurance sur
+    /// un Pi parfaitement sain ressortait « sortie sans aucune image ». Rien
+    /// ne retenait ce correctif : le seul test qui regarde ce champ force le
+    /// drapeau à vrai.
+    #[tokio::test]
+    async fn fps_est_nul_quand_la_mesure_n_existe_pas() {
+        let bed = testbed(); // mesure_disponible = false par défaut
+        for route in ["/api/system", "/api/outputs"] {
+            let response = bed
+                .router
+                .clone()
+                .oneshot(
+                    HttpRequest::get(route)
+                        .body(Body::empty())
+                        .expect("requête"),
+                )
+                .await
+                .expect("réponse");
+            let json = body_json(response).await;
+            assert!(
+                json["fps"].is_null(),
+                "{route} : fps doit être null quand la mesure n'existe pas, pas 0 —                  un zéro se lit « sortie morte »"
+            );
+        }
+        // Et `rendu` suit la même règle, sur la route qui le porte.
+        let response = bed
+            .router
+            .clone()
+            .oneshot(
+                HttpRequest::get("/api/system")
+                    .body(Body::empty())
+                    .expect("requête"),
+            )
+            .await
+            .expect("réponse");
+        assert!(body_json(response).await["rendu"].is_null());
+    }
+
+    /// Le relais d'identification n'accepte que des nodes CONNUS du parc :
+    /// l'URL vient du client, et la suivre sans contrôle serait un SSRF.
+    #[tokio::test]
+    async fn le_relais_d_identification_refuse_un_node_inconnu() {
+        let bed = testbed(); // parc vide
+        let response = bed
+            .router
+            .clone()
+            .oneshot(
+                HttpRequest::post("/api/fleet/identify?url=http://192.168.1.99:8080/")
+                    .header("origin", "http://192.168.1.50:8080")
+                    .header("host", "192.168.1.50:8080")
+                    .body(Body::empty())
+                    .expect("requête"),
+            )
+            .await
+            .expect("réponse");
+        assert_ne!(
+            response.status(),
+            StatusCode::NO_CONTENT,
+            "un node absent du parc ne doit pas être contacté"
+        );
+    }
+
+    /// Une LUT d'étalonnage réaliste (64 points ≈ 7 Mo) doit atteindre le
+    /// parseur. Sans `DefaultBodyLimit` relevé sur la route, axum coupait à
+    /// 2 Mo et répondait 413 SANS corps JSON : le garde « 64 Mo max » de
+    /// `lut_upload` ne servait à rien et l'UI n'affichait qu'une erreur
+    /// générique. On envoie 3 Mo de contenu invalide : le refus doit venir du
+    /// parseur (400), pas du cadre (413).
+    #[tokio::test]
+    async fn depot_de_lut_depasse_la_limite_de_corps_par_defaut() {
+        let bed = testbed();
+        let gros = "x".repeat(3 * 1024 * 1024);
+        let response = bed
+            .router
+            .clone()
+            .oneshot(
+                HttpRequest::put("/api/luts/etalon.cube")
+                    .header("origin", "http://192.168.1.50:8080")
+                    .header("host", "192.168.1.50:8080")
+                    .body(Body::from(gros))
+                    .expect("requête"),
+            )
+            .await
+            .expect("réponse");
+        assert_ne!(
+            response.status(),
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "le corps a été coupé par axum avant d'atteindre lut_upload"
+        );
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

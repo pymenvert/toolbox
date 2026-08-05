@@ -25,10 +25,16 @@ jobs:
             **Quel fichier télécharger ?**
             - Windows : `toolbox-node-windows-x64-gstreamer.zip` — pack
               complet avec la vidéo, dézipper et lancer, rien à installer.
+              **C'est le seul binaire publié qui lit des vidéos.**
             - Windows sans vidéo (léger) : `toolbox-node-windows-x64.zip`.
-            - Ubuntu/Debian : `toolbox-node-linux-x64.tar.gz`
-              (+ paquets gstreamer1.0-*, voir le manuel).
-            - Raspberry Pi 4/5 : `toolbox-node-raspberrypi-arm64.tar.gz`.
+            - Ubuntu/Debian : `toolbox-node-linux-x64.tar.gz` — mires,
+              mapping, calibrage et OSC/MIDI, **sans lecture vidéo** (les
+              paquets `gstreamer1.0-*` n'y changent rien : pour lire des
+              vidéos, recompiler avec `--features gstreamer`).
+            - Raspberry Pi 4/5 : `toolbox-node-raspberrypi-arm64.tar.gz` —
+              **pilotage seul, cette archive ne projette rien** (compilée
+              sans fenêtre de sortie, sans MIDI et sans GStreamer). Pour
+              projeter depuis un Pi, compiler sur le Pi — voir le manuel.
 
             Manuel : `docs/manuel.html` du dépôt. Journal des changements :
             `CHANGELOG.md`.
@@ -41,7 +47,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Dépendances système (ALSA)
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+        run: |
+          set -o pipefail
+          # Les images GitHub embarquent des depots tiers (packages.microsoft.com)
+          # dont la signature expire : `apt-get update` sort alors en 100 et
+          # casse un job qui n'a besoin que du depot Ubuntu.
+          sudo rm -f /etc/apt/sources.list.d/microsoft*.list /etc/apt/sources.list.d/microsoft*.sources
+          sudo apt-get update 2>&1 | tail -1
+          sudo apt-get install -y libasound2-dev 2>&1 | tail -1
       - name: Build + archive
         run: |
           cargo build --release -p toolbox-node
@@ -53,6 +66,11 @@ jobs:
           # installations permanentes : ./deploy/install.sh
           cp deploy/install.sh deploy/smoke.sh staging/deploy/
           cp -r deploy/systemd staging/deploy/
+          # Mentions légales : docs/TIERS.md dit lui-même être « inclus dans
+          # chaque archive de release » (mention IJG obligatoire, LGPL de
+          # GStreamer). Sans ces deux fichiers, l'archive publique ne tient
+          # pas cette promesse.
+          cp docs/TIERS.md LICENSE staging/
           tar czf toolbox-node-linux-x64.tar.gz -C staging .
       - uses: softprops/action-gh-release@v2
         with:
@@ -70,7 +88,9 @@ jobs:
         run: |
           cargo build --release -p toolbox-node
           New-Item -ItemType Directory staging | Out-Null
-          Copy-Item target/release/toolbox-node.exe, deploy/run-portable.bat, deploy/install-autostart-windows.bat, node.toml.example staging/
+          # docs/TIERS.md + LICENSE : mentions légales que le fichier lui-même
+          # annonce comme livrées avec chaque archive.
+          Copy-Item target/release/toolbox-node.exe, deploy/run-portable.bat, deploy/install-autostart-windows.bat, deploy/installer-windows.ps1, node.toml.example, docs/TIERS.md, LICENSE staging/
           Compress-Archive -Path staging/* -DestinationPath toolbox-node-windows-x64.zip
       - uses: softprops/action-gh-release@v2
         with:
@@ -85,7 +105,16 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: GStreamer MSVC (dev + runtime) + pkg-config
         shell: bash
-        run: choco install -y gstreamer gstreamer-devel pkgconfiglite --no-progress 2>&1 | tail -3
+        # Installations SEPAREES : chocolatey annule toute la transaction si
+        # UN paquet est introuvable. Le 2026-08-05, pkgconfiglite a disparu du
+        # depot communautaire et a emporte GStreamer avec lui -- le pack video
+        # public, seul binaire publie qui lit des videos, cessait d'etre
+        # construit sans que la cause soit lisible.
+        run: |
+          set -o pipefail
+          choco install -y gstreamer gstreamer-devel --no-progress 2>&1 | tail -3
+          choco install -y pkgconfiglite --no-progress 2>&1 | tail -3 || \
+            echo "pkgconfiglite indisponible : build video impossible sur ce runner"
       - name: Build + pack autonome
         shell: bash
         run: |
@@ -100,7 +129,10 @@ jobs:
           cargo build --release -p toolbox-node --features gstreamer
           mkdir -p dist/lib
           cp target/release/toolbox-node.exe dist/
-          cp deploy/run-portable.bat deploy/install-autostart-windows.bat node.toml.example dist/
+          cp deploy/run-portable.bat deploy/install-autostart-windows.bat deploy/installer-windows.ps1 node.toml.example dist/
+          # Obligation la plus forte de toutes les archives : ce pack embarque
+          # les DLL et plugins GStreamer (LGPL, et GPL pour gst-plugins-ugly).
+          cp docs/TIERS.md LICENSE dist/
           cp "$GST"/bin/*.dll dist/
           cp -r "$GST"/lib/gstreamer-1.0 dist/lib/
           rm -f dist/lib/gstreamer-1.0/*.pdb dist/lib/gstreamer-1.0/gstpython.dll 2>/dev/null || true
@@ -121,7 +153,14 @@ jobs:
           targets: aarch64-unknown-linux-gnu
       - uses: Swatinem/rust-cache@v2
       - name: Linker croisé ARM64
-        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+        run: |
+          set -o pipefail
+          # Les images GitHub embarquent des depots tiers (packages.microsoft.com)
+          # dont la signature expire : `apt-get update` sort alors en 100 et
+          # casse un job qui n'a besoin que du depot Ubuntu.
+          sudo rm -f /etc/apt/sources.list.d/microsoft*.list /etc/apt/sources.list.d/microsoft*.sources
+          sudo apt-get update 2>&1 | tail -1
+          sudo apt-get install -y gcc-aarch64-linux-gnu 2>&1 | tail -1
       - name: Build + archive (sans MIDI/fenêtre — voir install.sh pour le Pi)
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
@@ -134,6 +173,7 @@ jobs:
           # profil + réglages (./deploy/install.sh depuis l'archive).
           cp deploy/install.sh deploy/smoke.sh staging/deploy/
           cp -r deploy/systemd staging/deploy/
+          cp docs/TIERS.md LICENSE staging/
           tar czf toolbox-node-raspberrypi-arm64.tar.gz -C staging .
       - uses: softprops/action-gh-release@v2
         with:

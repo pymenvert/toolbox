@@ -79,6 +79,16 @@ pub enum TestPattern {
 /// | `preset_fade`      | `/preset/fade <name> <s>`    |
 /// | `sync_arm`         | `/sync/arm`                  |
 /// | `sync_start_at`    | `/sync/startAt <unix f64>`   |
+/// | `lut_set`          | `/lut <nom.cube>` (vide = retirer) |
+/// | `blackout_set`     | `/blackout <0|1> [fondu ms]` |
+/// | `freeze_set`       | `/freeze <0|1>`              |
+/// | `cue_go`           | `/cue/go <nom>`              |
+/// | `dmx_scene`        | `/dmx/scene <nom>`           |
+/// | `dmx_chaser`       | `/dmx/chaser [nom]` (rien = stop) |
+/// | `dmx_master`       | `/dmx/master <0..255 ou 0..1>` |
+/// | `dmx_fader`        | `/dmx/fader <id> <0..255 ou 0..1>` |
+/// | `mesh_set`         | — (UI/REST)                  |
+/// | `mesh_reset`       | — (UI/REST)                  |
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case")]
 pub enum Command {
@@ -244,6 +254,21 @@ pub enum Command {
     DmxChaser {
         name: Option<String>,
     },
+    /// Grand master lumières, 0..=255 (OSC `/dmx/master`, fader MIDI).
+    /// Le master et les niveaux de fader n'existaient QUE via POST
+    /// /api/dmx, donc uniquement depuis la web UI : poser un fader de
+    /// surface MIDI sur le grand master — le geste le plus canonique
+    /// d'une console — était impossible, comme de le piloter depuis
+    /// Chataigne.
+    DmxMaster {
+        valeur: u8,
+    },
+    /// Niveau d'un fader lumières par identifiant, 0..=255
+    /// (OSC `/dmx/fader <id> <valeur>`).
+    DmxFader {
+        id: String,
+        valeur: u8,
+    },
     /// Arme la synchro multi-node : média prêt, position 0, en pause.
     /// (`/sync/arm` — envoyé à tous les nodes avant un départ commun.)
     SyncArm,
@@ -257,6 +282,70 @@ pub enum Command {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// La table en tête de module s'annonce comme la référence du vocabulaire
+    /// (« Chaque commande a une représentation JSON canonique … et une adresse
+    /// OSC équivalente documentée ci-dessous »). Elle s'était arrêtée à la
+    /// v1.1 : huit commandes livrées depuis — dont `blackout_set`, `cue_go` et
+    /// `dmx_scene`, qui ONT une adresse OSC — n'y figuraient pas. Qui la
+    /// consultait en concluait qu'elles n'étaient pas pilotables.
+    #[test]
+    fn la_table_de_documentation_couvre_toutes_les_commandes() {
+        let source = include_str!("command.rs");
+
+        let documentees: std::collections::BTreeSet<String> = source
+            .lines()
+            .filter_map(|l| l.trim_start().strip_prefix("/// | `"))
+            .filter_map(|reste| reste.split('`').next())
+            .map(str::to_string)
+            .collect();
+
+        // Variantes de l'enum : lignes indentées de 4 espaces commençant par
+        // une majuscule, entre `pub enum Command {` et sa fermeture.
+        let corps = source
+            .split_once("pub enum Command {")
+            .map(|(_, apres)| apres)
+            .unwrap_or_default();
+        let mut variantes = std::collections::BTreeSet::new();
+        for ligne in corps.lines() {
+            if ligne == "}" {
+                break;
+            }
+            let Some(nom) = ligne.strip_prefix("    ") else {
+                continue;
+            };
+            if !nom.starts_with(char::is_uppercase) {
+                continue;
+            }
+            let nom: String = nom
+                .chars()
+                .take_while(|c| c.is_alphanumeric())
+                .collect::<String>();
+            if nom.is_empty() {
+                continue;
+            }
+            // CamelCase → snake_case, comme `rename_all = "snake_case"`.
+            let mut snake = String::new();
+            for (i, c) in nom.chars().enumerate() {
+                if c.is_uppercase() && i > 0 {
+                    snake.push('_');
+                }
+                snake.extend(c.to_lowercase());
+            }
+            variantes.insert(snake);
+        }
+
+        assert!(
+            variantes.len() >= 40,
+            "analyse de l'enum ratée : {} variantes trouvées",
+            variantes.len()
+        );
+        let absentes: Vec<_> = variantes.difference(&documentees).collect();
+        assert!(
+            absentes.is_empty(),
+            "commandes absentes de la table de documentation : {absentes:?}"
+        );
+    }
 
     /// Le format JSON est un contrat public (web UI, REST) : on le fige par test.
     #[test]

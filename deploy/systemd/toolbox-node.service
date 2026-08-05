@@ -2,13 +2,37 @@
 # (@PREFIX@ et @USER@ sont remplacés à l'installation).
 #
 # Mode kiosque : le node redémarre tout seul en cas de crash ou au boot ;
-# combiné à [startup] preset/autoplay dans node.toml, un Pi branché à un
-# vidéoprojecteur reprend son show sans intervention.
+# combiné à [startup] preset/autoplay dans node.toml, un Pi reprend son show
+# sans intervention.
+#
+# ATTENTION — CE QUE CETTE UNITÉ PROJETTE, ET CE QU'ELLE NE PROJETTE PAS.
+# Telle quelle, elle est ordonnée sur multi-user.target et ne reçoit aucune
+# variable d'affichage. Elle convient à deux usages :
+#   - le PILOTAGE seul (web UI, mapping, OSC/MIDI, lumières, séquenceur) ;
+#   - la sortie DRM/KMS (`[output] mode = "kms"` dans node.toml), qui écrit
+#     directement sur l'écran sans serveur graphique — le chemin conseillé
+#     sur Raspberry Pi OS Lite.
+# En mode fenêtre (le DÉFAUT), un service lancé dans ce contexte n'a aucun
+# serveur d'affichage à contacter : le node journalise « fenêtre de sortie
+# indisponible » et continue SANS projeter. Il ne plante pas — donc rien
+# n'attire l'attention, et le vidéoprojecteur reste noir.
+#
+# Pour un kiosque en mode fenêtre sur Raspberry Pi OS Desktop, décommenter
+# le bloc ci-dessous ET la ligne graphical.target, après avoir vérifié la
+# session réellement utilisée (X11 ou Wayland) et l'UID du compte :
+#   loginctl show-user @USER@ -p RuntimePath  →  XDG_RUNTIME_DIR=<valeur>
+#   (ou simplement : id -u @USER@  →  /run/user/<uid>)
+#   echo $DISPLAY / $WAYLAND_DISPLAY dans une session ouverte
+# Non activé par défaut : le passage à graphical.target empêcherait le
+# service de démarrer sur une machine sans bureau (Pi OS Lite), et ces
+# valeurs dépendent de l'installation. À valider sur un Pi réel.
 
 [Unit]
 Description=Toolbox node multimédia (player + mapping + contrôle réseau)
 After=network-online.target
 Wants=network-online.target
+# Kiosque en mode fenêtre uniquement :
+#After=graphical.target
 
 [Service]
 Type=simple
@@ -17,6 +41,10 @@ WorkingDirectory=@PREFIX@
 ExecStart=@PREFIX@/toolbox-node
 Restart=always
 RestartSec=2
+# Kiosque en mode fenêtre uniquement (voir l'en-tête) :
+#Environment=DISPLAY=:0
+#Environment=WAYLAND_DISPLAY=wayland-0
+#Environment=XDG_RUNTIME_DIR=/run/user/1000
 # Limite mémoire de sécurité (un node ne doit jamais étouffer le Pi).
 MemoryMax=1G
 # Journal : stdout/stderr vont dans journald ; la page de logs de la web UI

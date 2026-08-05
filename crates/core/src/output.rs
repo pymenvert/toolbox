@@ -21,7 +21,13 @@ pub struct MonitorInfo {
 }
 
 /// Réglages appliqués par la fenêtre de sortie (modifiables à chaud).
+///
+/// `#[serde(default)]` : un `sortie.json` écrit par une version antérieure
+/// (ou amputé d'un champ ajouté depuis) reste lisible, les champs absents
+/// prenant leur valeur par défaut — au lieu de faire repartir la sortie sur
+/// le mauvais écran après une mise à jour.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct OutputSettings {
     /// Écran cible, par index dans la liste détectée.
     pub monitor: usize,
@@ -49,6 +55,17 @@ impl OutputSettings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Un `sortie.json` amputé d'un champ (version antérieure, ou champ
+    /// ajouté depuis) reste lisible : sinon la sortie repartait sur le
+    /// mauvais écran après une mise à jour.
+    #[test]
+    fn un_sortie_json_ancien_reste_lisible() {
+        let settings: OutputSettings =
+            serde_json::from_str(r#"{"monitor":2}"#).expect("un fichier ancien doit se relire");
+        assert_eq!(settings.monitor, 2);
+        assert!(!settings.fullscreen);
+    }
 
     #[test]
     fn settings_persist_and_survive_corruption() {

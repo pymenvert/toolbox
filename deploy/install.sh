@@ -38,6 +38,28 @@ done
 say()  { printf '\033[1;36m>>\033[0m %s\n' "$*"; }
 fail() { printf '\033[1;31m!!\033[0m %s\n' "$*" >&2; exit 1; }
 
+# systemd EXIGE un chemin absolu dans WorkingDirectory= et ExecStart=. Or
+# mkdir, install et chown acceptent parfaitement un préfixe relatif : sans
+# cette normalisation, `--prefix lanterne` déroulait toute l'installation
+# sans le moindre message, et seul `systemctl start` échouait ensuite, sur
+# une unité que systemd refusait de charger.
+# Un préfixe VIDE ne correspond pas à `/*` : il tomberait dans la conversion,
+# où `cd ""` réussit sans changer de répertoire — l'installation se déroulait
+# alors dans le répertoire courant, sans un mot. Le cas arrive pour de bon :
+# `--prefix "$DEST"` avec DEST oublié dans un script de provisionnement.
+[ -n "$PREFIX" ] || fail "préfixe vide : passez un chemin à --prefix"
+case "$PREFIX" in
+    /*) ;;
+    *)  # Simple préfixage par le répertoire courant : on ne CRÉE rien ici
+        # (`mkdir` poserait le dossier avant de savoir sous quelle identité,
+        # et fausserait le chown de fin d'installation) et on n'exige pas que
+        # le parent existe — `mkdir -p`, plus bas, sait le créer, et l'exiger
+        # refuserait `--prefix sous/lanterne`, que l'ancienne version
+        # acceptait.
+        PREFIX="$(pwd)/${PREFIX#./}"
+        say "Préfixe relatif converti en chemin absolu : $PREFIX" ;;
+esac
+
 # Échappe une valeur pour le REMPLACEMENT d'un sed dont le délimiteur est
 # « | » : & (rappel du motif), | (délimiteur) et \ doivent être protégés,
 # sinon un préfixe contenant l'un d'eux produirait une unité systemd cassée.
@@ -111,8 +133,13 @@ case "$MATERIEL" in
         echo "  Déconseillé : sortie RTSP au-delà de 720p (encodage au CPU)." ;;
     pi3)
         say "Matériel détecté : Raspberry Pi 3 / Zero 2 — VERSION ALLÉGÉE conseillée"
-        echo "  Conseillé   : profil « lecteur » (lecture + mapping), rendu CPU en"
-        echo "                960×540, aperçu web coupé (onglet Fonctions)."
+        echo "  Conseillé   : profil « lecteur » (lecture + mapping), rendu CPU,"
+        echo "                aperçu web coupé."
+        echo "  À FAIRE À LA MAIN : sur Pi OS Lite (sans bureau), ajouter"
+        echo "                [output] mode = \"kms\" dans node.toml — ce script ne"
+        echo "                l'écrit pas, et le mode KMS exige un binaire compilé"
+        echo "                avec --features gstreamer. C'est là que la résolution"
+        echo "                960×540 des réglages de performance s'applique."
         echo "  Déconseillé : rendu GPU (puce GLES 2.0 trop ancienne), sortie RTSP,"
         echo "                flux MJPEG au-delà de 480p, effets lourds." ;;
     pi_ancien)
@@ -197,7 +224,7 @@ if { [ -d "$PREFIX" ] && [ ! -w "$PREFIX" ]; } || { [ ! -d "$PREFIX" ] && [ ! -w
     say "Le préfixe demande les droits administrateur (sudo)."
 fi
 
-run mkdir -p "$PREFIX" "$PREFIX/media" "$PREFIX/presets" "$PREFIX/logs" "$PREFIX/shaders"
+run mkdir -p "$PREFIX" "$PREFIX/media" "$PREFIX/presets" "$PREFIX/logs" "$PREFIX/luts"
 run install -m 755 "$BINARY" "$PREFIX/toolbox-node"
 
 TMP_CONF="$(mktemp)"
@@ -267,7 +294,25 @@ if command -v systemctl > /dev/null 2>&1; then
             | sudo tee /etc/systemd/system/toolbox-node.service > /dev/null
         sudo systemctl daemon-reload
         sudo systemctl enable toolbox-node.service
-        say "Service installé. Démarrage : sudo systemctl start toolbox-node"
+        # Réinstallation par-dessus un node qui tourne : `install` a remplacé
+        # le binaire, mais le processus en cours exécute toujours l'ANCIEN
+        # code (l'inode d'origine survit tant qu'il est ouvert). Sans ce
+        # redémarrage, le script concluait « Installation terminée » et le
+        # conseil `systemctl start` ne faisait rien — le service étant déjà
+        # actif. La mise à jour semblait faite et ne l'était pas.
+        if sudo systemctl is-active --quiet toolbox-node.service; then
+            say "Service déjà actif : redémarrage sur le nouveau binaire."
+            # NON fatal : sous `set -e`, un restart refusé (binaire de la
+            # mauvaise architecture, archive tronquée…) tuait le script AVANT
+            # le chown du préfixe — l'installation repartait donc avec des
+            # fichiers appartenant à root, et le node ne pouvait plus rien
+            # enregistrer. Exactement la panne que le chown existe pour éviter.
+            if ! sudo systemctl restart toolbox-node.service; then
+                say "ATTENTION : redémarrage refusé — voir journalctl -u toolbox-node"
+            fi
+        else
+            say "Service installé. Démarrage : sudo systemctl start toolbox-node"
+        fi
         say "Logs : journalctl -u toolbox-node -f  (ou la page Logs de la web UI)"
     fi
 fi

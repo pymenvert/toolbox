@@ -30,6 +30,13 @@ impl Default for Resolution {
 }
 
 /// Modules activables — c'est ce qui rend l'installeur "à la carte" possible.
+///
+/// Uniquement les quatre interrupteurs RÉELLEMENT lus au démarrage. Il y en a
+/// eu trois autres (`sequencer`, `sync`, `ndi`) que rien ne consultait : les
+/// mettre à `true` n'allumait rien, les laisser à `false` n'éteignait rien.
+/// Le séquenceur démarre toujours (il s'arrête depuis l'onglet Fonctions), la
+/// synchro dépend de `[sync] role`, et la sortie NDI de `[ndi] sortie`. Une
+/// clé restée dans un ancien `node.toml` est ignorée sans bruit.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Modules {
@@ -37,9 +44,6 @@ pub struct Modules {
     pub osc: bool,
     pub midi: bool,
     pub http: bool,
-    pub sequencer: bool,
-    pub sync: bool,
-    pub ndi: bool,
 }
 
 impl Default for Modules {
@@ -49,9 +53,6 @@ impl Default for Modules {
             osc: true,
             midi: false,
             http: true,
-            sequencer: false,
-            sync: false,
-            ndi: false,
         }
     }
 }
@@ -121,6 +122,51 @@ pub enum ScaleTarget {
     GainR,
     GainG,
     GainB,
+    // Les cinq effets et la vitesse : le manuel promet depuis la v1 qu'« un
+    // fader MIDI ou OSC suffit à activer et doser » un effet, mais aucune
+    // cible n'existait — et un binding CC sans `scale` ne peut envoyer
+    // qu'une valeur CONSTANTE. Le fader était donc inutilisable pour ça.
+    Pixelate,
+    Posterize,
+    Noise,
+    Sharpen,
+    Mirror,
+    /// Vitesse de lecture, 0,25× à 4×, sur une échelle GÉOMÉTRIQUE :
+    /// 0,25× en bas, 0,5× au quart, 1× PILE à mi-course, 2× aux trois
+    /// quarts, 4× à fond. Un fader de vitesse se pense en octaves, et la
+    /// vitesse normale doit être atteignable — en linéaire elle tombait
+    /// entre deux crans du contrôleur.
+    Rate,
+    /// Grand master de la console lumières (0..255). Poser un fader de
+    /// surface dessus est le geste le plus canonique d'une console ; il
+    /// n'existait aucun chemin pour le faire.
+    DmxMaster,
+}
+
+impl ScaleTarget {
+    /// Les cibles, telles qu'on les écrit dans `node.toml`. Recopier cette
+    /// liste à la main dans le message d'erreur l'avait déjà laissée en
+    /// arrière d'une version : `dmx_master` existait et fonctionnait, mais
+    /// la seule liste que l'opérateur voit au démarrage l'ignorait. Un test
+    /// vérifie qu'elle reste alignée sur l'énumération.
+    pub const NOMS: &'static [&'static str] = &[
+        "volume",
+        "brightness",
+        "contrast",
+        "gamma",
+        "saturation",
+        "hue",
+        "gain_r",
+        "gain_g",
+        "gain_b",
+        "pixelate",
+        "posterize",
+        "noise",
+        "sharpen",
+        "mirror",
+        "rate",
+        "dmx_master",
+    ];
 }
 
 /// Un binding MIDI : note ou CC → commande fixe ou paramètre continu.
@@ -148,7 +194,12 @@ pub struct MidiBinding {
     /// est ignorée avec un ERROR au lieu de faire échouer tout le node.toml.
     #[serde(default, deserialize_with = "commande_tolerante")]
     pub command: Option<Command>,
-    /// Paramètre continu piloté par la valeur du CC.
+    /// Paramètre continu piloté par la valeur du CC. Désérialisation
+    /// TOLÉRANTE, comme `command` : une cible inconnue — une faute de frappe
+    /// dans un nom qu'on vient d'écrire à la main — est ignorée avec un
+    /// avertissement, au lieu d'empêcher le node de démarrer. C'est la panne
+    /// que la tolérance sur `command` avait justement été écrite pour éviter.
+    #[serde(default, deserialize_with = "cible_tolerante")]
     pub scale: Option<ScaleTarget>,
 }
 
@@ -168,6 +219,24 @@ where
         Err(err) => {
             noter(format!(
                 "binding MIDI ignoré : commande inconnue ({err}) dans « {brut} »"
+            ));
+            Ok(None)
+        }
+    }
+}
+
+/// Même filet que [`commande_tolerante`], pour la cible d'un CC.
+fn cible_tolerante<'de, D>(deserializer: D) -> Result<Option<ScaleTarget>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let brut = toml::Value::deserialize(deserializer)?;
+    match brut.clone().try_into::<ScaleTarget>() {
+        Ok(cible) => Ok(Some(cible)),
+        Err(err) => {
+            noter(format!(
+                "binding MIDI ignoré : cible « {brut} » inconnue ({err}). Cibles possibles : {}",
+                ScaleTarget::NOMS.join(", ")
             ));
             Ok(None)
         }
@@ -430,12 +499,18 @@ impl Default for Limits {
 }
 
 /// Chemins des données. Relatifs au dossier de travail → portable par défaut.
+///
+/// Pas de champ `shaders` : les shaders sont embarqués dans le binaire par
+/// `include_str!`. Le réglage a existé, n'a jamais été lu par personne, et
+/// laissait croire qu'on pouvait déposer des shaders dans un dossier. Un
+/// `shaders = …` resté dans un ancien `node.toml` est simplement ignoré
+/// (aucun `deny_unknown_fields` ici). Le dossier `luts/`, lui, est bien réel
+/// mais vit toujours à côté du binaire — il n'est pas déplaçable.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Paths {
     pub media: PathBuf,
     pub presets: PathBuf,
-    pub shaders: PathBuf,
     pub logs: PathBuf,
 }
 
@@ -444,7 +519,6 @@ impl Default for Paths {
         Self {
             media: PathBuf::from("media"),
             presets: PathBuf::from("presets"),
-            shaders: PathBuf::from("shaders"),
             logs: PathBuf::from("logs"),
         }
     }
@@ -533,7 +607,25 @@ mod tests {
         assert_eq!(cfg, NodeConfig::default());
         assert_eq!(cfg.ports.http, 8080);
         assert!(cfg.modules.player);
-        assert!(!cfg.modules.ndi);
+        assert!(!cfg.modules.midi);
+    }
+
+    /// Les clés `[modules]` supprimées (sequencer, sync, ndi) ne doivent pas
+    /// faire échouer le chargement d'un `node.toml` écrit par une version
+    /// précédente : sinon une mise à jour perdrait TOUTE la configuration.
+    #[test]
+    fn anciennes_cles_modules_ignorees_sans_erreur() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let chemin = dir.path().join("node.toml");
+        std::fs::write(
+            &chemin,
+            "[modules]\nplayer = true\nsequencer = true\nsync = true\nndi = true\n\n\
+             [ports]\nhttp = 9999\n",
+        )
+        .expect("écriture");
+        let cfg = NodeConfig::load(&chemin).expect("un node.toml ancien doit rester lisible");
+        assert!(cfg.modules.player);
+        assert_eq!(cfg.ports.http, 9999);
     }
 
     #[test]
@@ -562,6 +654,78 @@ mod tests {
         assert!(cfg.modules.midi);
         assert!(cfg.modules.player);
         assert_eq!(cfg.ports.osc, 9000);
+    }
+
+    #[test]
+    fn la_liste_des_cibles_reste_alignee_sur_l_enum() {
+        // Recopier la liste à la main l'avait déjà laissée en arrière :
+        // `dmx_master` fonctionnait mais n'était nulle part annoncé.
+        for nom in ScaleTarget::NOMS {
+            let valeur: ScaleTarget = toml::Value::String((*nom).to_string())
+                .try_into()
+                .unwrap_or_else(|e| panic!("cible « {nom} » annoncée mais illisible : {e}"));
+            // Aller-retour : le nom annoncé est bien celui que serde produit.
+            let round = toml::Value::try_from(valeur).expect("sérialisation");
+            assert_eq!(round.as_str(), Some(*nom));
+        }
+        // Et l'inverse : aucune variante ne doit manquer à l'appel. On compte
+        // les variantes via le nombre de cibles distinctes acceptées.
+        let variantes = [
+            ScaleTarget::Volume,
+            ScaleTarget::Brightness,
+            ScaleTarget::Contrast,
+            ScaleTarget::Gamma,
+            ScaleTarget::Saturation,
+            ScaleTarget::Hue,
+            ScaleTarget::GainR,
+            ScaleTarget::GainG,
+            ScaleTarget::GainB,
+            ScaleTarget::Pixelate,
+            ScaleTarget::Posterize,
+            ScaleTarget::Noise,
+            ScaleTarget::Sharpen,
+            ScaleTarget::Mirror,
+            ScaleTarget::Rate,
+            ScaleTarget::DmxMaster,
+        ];
+        assert_eq!(
+            variantes.len(),
+            ScaleTarget::NOMS.len(),
+            "une cible a été ajoutée à l'enum sans rejoindre NOMS (ou l'inverse)"
+        );
+    }
+
+    #[test]
+    fn une_cible_de_fader_inconnue_ne_bloque_pas_le_node() {
+        // Même filet que pour `command`, appliqué à `scale` : une coquille
+        // dans un nom de cible — le genre qu'on fait en suivant le manuel —
+        // ne doit pas empêcher le node de démarrer. C'est exactement la
+        // panne que la tolérance sur `command` évitait déjà.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("node.toml");
+        std::fs::write(
+            &path,
+            r#"
+            [[midi.bindings]]
+            cc = 21
+            scale = "pixelatte"
+
+            [[midi.bindings]]
+            cc = 7
+            scale = "volume"
+            "#,
+        )
+        .expect("write");
+        let cfg = NodeConfig::load(&path).expect("le node démarre malgré la coquille");
+        assert_eq!(cfg.midi.bindings.len(), 2);
+        assert!(cfg.midi.bindings[0].scale.is_none(), "coquille ignorée");
+        assert_eq!(cfg.midi.bindings[1].scale, Some(ScaleTarget::Volume));
+        // L'anomalie est remontée, pas avalée en silence.
+        assert!(
+            cfg.avertissements.iter().any(|a| a.contains("pixelatte")),
+            "l'avertissement doit nommer la cible fautive : {:?}",
+            cfg.avertissements
+        );
     }
 
     #[test]

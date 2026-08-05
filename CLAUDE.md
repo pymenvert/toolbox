@@ -240,11 +240,58 @@ Sous Windows, aucune dépendance système (midir utilise WinMM).
   le basculement ne demande aucun code, `rtsp.rs` retombe seul sur MJPEG
   si x264enc est absent). Ne pas re-litiger la question autrement.
 
+- v3.5.0 (2026-08-04/05) : publication de la mesure de performance
+  (section déjà écrite) + AUDIT DES ZONES JAMAIS COUVERTES — la cohérence
+  entre ce que Lanterne DIT et ce qu'il FAIT. 6 dimensions inédites
+  (dérive doc/réalité, complétude des contrats de contrôle, UI ↔ serveur,
+  démarrage à froid, 3e passe sur la mesure, mise à jour d'une
+  installation existante), chaque lot repassé en relecture adversariale,
+  et vérifications EMPIRIQUES sur un vrai node à chaque fois que possible.
+  269 tests. Faits notables :
+  **l'archive Pi officielle ne projette rien** (`--no-default-features` :
+  ni fenêtre, ni MIDI, ni GStreamer) alors que le manuel invitait à
+  installer des paquets `gstreamer1.0-*` — seul le pack Windows
+  `…-gstreamer` lit des vidéos, c'est écrit partout maintenant ;
+  **aucune archive publique ne portait `docs/TIERS.md` ni `LICENSE`** (le
+  correctif 3.4.1 n'avait été posé que sur ci.yml, jamais sur release.yml
+  — donc partout sauf sur ce que les gens téléchargent) ; **l'OTA
+  remplaçait le binaire par une variante plus pauvre** (le node déclare
+  désormais ses capacités et REFUSE la mise à jour quand aucune archive ne
+  fait autant que lui) ; `fps` restait un zéro dur là où `rendu` devient
+  null, donc un Pi sain ressortait « sortie morte » ; l'UI enregistrait
+  `load "undefined"` dans la conduite ; F11 n'était jamais republié ;
+  OSCQuery passe de 45 à 55 adresses (`/rate`, `/blending`, la régie, et
+  `/transport`+`/media` en lecture seule) ; faders MIDI sur les effets, la
+  vitesse et le master lumières ; `dmx_master`/`dmx_fader` (le master
+  n'était joignable que depuis la web UI) ; l'export diagnostic contient
+  enfin le CONTENU des presets et les fichiers d'état — c'est la
+  sauvegarde d'avant mise à jour ; CI : `apt-get update` cassé par un
+  dépôt tiers du runner (touchait main aussi), et les `.ps1` n'étaient
+  lintés NULLE PART (job check-windows).
+  LIMITES ASSUMÉES, écrites dans le CHANGELOG : l'unité systemd ne
+  projette toujours pas en mode fenêtre (ni DISPLAY ni ordonnancement
+  graphique — bloc à décommenter fourni, l'activer par défaut casserait
+  les installs sans bureau, et cela demande un Pi réel) ; la résolution de
+  `reglages.json` ne s'applique QU'À la sortie KMS (le journal et l'UI le
+  disent au lieu de faire semblant).
+  POINT LAISSÉ À PYM : `deny.toml` justifie sa politique par « Lanterne
+  est destiné à être VENDU » et parle de « distribution propriétaire »,
+  alors que LICENSE et Cargo.toml sont MIT. La politique (refuser le GPL
+  dans le binaire) reste juste et n'a PAS été touchée — la formulation
+  touche à la décision sur gst-plugins-ugly, qu'on ne rouvre pas.
+  `docs/TIERS.md`, lui, disait « logiciel propriétaire » en citant le
+  fichier LICENSE qui dit MIT : corrigé.
+
 ## Prochaines étapes
 
 1. Au retour de Pym : tests matériels (Pi, capture HDMI, Chataigne réel,
    multi-machine, `systemctl stop`) — liste dans
-   `../RAPPORT_V1_2026-07-10.md`.
+   `../RAPPORT_V1_2026-07-10.md`. **La v3.5.0 y ajoute deux points
+   précis** : (a) le kiosque en mode fenêtre sur Pi OS Desktop demande de
+   décommenter le bloc `DISPLAY`/`graphical.target` de
+   `deploy/systemd/toolbox-node.service` et de le valider ; (b) décider si
+   l'on publie une archive Linux/Pi AVEC GStreamer (aujourd'hui il faut
+   compiler sur place pour projeter depuis un Pi).
 2. Petites améliorations UX de l'UI signalées par des TODO éventuels.
 3. Les grosses suites (chaîne vidéo Pi, sync multi-device, séquenceur)
    attendent le matériel et les retours de Pym — **ne pas les entamer**.

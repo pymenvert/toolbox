@@ -17,12 +17,23 @@ Tout vient de `GET /api/system` :
 | `rss_mb` | mémoire de **Lanterne lui-même** (pas de la machine) — c'est elle qui révèle une fuite |
 | `p50_us` / `p95_us` / `max_us` | temps de production d'une image sur la dernière seconde |
 | `sautees` | images perdues depuis le démarrage (cumul) |
-| `fps` | images réellement présentées |
+| `fps` | images réellement présentées (**cellule vide** = rien ne peut compter : mode KMS, ou binaire sans fenêtre — ce n'est pas zéro) |
 | `erreurs` | erreurs dans le journal |
 
-Le `p95` est le chiffre qui compte : c'est l'à-coup qui fait saccader une
-projection, pas la moyenne. Au-delà de **16 ms**, une sortie 60 Hz commence à
-sauter des images.
+**`p95` et `max_us` se lisent ENSEMBLE — l'un ne remplace pas l'autre.**
+
+- Le `p95` décrit une gêne **installée** : au-delà de **16 ms**, une sortie
+  60 Hz commence à sauter des images en permanence.
+- Le `max_us` est le seul qui attrape le **blocage isolé** — celui que le
+  spectateur voit. Un figement de 200 ms une fois par minute, à 60 img/s, ne
+  touche qu'une image sur 300 : le `p95` ne bouge alors pas d'une
+  microseconde, pendant que `max_us` monte à 200 000.
+
+Lire le `p95` seul revient donc à déclarer sain un node qui hoquette
+visiblement. C'est pour cette raison que la page Système affiche les deux.
+
+Attention aussi au **nombre d'échantillons** : sur une poignée d'images, le
+`p95` vaut simplement le maximum et n'a aucune valeur statistique.
 
 ## La charge
 

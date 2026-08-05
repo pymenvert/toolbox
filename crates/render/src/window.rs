@@ -52,6 +52,14 @@ pub struct OutputChannels {
     pub video: watch::Receiver<Option<VideoFrame>>,
     /// Réglages de sortie appliqués à chaud (écran cible, plein écran).
     pub settings: watch::Receiver<OutputSettings>,
+    /// Le MÊME canal en écriture : F11 et Échap changent le plein écran
+    /// directement sur la fenêtre, sans passer par l'API. Sans ce Sender,
+    /// personne ne republiait l'état réel — `/api/outputs` continuait
+    /// d'annoncer l'ancienne valeur, la case « Plein écran » de l'UI restait
+    /// désynchronisée, et le réglage suivant (changer d'écran, par exemple)
+    /// réappliquait le `fullscreen` périmé : la sortie sortait du plein
+    /// écran toute seule, en plein spectacle.
+    pub settings_tx: std::sync::Arc<watch::Sender<OutputSettings>>,
     /// Liste des écrans détectés, publiée pour l'API `/api/outputs`.
     pub monitors: watch::Sender<Vec<MonitorInfo>>,
     /// Frames réellement présentées par seconde, publiées pour l'UI
@@ -103,6 +111,7 @@ fn run_event_loop(config: WindowConfig, channels: OutputChannels) {
         state,
         video,
         settings,
+        settings_tx,
         monitors,
         fps,
         mesures,
@@ -149,6 +158,8 @@ fn run_event_loop(config: WindowConfig, channels: OutputChannels) {
         snapshot,
         video,
         settings,
+        settings_tx,
+        applique: None,
         monitors,
         fps,
         mesures,
@@ -174,6 +185,30 @@ fn run_event_loop(config: WindowConfig, channels: OutputChannels) {
         error!(%err, "event loop de la fenêtre de sortie terminé en erreur");
     }
     info!("fenêtre de sortie fermée");
+}
+
+/// Ce qu'il faut publier quand la fenêtre bascule elle-même le plein écran
+/// (F11 / Échap). `None` = l'état publié est déjà le bon, ne rien envoyer —
+/// une publication inutile réveillerait l'event loop pour rien.
+///
+/// Séparé de la fenêtre pour être testable : le reste demande un event loop
+/// winit, donc un serveur graphique.
+fn publication_plein_ecran(
+    publie: OutputSettings,
+    applique: Option<OutputSettings>,
+    plein: bool,
+) -> Option<OutputSettings> {
+    if publie.fullscreen == plein {
+        return None;
+    }
+    // La base est ce que la FENÊTRE a appliqué, pas le contenu du canal : un
+    // réglage de l'UI peut y être sans que l'event loop l'ait traité, et le
+    // recopier le ferait passer pour notre propre écho — donc ignorer à
+    // jamais l'écran cible choisi depuis la tablette.
+    Some(OutputSettings {
+        fullscreen: plein,
+        ..applique.unwrap_or(publie)
+    })
 }
 
 /// Forwarde chaque signal async vers l'event loop. Runtime minimal dédié.
@@ -250,6 +285,13 @@ struct OutputApp {
     snapshot: NodeState,
     video: watch::Receiver<Option<VideoFrame>>,
     settings: watch::Receiver<OutputSettings>,
+    settings_tx: std::sync::Arc<watch::Sender<OutputSettings>>,
+    /// Dernier réglage RÉELLEMENT appliqué à la fenêtre. Sert à ignorer
+    /// l'écho de nos propres publications (F11/Échap) : sans lui,
+    /// `apply_settings` rejouerait le `set_outer_position` de la branche
+    /// « fenêtré » et la fenêtre sauterait à l'origine de l'écran juste
+    /// après un Échap.
+    applique: Option<OutputSettings>,
     monitors: watch::Sender<Vec<MonitorInfo>>,
     fps: watch::Sender<f32>,
     /// Publication du coût des frames (voir [`OutputChannels::mesures`]).
@@ -357,8 +399,15 @@ impl OutputApp {
     }
 
     /// Applique les réglages courants : écran cible + plein écran.
-    fn apply_settings(&self, event_loop: &ActiveEventLoop) {
+    fn apply_settings(&mut self, event_loop: &ActiveEventLoop) {
         let settings = *self.settings.borrow();
+        // Écho de notre propre publication (F11/Échap) : la fenêtre est déjà
+        // dans cet état. Refaire le travail rejouerait le
+        // `set_outer_position` ci-dessous, et la fenêtre sauterait à
+        // l'origine de l'écran juste après un Échap.
+        if self.applique == Some(settings) {
+            return;
+        }
         let monitor = self.refresh_monitors(event_loop, settings.monitor);
         let Some(window) = &self.window else { return };
         if settings.fullscreen {
@@ -370,16 +419,54 @@ impl OutputApp {
             }
         }
         window.request_redraw();
+        self.applique = Some(settings);
     }
 
-    fn toggle_fullscreen(&self) {
-        if let Some(window) = &self.window {
-            if window.fullscreen().is_some() {
-                window.set_fullscreen(None);
-            } else {
-                window.set_fullscreen(Some(Fullscreen::Borderless(window.current_monitor())));
-            }
+    /// Publie l'état de plein écran RÉEL de la fenêtre (F11, Échap).
+    ///
+    /// Sans cela, `/api/outputs` continuait d'annoncer l'ancienne valeur et
+    /// l'UI renvoyait ce `fullscreen` périmé au moindre autre réglage : mettre
+    /// la sortie en plein écran avec F11 sur la machine, puis changer d'écran
+    /// depuis une tablette, la faisait sortir du plein écran toute seule.
+    fn publier_plein_ecran(&mut self, plein: bool) {
+        let Some(cible) = publication_plein_ecran(*self.settings.borrow(), self.applique, plein)
+        else {
+            return;
+        };
+        // `send_modify` et non `send_replace` : la lecture-modification-
+        // écriture est ATOMIQUE sous le verrou du canal. Publier une copie
+        // lue plus tôt écraserait un changement d'écran cible venu de l'UI
+        // entre-temps — F11 sur la machine pendant qu'on change d'écran
+        // depuis la tablette ramènerait la sortie sur l'ancien écran.
+        // Le marqueur d'écho part de ce que la fenêtre a RÉELLEMENT appliqué,
+        // pas de ce que le canal contient : un réglage venu de l'UI peut
+        // déjà y être sans que l'event loop l'ait traité (il peint une
+        // frame). Recopier le canal ferait passer ce réglage-là pour notre
+        // propre écho, et il serait ignoré pour toujours — l'écran cible
+        // choisi depuis la tablette ne serait jamais appliqué.
+        self.settings_tx.send_modify(|s| s.fullscreen = plein);
+        self.applique = Some(cible);
+    }
+
+    fn toggle_fullscreen(&mut self) {
+        let Some(window) = &self.window else { return };
+        let plein = window.fullscreen().is_none();
+        if plein {
+            window.set_fullscreen(Some(Fullscreen::Borderless(window.current_monitor())));
+        } else {
+            window.set_fullscreen(None);
         }
+        self.publier_plein_ecran(plein);
+    }
+
+    /// Échap : quitte le plein écran, jamais la fenêtre.
+    fn quitter_plein_ecran(&mut self) {
+        let Some(window) = &self.window else { return };
+        if window.fullscreen().is_none() {
+            return;
+        }
+        window.set_fullscreen(None);
+        self.publier_plein_ecran(false);
     }
 
     /// Fabrique le peintre (GPU si demandé, CPU en secours). `None` si aucun
@@ -876,11 +963,7 @@ impl ApplicationHandler<Wake> for OutputApp {
                     Key::Named(NamedKey::F11) => self.toggle_fullscreen(),
                     // Échap quitte SEULEMENT le plein écran (jamais la
                     // fenêtre : un show ne se ferme pas sur une fausse touche).
-                    Key::Named(NamedKey::Escape) => {
-                        if let Some(window) = &self.window {
-                            window.set_fullscreen(None);
-                        }
-                    }
+                    Key::Named(NamedKey::Escape) => self.quitter_plein_ecran(),
                     _ => {}
                 }
             }
@@ -908,6 +991,58 @@ impl ApplicationHandler<Wake> for OutputApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// F11 et Échap changeaient le plein écran sur la fenêtre sans jamais le
+    /// republier : `/api/outputs` gardait l'ancienne valeur, et comme l'UI
+    /// renvoie TOUJOURS les deux champs, le réglage suivant réappliquait le
+    /// `fullscreen` périmé. Mettre la sortie en plein écran avec F11 sur la
+    /// machine, puis changer d'écran depuis une tablette, la faisait sortir
+    /// du plein écran toute seule.
+    #[test]
+    fn le_plein_ecran_de_la_fenetre_est_republie() {
+        let fenetre = OutputSettings {
+            monitor: 1,
+            fullscreen: false,
+        };
+        // F11 depuis l'état fenêtré : on publie, en gardant l'écran cible.
+        let publie = publication_plein_ecran(fenetre, None, true).expect("doit publier");
+        assert!(publie.fullscreen);
+        assert_eq!(publie.monitor, 1, "l'écran cible ne doit pas bouger");
+
+        // Échap depuis le plein écran : on publie le retour en fenêtré.
+        let publie = publication_plein_ecran(publie, None, false).expect("doit publier");
+        assert!(!publie.fullscreen);
+
+        // Déjà dans l'état demandé : rien à publier (sinon on réveille
+        // l'event loop pour rien, et on relance un cycle d'écho).
+        assert_eq!(publication_plein_ecran(fenetre, None, false), None);
+        let plein = OutputSettings {
+            monitor: 0,
+            fullscreen: true,
+        };
+        assert_eq!(publication_plein_ecran(plein, None, true), None);
+
+        // LE CAS QUI COMPTE, et que la production retient vraiment : un
+        // réglage de l'UI est déjà dans le canal (écran 1) mais la fenêtre
+        // n'a pas encore eu le temps de l'appliquer (elle en est à l'écran
+        // 0). Un F11 ne doit PAS s'attribuer l'écran 1, sinon le changement
+        // venu de la tablette passerait pour notre écho et serait ignoré.
+        let en_attente = OutputSettings {
+            monitor: 1,
+            fullscreen: false,
+        };
+        let deja_applique = OutputSettings {
+            monitor: 0,
+            fullscreen: false,
+        };
+        let retenu =
+            publication_plein_ecran(en_attente, Some(deja_applique), true).expect("doit publier");
+        assert!(retenu.fullscreen);
+        assert_eq!(
+            retenu.monitor, 0,
+            "le marqueur d'écho part de ce que la FENÊTRE a appliqué, pas du canal"
+        );
+    }
 
     #[test]
     fn publier_transmet_les_percentiles_mesures() {

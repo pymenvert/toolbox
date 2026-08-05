@@ -2,11 +2,20 @@
 
 ## 1. Récupérer un binaire
 
-- **Sans compiler** : GitHub → onglet *Actions* → dernier run vert →
-  *Artifacts* : `toolbox-node-linux-x64`, `toolbox-node-windows-x64`,
-  `toolbox-node-raspberrypi-arm64` (login GitHub requis).
+- **Binaires publics, sans compte GitHub** : page
+  [Releases](https://github.com/pymenvert/toolbox/releases). C'est la voie
+  normale. Attention à ce que contient chaque archive :
+  `toolbox-node-windows-x64-gstreamer` est **le seul binaire publié qui lit
+  des vidéos** ; `…-windows-x64` et `…-linux-x64` font mires, mapping,
+  calibrage et OSC/MIDI sans lecture vidéo ; `…-raspberrypi-arm64` est
+  **du pilotage seul — il ne projette rien** (compilé sans fenêtre de
+  sortie, sans MIDI et sans GStreamer).
+- **Builds de développement** : GitHub → onglet *Actions* → dernier run vert
+  → *Artifacts* (login GitHub requis).
 - **En compilant** : `cargo build --release -p toolbox-node`
-  (Linux : `sudo apt install libasound2-dev` pour le MIDI).
+  (Linux : `sudo apt install libasound2-dev` pour le MIDI). **C'est le seul
+  moyen d'avoir la vidéo sur Linux, et de projeter depuis un Pi** : ajouter
+  `--features gstreamer` (voir §6).
 
 ## 2. Version portable (P1.10)
 
@@ -82,7 +91,19 @@ binaire compilé avec la feature `gstreamer` **et** le runtime GStreamer :
 Sans GStreamer sur la machine, ce binaire se replie automatiquement sur le
 backend simulé (visible dans les logs) : rien ne casse.
 
-## 7. Ce qui arrive ensuite
+## 7. Déjà livré (ne pas refaire à la main)
 
-- Image carte SD prête à flasher (pi-gen) — phase 4.
-- Mise à jour OTA, mot de passe UI, token API — phase 4.
+- **Mise à jour OTA** : onglet Système → Mise à jour. Le binaire précédent
+  est conservé, et un bouton « Revenir à la version précédente » permet de
+  faire marche arrière. Inutile de refaire un `scp` + `systemctl restart`.
+- **Mot de passe de l'UI** : `[security] password` dans `node.toml`
+  (protège la web UI et l'API ; l'OSC en UDP reste ouvert).
+- **Jeton de parc** : `[security] fleet_token`, à mettre IDENTIQUE sur tous
+  les nodes, pour les échanges de médias de machine à machine. Le mot de
+  passe de l'UI n'est jamais transmis à une machine annoncée sur le réseau.
+- **Installateurs à profils** : `install.sh` (Linux/Pi, avec détection du
+  modèle de Pi) et `installer-windows.ps1`.
+
+## 8. Ce qui arrive ensuite
+
+- Image carte SD prête à flasher (pi-gen).

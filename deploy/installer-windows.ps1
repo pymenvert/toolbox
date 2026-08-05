@@ -61,7 +61,7 @@ foreach ($cand in @("$ici\toolbox-node.exe", "$ici\dist\toolbox-node.exe")) {
 }
 
 New-Item -ItemType Directory -Force $Dossier | Out-Null
-foreach ($sous in @("media", "presets", "logs", "shaders")) {
+foreach ($sous in @("media", "presets", "logs", "luts")) {
     New-Item -ItemType Directory -Force (Join-Path $Dossier $sous) | Out-Null
 }
 
@@ -73,7 +73,16 @@ if ($exeLocal) {
     if (Test-Path $libLocal) {
         Dire "Pack video detecte : copie des DLL GStreamer"
         Copy-Item (Join-Path (Split-Path -Parent $exeLocal) "*.dll") $Dossier -Force
-        Copy-Item $libLocal (Join-Path $Dossier "lib") -Recurse -Force
+        # Copier le CONTENU, pas le dossier : `Copy-Item dossier cible` cree
+        # cible\lib quand cible existe deja. A la deuxieme installation, les
+        # plugins atterrissaient donc dans lib\lib\gstreamer-1.0, ou le
+        # binaire ne regarde jamais -- DLL a jour a la racine, plugins
+        # perimes en dessous. On repart d'un lib\ propre pour ne pas garder
+        # les plugins fantomes de la version precedente.
+        $libCible = Join-Path $Dossier "lib"
+        if (Test-Path $libCible) { Remove-Item $libCible -Recurse -Force }
+        New-Item -ItemType Directory -Force $libCible | Out-Null
+        Copy-Item (Join-Path $libLocal "*") $libCible -Recurse -Force
     }
 } else {
     $reponse = "o"

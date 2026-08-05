@@ -120,9 +120,46 @@ where
     Ok(actions)
 }
 
+/// Désérialise les cues une par une, sur le modèle d'[`actions_tolerantes`].
+///
+/// Le filet existait pour les ACTIONS mais pas pour les cues elles-mêmes :
+/// `Declencheur` est un enum étiqueté sans repli, si bien qu'un déclencheur
+/// inconnu — une conduite écrite par une version plus récente, relue après
+/// un « Revenir à la version précédente » — faisait échouer le fichier
+/// ENTIER. Perdre la cue qu'on ne comprend pas vaut infiniment mieux que
+/// perdre tout le spectacle.
+fn cues_tolerantes<'de, D>(deserializer: D) -> Result<Vec<Cue>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let brutes = Vec::<serde_json::Value>::deserialize(deserializer)?;
+    let mut cues = Vec::with_capacity(brutes.len());
+    for brute in brutes {
+        match serde_json::from_value::<Cue>(brute.clone()) {
+            Ok(cue) => cues.push(cue),
+            Err(err) => {
+                tracing::error!(%err, cue = %brute, "cue illisible — ignorée (le reste de la conduite est conservé)");
+            }
+        }
+    }
+    Ok(cues)
+}
+
+/// Combien de cues le fichier contenait-il de plus que ce qu'on a relu ?
+/// `None` si le compte est le même (cas nominal) ou si le fichier ne se
+/// laisse pas inspecter — on ne veut surtout pas transformer une lecture
+/// réussie en échec pour un dénombrement.
+fn cues_ecartees(path: &std::path::Path, relues: usize) -> Option<usize> {
+    let octets = std::fs::read(path).ok()?;
+    let brut: serde_json::Value = serde_json::from_slice(&octets).ok()?;
+    let ecrites = brut.get("cues")?.as_array()?.len();
+    ecrites.checked_sub(relues).filter(|n| *n > 0)
+}
+
 /// L'état du séquenceur, publié à l'UI et persisté (sans le transitoire).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct EtatSequenceur {
+    #[serde(default, deserialize_with = "cues_tolerantes")]
     pub cues: Vec<Cue>,
     /// Cue en attente d'enchaînement (nom, échéance en ms) — transitoire,
     /// publié à l'UI, purgé au chargement.
@@ -136,6 +173,25 @@ pub struct EtatSequenceur {
 impl EtatSequenceur {
     pub fn load(path: &std::path::Path) -> Option<Self> {
         let mut etat: Self = crate::charger_ou_mettre_de_cote(path, "séquences")?;
+        // Une cue écartée par `cues_tolerantes` disparaîtrait DÉFINITIVEMENT
+        // à la première réécriture du fichier. Le filet qui existait avant
+        // (échec de lecture → `sequences.json.corrompu`, tout le fichier
+        // conservé) ne joue plus, puisqu'on lit désormais avec succès. On
+        // garde donc une copie de l'original AVANT que la conduite ne soit
+        // réenregistrée amputée — le cas visé est le retour arrière après
+        // une mise à jour, où les cues perdues sont parfaitement valides
+        // pour la version qui les a écrites.
+        if let Some(ecartees) = cues_ecartees(path, etat.cues.len()) {
+            let copie = path.with_extension("json.incomplet");
+            match std::fs::copy(path, &copie) {
+                Ok(_) => tracing::warn!(
+                    ecartees,
+                    copie = %copie.display(),
+                    "cues illisibles écartées — conduite d'origine conservée"
+                ),
+                Err(err) => tracing::error!(%err, ecartees, "cues écartées ET copie impossible"),
+            }
+        }
         // Le transitoire ne survit pas au redémarrage.
         etat.en_attente = None;
         etat.derniere = None;
@@ -499,6 +555,75 @@ mod tests {
     use super::*;
     use crate::Bus;
 
+    /// La cue écartée ne doit pas disparaître SANS TRACE : avant le filet
+    /// tolérant, un fichier illisible partait en `.corrompu` et restait
+    /// récupérable en entier. Maintenant qu'on le lit avec succès, la
+    /// première réécriture l'amputerait définitivement — on en garde donc
+    /// une copie.
+    #[test]
+    fn une_cue_ecartee_laisse_l_original_recuperable() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let chemin = dir.path().join("sequences.json");
+        std::fs::write(
+            &chemin,
+            r#"{"cues":[
+                {"nom":"ouverture","declencheur":{"type":"manuel"},"actions":[]},
+                {"nom":"venue_du_futur","declencheur":{"type":"au_lever_du_jour"},"actions":[]}
+            ]}"#,
+        )
+        .expect("écriture");
+
+        let etat = EtatSequenceur::load(&chemin).expect("la conduite doit se relire");
+        assert_eq!(etat.cues.len(), 1, "la cue incomprise est écartée");
+
+        // L'original est conservé À CÔTÉ, avec ses DEUX cues.
+        let copie = chemin.with_extension("json.incomplet");
+        assert!(copie.exists(), "l'original doit être conservé : {copie:?}");
+        let garde: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&copie).expect("copie")).expect("json");
+        assert_eq!(
+            garde["cues"].as_array().expect("cues").len(),
+            2,
+            "la copie doit porter la conduite ENTIÈRE, cue incomprise incluse"
+        );
+    }
+
+    /// Cas nominal : aucune cue écartée, donc aucune copie parasite.
+    #[test]
+    fn une_conduite_saine_ne_laisse_pas_de_copie() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let chemin = dir.path().join("sequences.json");
+        std::fs::write(
+            &chemin,
+            r#"{"cues":[{"nom":"ouverture","declencheur":{"type":"manuel"},"actions":[]}]}"#,
+        )
+        .expect("écriture");
+        EtatSequenceur::load(&chemin).expect("relecture");
+        assert!(
+            !chemin.with_extension("json.incomplet").exists(),
+            "pas de copie quand rien n'a été écarté"
+        );
+    }
+
+    /// Scénario réel : une version plus récente a écrit une conduite avec un
+    /// déclencheur qu'on ne connaît pas (retour arrière après mise à jour).
+    /// Avant, `Declencheur` étant un enum étiqueté sans repli, TOUTE la
+    /// conduite devenait illisible et partait en `.corrompu` — le spectacle
+    /// du soir avec. On ne perd plus que la cue incomprise.
+    #[test]
+    fn une_cue_au_declencheur_inconnu_ne_fait_pas_perdre_la_conduite() {
+        let brut = r#"{
+            "cues": [
+                {"nom": "ouverture", "declencheur": {"type": "manuel"}, "actions": []},
+                {"nom": "venue_du_futur", "declencheur": {"type": "au_lever_du_jour"}, "actions": []},
+                {"nom": "final", "declencheur": {"type": "manuel"}, "actions": []}
+            ]
+        }"#;
+        let etat: EtatSequenceur = serde_json::from_str(brut).expect("la conduite doit survivre");
+        let noms: Vec<&str> = etat.cues.iter().map(|c| c.nom.as_str()).collect();
+        assert_eq!(noms, vec!["ouverture", "final"]);
+    }
+
     #[test]
     fn les_jours_de_semaine_filtrent_le_declencheur() {
         // Vide = tous les jours.
@@ -595,6 +720,28 @@ mod tests {
         .is_ok());
     }
 
+    /// Attend qu'une condition sur l'état publié devienne vraie, ou abandonne.
+    ///
+    /// Les tests de ce module dormaient une durée FIXE, calculée avec une
+    /// marge de quelques dizaines de ms sur l'échéance réelle. Sur un runner
+    /// Windows chargé — où chaque enregistrement de cue passe par un fsync de
+    /// sequences.json — la marge est parfois dépassée, et deux tests
+    /// différents ont échoué tour à tour sans qu'aucun code soit en cause.
+    /// On attend donc l'événement au lieu de le parier ; la limite reste
+    /// large, et un vrai défaut la dépasse de toute façon.
+    async fn attendre<F>(etat: &watch::Receiver<EtatSequenceur>, mut pret: F)
+    where
+        F: FnMut(&EtatSequenceur) -> bool,
+    {
+        let limite = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::time::Instant::now() < limite {
+            if pret(&etat.borrow()) {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    }
+
     /// Supprimer la cue A pendant que B(après) attend ne doit PAS faire
     /// jouer C à la place : l'enchaînement suit le NOM, pas l'index.
     #[tokio::test]
@@ -635,13 +782,32 @@ mod tests {
             .send(CommandeSequenceur::CueSupprime { nom: "A".into() })
             .await
             .expect("suppr");
-        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        // ATTENDRE l'enchaînement, ne pas le PARIER. Une temporisation fixe de
+        // 400 ms pour un enchaînement à 300 ms ne laisse que 100 ms de marge :
+        // sur un runner Windows chargé, où chaque enregistrement de cue passe
+        // par un fsync de sequences.json, la marge est parfois dépassée et le
+        // test échouait sans qu'aucun code soit en cause (observé une fois sur
+        // six exécutions de cette branche).
+        //
+        // On sonde jusqu'à ce qu'une cue se soit enchaînée, avec une limite
+        // large. La garantie du test est INTACTE : si l'enchaînement suivait
+        // l'index au lieu du nom, ce serait C qui jouerait, et l'assertion
+        // ci-dessous le verrait immédiatement.
+        // On attend qu'une cue ENCHAÎNÉE ait joué, c'est-à-dire que `derniere`
+        // ne soit plus « A » : A est la cue lancée à la main, elle devient
+        // `derniere` immédiatement. Attendre simplement « une cue a joué »
+        // sortirait de la boucle sur A, avant même l'enchaînement.
+        attendre(&etat_rx, |e| e.derniere.as_deref() != Some("A")).await;
         // B (0.5) doit avoir joué, PAS C (0.9).
-        assert!(
-            (handle.snapshot().player.volume - 0.5).abs() < 1e-6,
+        assert_eq!(
+            etat_rx.borrow().derniere.as_deref(),
+            Some("B"),
             "c'est B qui doit s'enchaîner, pas la cue à l'ancien index"
         );
-        assert_eq!(etat_rx.borrow().derniere.as_deref(), Some("B"));
+        assert!(
+            (handle.snapshot().player.volume - 0.5).abs() < 1e-6,
+            "le volume doit être celui de B (0.5), pas celui de C (0.9)"
+        );
     }
 
     /// Une cue dont l'action est cue_go vers elle-même via le bus ne boucle
@@ -765,7 +931,7 @@ mod tests {
             .expect("go");
 
         // La cue « un » est jouée tout de suite…
-        tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+        attendre(&etat_rx, |e| e.derniere.as_deref() == Some("un")).await;
         assert!((handle.snapshot().player.volume - 0.25).abs() < 1e-6);
         assert_eq!(
             etat_rx.borrow().en_attente.as_ref().map(|(n, _)| n.clone()),
@@ -773,18 +939,29 @@ mod tests {
             "l'enchaînement doit être annoncé"
         );
         // … et « deux » s'enchaîne ~300 ms plus tard.
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        attendre(&etat_rx, |e| e.derniere.as_deref() == Some("deux")).await;
         assert!((handle.snapshot().player.volume - 0.75).abs() < 1e-6);
         assert_eq!(etat_rx.borrow().derniere.as_deref(), Some("deux"));
 
-        // Stop annule un enchaînement en attente.
+        // Stop annule un enchaînement en attente. Ici on affirme qu'il ne se
+        // passe RIEN : une attente ne peut pas remplacer le délai, mais elle
+        // peut garantir l'état de DÉPART. Dormir 100 ms en espérant que
+        // l'enchaînement soit armé, c'était risquer d'envoyer Stop avant même
+        // qu'il y ait quelque chose à annuler — le test aurait alors réussi
+        // sans rien prouver.
         cmd_tx
             .send(CommandeSequenceur::Go { nom: "un".into() })
             .await
             .expect("re-go");
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        attendre(&etat_rx, |e| e.en_attente.is_some()).await;
+        assert!(
+            etat_rx.borrow().en_attente.is_some(),
+            "l'enchaînement doit être armé AVANT d'être annulé, sinon le test ne prouve rien"
+        );
         cmd_tx.send(CommandeSequenceur::Stop).await.expect("stop");
-        tokio::time::sleep(std::time::Duration::from_millis(450)).await;
+        attendre(&etat_rx, |e| e.en_attente.is_none()).await;
+        // Au-delà de l'échéance de « deux » (300 ms) : elle ne doit pas jouer.
+        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
         assert!(
             (handle.snapshot().player.volume - 0.25).abs() < 1e-6,
             "la cue deux ne doit PAS avoir été jouée après Stop"

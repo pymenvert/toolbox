@@ -88,7 +88,14 @@ pub struct Chaser {
 }
 
 /// L'état complet de la console, publié à l'UI et persisté.
+///
+/// `#[serde(default)]` : filet de MISE À JOUR. Sans lui, tous les champs
+/// étaient obligatoires — le jour où une version ajoute un champ, le
+/// `lumieres.json` du client devient illisible, part en `.corrompu` et la
+/// console repart vide (scènes et chasers du spectacle perdus). Le fichier
+/// est justement celui qu'on ne peut pas reconstituer de mémoire.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct EtatLumieres {
     /// Destination Art-Net (`"255.255.255.255"` = broadcast, ou IP du node
     /// lumière). Le port standard 6454 est ajouté si absent.
@@ -476,11 +483,24 @@ pub async fn service(
                     Ok(toolbox_core::Event::DmxChaserDemande { name: None }) => {
                         Some(CommandeLumieres::ChaserArrete)
                     }
+                    Ok(toolbox_core::Event::DmxMasterDemande { valeur }) => {
+                        Some(CommandeLumieres::Master { valeur })
+                    }
+                    Ok(toolbox_core::Event::DmxFaderDemande { id, valeur }) => {
+                        Some(CommandeLumieres::FaderValeur { id, valeur })
+                    }
                     Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => None,
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 };
                 if let Some(commande) = commande {
-                    appliquer(&mut etat, commande);
+                    // MEME traitement que le bras `commandes` : sans le
+                    // `a_sauver`, un master pose par OSC, par un fader MIDI
+                    // ou par une cue vivait en memoire et disparaissait au
+                    // redemarrage -- alors que le meme geste depuis la web UI
+                    // etait bien persiste. Deux entrees, deux comportements.
+                    if appliquer(&mut etat, commande) {
+                        a_sauver = true;
+                    }
                     etat_tx.send_replace(etat.clone());
                 }
             }
@@ -541,6 +561,24 @@ pub async fn service(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Filet de MISE A JOUR : un `lumieres.json` ecrit par une version qui
+    /// ne connaissait pas encore tel champ doit rester lisible. Sans
+    /// `#[serde(default)]` sur le type, tous les champs etaient obligatoires
+    /// et le premier champ ajoute aurait envoye en `.corrompu` les scenes et
+    /// les chasers du client -- ce qu'on ne reconstitue pas de memoire.
+    #[test]
+    fn un_lumieres_json_ancien_reste_lisible() {
+        // Fichier d'une version anterieure : ni `chasers` ni `chaser_actif`.
+        let brut = r#"{"cible":"10.0.0.9","master":200,"faders":[],"scenes":{}}"#;
+        let etat: EtatLumieres =
+            serde_json::from_str(brut).expect("un fichier ancien doit se relire");
+        assert_eq!(etat.cible, "10.0.0.9");
+        assert_eq!(etat.master, 200);
+        // Champs absents : valeurs par defaut, pas d'echec.
+        assert!(etat.chasers.is_empty());
+        assert_eq!(etat.chaser_actif, None);
+    }
 
     /// Un fader au canal hors bornes (0 ou > 512) venu d'un fichier
     /// corrompu ne fait PAS paniquer l'émission — il est ignoré.

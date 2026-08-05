@@ -133,6 +133,21 @@ fn leaf(
     node
 }
 
+/// Feuille en LECTURE SEULE (`ACCESS` 1) : un état que le node publie en
+/// retour OSC mais qu'on ne lui envoie pas. Sans ces nœuds, `event_to_osc`
+/// émettait `/transport`, `/media`… vers des adresses que le namespace ne
+/// déclarait nulle part : Chataigne recevait les messages sans avoir de
+/// paramètre où les ranger, donc aucun voyant à l'écran.
+fn feuille_lecture(path: &str, types: &str, description: &str, value: Value) -> Value {
+    json!({
+        "FULL_PATH": path,
+        "TYPE": types,
+        "DESCRIPTION": description,
+        "ACCESS": 1,
+        "VALUE": value,
+    })
+}
+
 fn container(path: &str, contents: Value) -> Value {
     json!({ "FULL_PATH": path, "CONTENTS": contents })
 }
@@ -208,6 +223,8 @@ pub fn namespace(state: &NodeState) -> Value {
             "seek": leaf("/seek", "f", "Position (secondes)", None, None),
             "load": leaf("/load", "s", "Charger une source (fichier, rtsp://, capture://N, ndi://Nom)", None, None),
             "volume": leaf("/volume", "f", "Volume", Some(json!([state.player.volume])), Some(range01())),
+            "rate": leaf("/rate", "f", "Vitesse de lecture (1 = normale)",
+                Some(json!([state.player.rate])), Some(json!([{ "MIN": 0.25, "MAX": 4.0 }]))),
             "lut": leaf("/lut", "s", "LUT d'étalonnage (.cube du dossier luts/, vide = retirer)",
                 Some(json!([state.lut.clone().unwrap_or_default()])), None),
             "blackout": leaf("/blackout", "i", "Blackout de régie (0|1, + fondu ms optionnel)",
@@ -224,7 +241,31 @@ pub fn namespace(state: &NodeState) -> Value {
                 "go": leaf("/playlist/go", "i", "Saute à l'élément", None, None),
                 "next": leaf("/playlist/next", "", "Suivant", None, None),
                 "prev": leaf("/playlist/prev", "", "Précédent", None, None),
+                "position": feuille_lecture("/playlist/position", "is",
+                    "Position courante dans la playlist (index, chemin)",
+                    json!([
+                        state.player.playlist_index.map_or(-1, |i| i as i64),
+                        state.player.media.clone().unwrap_or_default(),
+                    ])),
             })),
+            // Les deux voyants les plus élémentaires d'un lecteur : ce qu'il
+            // fait, et ce qu'il a chargé. Le node les émettait déjà en
+            // feedback ; ils n'étaient simplement pas déclarés.
+            "transport": feuille_lecture("/transport", "s",
+                "Transport : stopped | playing | paused",
+                json!([match state.player.transport {
+                    toolbox_core::Transport::Stopped => "stopped",
+                    toolbox_core::Transport::Playing => "playing",
+                    toolbox_core::Transport::Paused => "paused",
+                }])),
+            "media": feuille_lecture("/media", "s", "Média chargé",
+                json!([state.player.media.clone().unwrap_or_default()])),
+            // NON déclarés volontairement : /preset/loaded, /mapping/loaded et
+            // /sync/scheduled. Le feedback les émet, mais ce sont des
+            // notifications sans état correspondant dans NodeState (aucun
+            // champ ne retient le dernier preset chargé) : les publier
+            // imposerait une VALUE perpétuellement vide, qui se lirait comme
+            // « aucun preset » plutôt que « non mémorisé ».
             "corner": container("/corner", Value::Object(corners)),
             "rotation": leaf("/rotation", "i", "Rotation de la source",
                 Some(json!([state.mapping.rotation.degrees()])),
@@ -266,9 +307,34 @@ pub fn namespace(state: &NodeState) -> Value {
                 "load": leaf("/preset/load", "s", "Charge un preset", None, None),
                 "fade": leaf("/preset/fade", "sf", "Fondu vers un preset (nom, secondes)", None, None),
             })),
+            "blending": leaf("/blending", "fffff",
+                "Fondu de bords : gauche droite haut bas (0..0,5) puis gamma (1..3)",
+                Some(json!([
+                    state.blending.gauche, state.blending.droite,
+                    state.blending.haut, state.blending.bas, state.blending.gamma,
+                ])),
+                Some(json!([
+                    { "MIN": 0.0, "MAX": 0.5 }, { "MIN": 0.0, "MAX": 0.5 },
+                    { "MIN": 0.0, "MAX": 0.5 }, { "MIN": 0.0, "MAX": 0.5 },
+                    { "MIN": 1.0, "MAX": 3.0 },
+                ]))),
             "sync": container("/sync", json!({
                 "arm": leaf("/sync/arm", "", "Arme : média prêt, pause à 0", None, None),
                 "startAt": leaf("/sync/startAt", "d", "Départ à l'heure Unix (secondes, double)", None, None),
+            })),
+            // Régie : le déclenchement d'un spectacle depuis Chataigne passe
+            // par ces trois adresses. Elles fonctionnaient en OSC mais
+            // n'étaient publiées nulle part — donc invisibles dans le module
+            // OSCQuery, seul endroit où l'opérateur va les chercher.
+            "cue": container("/cue", json!({
+                "go": leaf("/cue/go", "s", "Déclenche une cue du séquenceur (par nom)", None, None),
+            })),
+            "dmx": container("/dmx", json!({
+                "scene": leaf("/dmx/scene", "s", "Rappelle une scène de la console lumières", None, None),
+                "chaser": leaf("/dmx/chaser", "s", "Lance un chaser (nom) ; chaîne VIDE : arrêt du chaser en cours", None, None),
+                "master": leaf("/dmx/master", "i", "Grand master lumières : entier 0..255, ou flottant 0..1 (fader normalisé)",
+                    None, Some(json!([{ "MIN": 0, "MAX": 255 }]))),
+                "fader": leaf("/dmx/fader", "si", "Niveau d'un fader : identifiant, puis entier 0..255 ou flottant 0..1", None, None),
             })),
         }
     })
@@ -327,6 +393,64 @@ mod tests {
             tree["CONTENTS"]["mapping"]["CONTENTS"]["fade"]["FULL_PATH"],
             "/mapping/fade"
         );
+    }
+
+    /// Chataigne ne connaît QUE ce que cet arbre déclare. Une adresse OSC
+    /// acceptée par `control-osc` mais absente d'ici est une fonction
+    /// injoignable en pratique : l'opérateur ne la voit nulle part.
+    /// `/rate`, `/blending`, `/cue/go`, `/dmx/scene` et `/dmx/chaser`
+    /// marchaient toutes en OSC sans figurer dans le namespace — vérifié en
+    /// réel : `/rate 0.5` changeait bien la vitesse d'un node dont le module
+    /// OSCQuery n'offrait aucun curseur de vitesse.
+    #[test]
+    fn namespace_publie_les_adresses_osc_pilotables() {
+        let tree = namespace(&NodeState::default());
+        let c = &tree["CONTENTS"];
+
+        // Vitesse de lecture : écrivable, bornée comme la commande.
+        assert_eq!(c["rate"]["FULL_PATH"], "/rate");
+        assert_eq!(c["rate"]["ACCESS"], 3);
+        assert_eq!(c["rate"]["RANGE"][0]["MIN"], 0.25);
+        assert_eq!(c["rate"]["RANGE"][0]["MAX"], 4.0);
+
+        // Fondu de bords : cinq floats, dans l'ordre exact de l'adresse OSC
+        // (gauche, droite, haut, bas, gamma) — pas celui de /crop.
+        assert_eq!(c["blending"]["TYPE"], "fffff");
+        // Gamma stocké en f32 : tolérance, pas d'égalité stricte.
+        let gamma = c["blending"]["VALUE"][4].as_f64().expect("gamma");
+        assert!((gamma - 2.2).abs() < 1e-6);
+
+        // Régie : cues et lumières, invisibles jusqu'ici.
+        assert_eq!(c["cue"]["CONTENTS"]["go"]["FULL_PATH"], "/cue/go");
+        assert_eq!(c["dmx"]["CONTENTS"]["scene"]["FULL_PATH"], "/dmx/scene");
+        assert_eq!(c["dmx"]["CONTENTS"]["chaser"]["FULL_PATH"], "/dmx/chaser");
+    }
+
+    /// Le retour d'état émet `/transport` et `/media` : sans nœud déclaré,
+    /// Chataigne reçoit les messages sans paramètre où les ranger.
+    #[test]
+    fn namespace_publie_letat_en_lecture_seule() {
+        let mut node_state = NodeState::default();
+        // `play` est refusé sans média : on charge d'abord, comme en vrai.
+        node_state
+            .apply(&toolbox_core::Command::Load {
+                path: "clip.mp4".into(),
+            })
+            .expect("load");
+        node_state
+            .apply(&toolbox_core::Command::Play)
+            .expect("play");
+        let tree = namespace(&node_state);
+        let c = &tree["CONTENTS"];
+
+        // ACCESS 1 = lecture seule : Chataigne ne doit pas proposer d'écrire
+        // dessus (le node n'accepte aucune commande sur ces adresses).
+        assert_eq!(c["transport"]["ACCESS"], 1);
+        assert_eq!(c["transport"]["VALUE"][0], "playing");
+        assert_eq!(c["media"]["ACCESS"], 1);
+        assert_eq!(c["playlist"]["CONTENTS"]["position"]["ACCESS"], 1);
+        // Hors playlist, l'index vaut -1 et non 0 : 0 est un rang valide.
+        assert_eq!(c["playlist"]["CONTENTS"]["position"]["VALUE"][0], -1);
     }
 
     #[tokio::test]

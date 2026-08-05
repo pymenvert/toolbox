@@ -24,9 +24,12 @@ player = true      # lecture : GStreamer si le binaire l'embarque (feature `gstr
 http = true        # web UI + API REST/WebSocket
 osc = true         # contrôle OSC (Chataigne…)
 midi = false       # contrôle MIDI (bindings ci-dessous)
-sequencer = false  # phase 3
-sync = false       # phase 2 (multi-device)
-ndi = false        # jamais dans le core (plugin optionnel)
+# Il n'y a PAS de clé ici pour le séquenceur, la synchro ou le NDI :
+#   séquenceur → toujours démarré, se coupe dans l'onglet « Fonctions » ;
+#   synchro    → section [sync] ci-dessous (c'est `role` qui décide) ;
+#   sortie NDI → section [ndi] ci-dessous (`sortie = true`).
+# Ces trois clés ont existé sans jamais être lues : les écrire ne faisait
+# rien du tout. Elles sont désormais ignorées si elles traînent encore.
 
 [ports]
 bind = "0.0.0.0"   # "127.0.0.1" pour restreindre à la machine locale
@@ -38,14 +41,19 @@ oscquery = 8081    # auto-découverte des paramètres OSC (Chataigne : hôte + c
 # Relatifs au dossier de travail → la version portable tient dans un dossier.
 media = "media"
 presets = "presets"       # les presets de mapping seul vont dans presets/mapping/
-shaders = "shaders"
 logs = "logs"             # journal quotidien sur disque (toolbox.log.AAAA-MM-JJ, 14 jours gardés)
+# NB : le dossier des LUT .cube (`luts/`) n'est PAS réglable ici — il est
+# toujours créé à côté du binaire, dans le répertoire de travail.
 
 [output]
 # Fenêtre de sortie : mires de test et vidéo déformées en direct par le
 # mapping. Sans mire ni lecture, la sortie est noire. F11 : plein écran,
 # Échap : le quitte. NB : l'écran et le plein écran choisis dans l'UI web
 # sont persistés dans sortie.json et priment sur ces valeurs au démarrage.
+# NB : l'archive officielle `toolbox-node-raspberrypi-arm64` est compilée
+# SANS fenêtre de sortie (et sans MIDI) : toute cette section y est sans
+# effet, et le mode "kms" ci-dessous exige lui aussi une compilation avec
+# `--features gstreamer`. Pour projeter depuis un Pi, compiler sur le Pi.
 enabled = true
 monitor = 0        # index de l'écran cible ; la liste détectée est dans les logs
 fullscreen = false # true = plein écran sans bordure sur l'écran cible
@@ -139,6 +147,7 @@ log_buffer = 1000      # entrées gardées par la page de logs
 #url = "https://exemple.fr/rapports-toolbox"
 
 [midi]
+# NB : absent de l'archive officielle ARM64 (compilée sans la feature `midi`).
 # Sous-chaîne du nom du port MIDI à ouvrir (absent = premier port trouvé).
 #port = "APC"
 
@@ -160,6 +169,13 @@ log_buffer = 1000      # entrées gardées par la page de logs
 #[[midi.bindings]]
 #cc = 1
 #scale = "brightness"                 # 0..127 → 0..2
+# Cibles possibles pour `scale` :
+#   volume · rate (vitesse 0,25×–4×)
+#   brightness · contrast · gamma · saturation · hue · gain_r · gain_g · gain_b
+#   pixelate · posterize · noise · sharpen · mirror  (les 5 effets, 0..1)
+#   dmx_master (grand master lumières, 0..255)
+# Une cible mal orthographiée est ignorée avec un avertissement au démarrage :
+# elle n'empêche pas le node de partir.
 
 #[[midi.bindings]]
 #note = 62
