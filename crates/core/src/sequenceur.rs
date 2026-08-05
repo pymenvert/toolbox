@@ -680,13 +680,37 @@ mod tests {
             .send(CommandeSequenceur::CueSupprime { nom: "A".into() })
             .await
             .expect("suppr");
-        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        // ATTENDRE l'enchaînement, ne pas le PARIER. Une temporisation fixe de
+        // 400 ms pour un enchaînement à 300 ms ne laisse que 100 ms de marge :
+        // sur un runner Windows chargé, où chaque enregistrement de cue passe
+        // par un fsync de sequences.json, la marge est parfois dépassée et le
+        // test échouait sans qu'aucun code soit en cause (observé une fois sur
+        // six exécutions de cette branche).
+        //
+        // On sonde jusqu'à ce qu'une cue se soit enchaînée, avec une limite
+        // large. La garantie du test est INTACTE : si l'enchaînement suivait
+        // l'index au lieu du nom, ce serait C qui jouerait, et l'assertion
+        // ci-dessous le verrait immédiatement.
+        // On attend qu'une cue ENCHAÎNÉE ait joué, c'est-à-dire que `derniere`
+        // ne soit plus « A » : A est la cue lancée à la main, elle devient
+        // `derniere` immédiatement. Attendre simplement « une cue a joué »
+        // sortirait de la boucle sur A, avant même l'enchaînement.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while etat_rx.borrow().derniere.as_deref() == Some("A")
+            && std::time::Instant::now() < deadline
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
         // B (0.5) doit avoir joué, PAS C (0.9).
-        assert!(
-            (handle.snapshot().player.volume - 0.5).abs() < 1e-6,
+        assert_eq!(
+            etat_rx.borrow().derniere.as_deref(),
+            Some("B"),
             "c'est B qui doit s'enchaîner, pas la cue à l'ancien index"
         );
-        assert_eq!(etat_rx.borrow().derniere.as_deref(), Some("B"));
+        assert!(
+            (handle.snapshot().player.volume - 0.5).abs() < 1e-6,
+            "le volume doit être celui de B (0.5), pas celui de C (0.9)"
+        );
     }
 
     /// Une cue dont l'action est cue_go vers elle-même via le bus ne boucle
