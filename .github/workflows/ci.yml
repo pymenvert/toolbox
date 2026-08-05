@@ -339,9 +339,24 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          # pkgconfiglite : les paquets GStreamer MSVC n'embarquent pas
-          # pkg-config.exe, requis par les crates *-sys.
-          choco install -y gstreamer gstreamer-devel pkgconfiglite --no-progress 2>&1 | tail -5 | tee gstwin.log
+          # DEUX installations SEPAREES, et c'est important : chocolatey
+          # traite une commande comme UNE transaction, donc un seul paquet
+          # introuvable annule TOUS les autres. Le 2026-08-05, pkgconfiglite
+          # a disparu du depot communautaire (« Unable to find package ») et
+          # a emporte gstreamer avec lui : « Chocolatey installed 0/0
+          # packages », puis « dossier GStreamer : INTROUVABLE » -- alors que
+          # GStreamer, lui, etait parfaitement disponible.
+          choco install -y gstreamer gstreamer-devel --no-progress 2>&1 | tail -5 | tee gstwin.log
+          # pkg-config.exe : absent des paquets GStreamer MSVC, requis par les
+          # crates *-sys. Non bloquant ici pour que le diagnostic soit lisible
+          # (l'etape suivante dira precisement ce qui manque) au lieu d'un
+          # « INTROUVABLE » qui accuse GStreamer a tort.
+          if ! choco install -y pkgconfiglite --no-progress 2>&1 | tail -5 | tee -a gstwin.log; then
+            echo "pkgconfiglite indisponible : voir l'etape suivante" | tee -a gstwin.log
+          fi
+          if ! command -v pkg-config > /dev/null 2>&1; then
+            echo "ATTENTION : pkg-config absent du runner -- le pack video ne peut pas etre construit." | tee -a gstwin.log
+          fi
       - name: Build release (feature gstreamer)
         shell: bash
         run: |

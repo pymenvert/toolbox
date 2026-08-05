@@ -105,7 +105,16 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: GStreamer MSVC (dev + runtime) + pkg-config
         shell: bash
-        run: choco install -y gstreamer gstreamer-devel pkgconfiglite --no-progress 2>&1 | tail -3
+        # Installations SEPAREES : chocolatey annule toute la transaction si
+        # UN paquet est introuvable. Le 2026-08-05, pkgconfiglite a disparu du
+        # depot communautaire et a emporte GStreamer avec lui -- le pack video
+        # public, seul binaire publie qui lit des videos, cessait d'etre
+        # construit sans que la cause soit lisible.
+        run: |
+          set -o pipefail
+          choco install -y gstreamer gstreamer-devel --no-progress 2>&1 | tail -3
+          choco install -y pkgconfiglite --no-progress 2>&1 | tail -3 || \
+            echo "pkgconfiglite indisponible : build video impossible sur ce runner"
       - name: Build + pack autonome
         shell: bash
         run: |
