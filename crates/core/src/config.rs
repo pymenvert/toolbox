@@ -122,6 +122,18 @@ pub enum ScaleTarget {
     GainR,
     GainG,
     GainB,
+    // Les cinq effets et la vitesse : le manuel promet depuis la v1 qu'« un
+    // fader MIDI ou OSC suffit à activer et doser » un effet, mais aucune
+    // cible n'existait — et un binding CC sans `scale` ne peut envoyer
+    // qu'une valeur CONSTANTE. Le fader était donc inutilisable pour ça.
+    Pixelate,
+    Posterize,
+    Noise,
+    Sharpen,
+    Mirror,
+    /// Vitesse de lecture, 0.25× à 4× (1× à mi-course n'est pas garanti :
+    /// l'échelle est linéaire sur les bornes de la commande).
+    Rate,
 }
 
 /// Un binding MIDI : note ou CC → commande fixe ou paramètre continu.
@@ -149,7 +161,12 @@ pub struct MidiBinding {
     /// est ignorée avec un ERROR au lieu de faire échouer tout le node.toml.
     #[serde(default, deserialize_with = "commande_tolerante")]
     pub command: Option<Command>,
-    /// Paramètre continu piloté par la valeur du CC.
+    /// Paramètre continu piloté par la valeur du CC. Désérialisation
+    /// TOLÉRANTE, comme `command` : une cible inconnue — une faute de frappe
+    /// dans un nom qu'on vient d'écrire à la main — est ignorée avec un
+    /// avertissement, au lieu d'empêcher le node de démarrer. C'est la panne
+    /// que la tolérance sur `command` avait justement été écrite pour éviter.
+    #[serde(default, deserialize_with = "cible_tolerante")]
     pub scale: Option<ScaleTarget>,
 }
 
@@ -169,6 +186,25 @@ where
         Err(err) => {
             noter(format!(
                 "binding MIDI ignoré : commande inconnue ({err}) dans « {brut} »"
+            ));
+            Ok(None)
+        }
+    }
+}
+
+/// Même filet que [`commande_tolerante`], pour la cible d'un CC.
+fn cible_tolerante<'de, D>(deserializer: D) -> Result<Option<ScaleTarget>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let brut = toml::Value::deserialize(deserializer)?;
+    match brut.clone().try_into::<ScaleTarget>() {
+        Ok(cible) => Ok(Some(cible)),
+        Err(err) => {
+            noter(format!(
+                "binding MIDI ignoré : cible « {brut} » inconnue ({err}). Cibles possibles : \
+                 volume, brightness, contrast, gamma, saturation, hue, gain_r, gain_g, gain_b, \
+                 pixelate, posterize, noise, sharpen, mirror, rate"
             ));
             Ok(None)
         }
@@ -586,6 +622,39 @@ mod tests {
         assert!(cfg.modules.midi);
         assert!(cfg.modules.player);
         assert_eq!(cfg.ports.osc, 9000);
+    }
+
+    #[test]
+    fn une_cible_de_fader_inconnue_ne_bloque_pas_le_node() {
+        // Même filet que pour `command`, appliqué à `scale` : une coquille
+        // dans un nom de cible — le genre qu'on fait en suivant le manuel —
+        // ne doit pas empêcher le node de démarrer. C'est exactement la
+        // panne que la tolérance sur `command` évitait déjà.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("node.toml");
+        std::fs::write(
+            &path,
+            r#"
+            [[midi.bindings]]
+            cc = 21
+            scale = "pixelatte"
+
+            [[midi.bindings]]
+            cc = 7
+            scale = "volume"
+            "#,
+        )
+        .expect("write");
+        let cfg = NodeConfig::load(&path).expect("le node démarre malgré la coquille");
+        assert_eq!(cfg.midi.bindings.len(), 2);
+        assert!(cfg.midi.bindings[0].scale.is_none(), "coquille ignorée");
+        assert_eq!(cfg.midi.bindings[1].scale, Some(ScaleTarget::Volume));
+        // L'anomalie est remontée, pas avalée en silence.
+        assert!(
+            cfg.avertissements.iter().any(|a| a.contains("pixelatte")),
+            "l'avertissement doit nommer la cible fautive : {:?}",
+            cfg.avertissements
+        );
     }
 
     #[test]

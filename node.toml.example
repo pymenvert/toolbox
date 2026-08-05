@@ -169,6 +169,12 @@ log_buffer = 1000      # entrées gardées par la page de logs
 #[[midi.bindings]]
 #cc = 1
 #scale = "brightness"                 # 0..127 → 0..2
+# Cibles possibles pour `scale` :
+#   volume · rate (vitesse 0,25×–4×)
+#   brightness · contrast · gamma · saturation · hue · gain_r · gain_g · gain_b
+#   pixelate · posterize · noise · sharpen · mirror  (les 5 effets, 0..1)
+# Une cible mal orthographiée est ignorée avec un avertissement au démarrage :
+# elle n'empêche pas le node de partir.
 
 #[[midi.bindings]]
 #note = 62

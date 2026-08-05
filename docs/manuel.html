@@ -637,7 +637,10 @@ command = { cmd = "play" }
 
 [[midi.bindings]]
 cc = 7                       <span class="c"># le fader 7 pilote le volume</span>
-scale = "volume"             <span class="c"># 0..127 → 0..1 (aussi : brightness, gamma, hue…)</span>
+scale = "volume"             <span class="c"># 0..127 → 0..1</span>
+<span class="c"># Cibles : volume, rate (0,25×–4×), les 8 réglages couleur</span>
+<span class="c"># (brightness, contrast, gamma, saturation, hue, gain_r/g/b)</span>
+<span class="c"># et les 5 effets (pixelate, posterize, noise, sharpen, mirror).</span>
 
 [[midi.bindings]]
 note = 62

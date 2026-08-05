@@ -130,6 +130,8 @@ fn scaled_command(target: ScaleTarget, value: u8) -> Command {
             value: min + t * (max - min),
         }
     };
+    // Les effets sont tous bornés 0..1, comme `t` : pas de mise à l'échelle.
+    let effet = |param: toolbox_core::state::EffectParam| Command::EffectSet { param, value: t };
     match target {
         ScaleTarget::Volume => Command::SetVolume { volume: t },
         ScaleTarget::Brightness => color(ColorParam::Brightness),
@@ -140,6 +142,16 @@ fn scaled_command(target: ScaleTarget, value: u8) -> Command {
         ScaleTarget::GainR => color(ColorParam::GainR),
         ScaleTarget::GainG => color(ColorParam::GainG),
         ScaleTarget::GainB => color(ColorParam::GainB),
+        ScaleTarget::Pixelate => effet(toolbox_core::state::EffectParam::Pixelate),
+        ScaleTarget::Posterize => effet(toolbox_core::state::EffectParam::Posterize),
+        ScaleTarget::Noise => effet(toolbox_core::state::EffectParam::Noise),
+        ScaleTarget::Sharpen => effet(toolbox_core::state::EffectParam::Sharpen),
+        ScaleTarget::Mirror => effet(toolbox_core::state::EffectParam::Mirror),
+        // Bornes de `Command::SetRate` (0.25..=4.0) : les respecter ici évite
+        // que le bus refuse la commande à fond de course.
+        ScaleTarget::Rate => Command::SetRate {
+            rate: 0.25 + t * (4.0 - 0.25),
+        },
     }
 }
 
@@ -254,6 +266,49 @@ pub fn connect(settings: &MidiSettings, bus: BusHandle) -> Result<MidiService, M
 mod tests {
     use super::*;
     use toolbox_core::LoopMode;
+
+    /// Le manuel promet depuis la v1 qu'« un fader MIDI ou OSC suffit à
+    /// activer et doser » un effet. Aucune cible n'existait : un binding CC
+    /// sans `scale` ne peut envoyer qu'une valeur CONSTANTE, donc le fader
+    /// était inutilisable pour ça.
+    #[test]
+    fn un_fader_pilote_un_effet_et_la_vitesse() {
+        use toolbox_core::state::EffectParam;
+
+        // Effets : bornés 0..1, donc la valeur du CC passe telle quelle.
+        assert_eq!(
+            scaled_command(ScaleTarget::Pixelate, 127),
+            Command::EffectSet {
+                param: EffectParam::Pixelate,
+                value: 1.0
+            }
+        );
+        assert_eq!(
+            scaled_command(ScaleTarget::Noise, 0),
+            Command::EffectSet {
+                param: EffectParam::Noise,
+                value: 0.0
+            }
+        );
+
+        // Vitesse : à l'échelle des bornes de SetRate, pour que le bus
+        // n'ait aucune raison de refuser la commande à fond de course.
+        let Command::SetRate { rate } = scaled_command(ScaleTarget::Rate, 0) else {
+            panic!("attendu SetRate");
+        };
+        assert!((rate - 0.25).abs() < 1e-6);
+        let Command::SetRate { rate } = scaled_command(ScaleTarget::Rate, 127) else {
+            panic!("attendu SetRate");
+        };
+        assert!((rate - 4.0).abs() < 1e-6);
+
+        // Contre-épreuve : les bornes doivent être acceptées par l'état.
+        let mut etat = toolbox_core::NodeState::default();
+        etat.apply(&scaled_command(ScaleTarget::Rate, 127))
+            .expect("la vitesse maximale doit être acceptée");
+        etat.apply(&scaled_command(ScaleTarget::Rate, 0))
+            .expect("la vitesse minimale doit être acceptée");
+    }
 
     fn note_binding(note: u8, command: Command) -> MidiBinding {
         MidiBinding {
