@@ -1667,7 +1667,13 @@ async fn diagnostic_zip(State(app): State<AppState>) -> Result<Response, ApiErro
          Contenu : etat.json (etat complet), journal.json (dernieres lignes\n\
          de log), systeme.json (CPU, memoire, disque, Tailscale),\n\
          sortie.json (ecran/plein ecran), ecrans.json, medias.json,\n\
-         presets.json, fleet.json (nodes decouverts en mDNS).\n",
+         presets.json (la LISTE des noms), fleet.json (nodes decouverts en\n\
+         mDNS), presets/<nom>.json et presets/mapping/<nom>.json (le CONTENU\n\
+         de chaque preset, octets bruts), etat/*.json (fichiers d'etat bruts :\n\
+         console lumieres, conduite du sequenceur, fonctions, reglages,\n\
+         demarrage).\n\n\
+         Cette archive sert AUSSI de sauvegarde avant une mise a jour : les\n\
+         dossiers presets/ et etat/ suffisent a remonter un node.\n",
         app.node_name,
         app.version,
         std::env::consts::OS,
@@ -1728,18 +1734,19 @@ async fn diagnostic_zip(State(app): State<AppState>) -> Result<Response, ApiErro
     // que la liste. En meilleur effort : un preset illisible ne doit pas
     // faire échouer tout l'export (c'est justement quand ça va mal qu'on le
     // demande).
+    // Octets BRUTS, comme les fichiers d'état plus bas : passer par `load`
+    // validerait le preset et le re-sérialiserait. Un preset abîmé — celui
+    // qu'on veut justement récupérer — serait alors le seul absent de la
+    // sauvegarde, et un champ écrit par une version plus récente
+    // disparaîtrait sans bruit.
     for nom in app.presets.list().unwrap_or_default() {
-        if let Ok(preset) = app.presets.load(&nom) {
-            if let Ok(octets) = serde_json::to_vec_pretty(&preset) {
-                zip.add(&format!("presets/{nom}.json"), &octets);
-            }
+        if let Ok(octets) = app.presets.octets(&nom) {
+            zip.add(&format!("presets/{nom}.json"), &octets);
         }
     }
     for nom in app.mapping_presets.list().unwrap_or_default() {
-        if let Ok(preset) = app.mapping_presets.load(&nom) {
-            if let Ok(octets) = serde_json::to_vec_pretty(&preset) {
-                zip.add(&format!("presets/mapping/{nom}.json"), &octets);
-            }
+        if let Ok(octets) = app.mapping_presets.octets(&nom) {
+            zip.add(&format!("presets/mapping/{nom}.json"), &octets);
         }
     }
 

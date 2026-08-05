@@ -2660,6 +2660,12 @@ $("#majVerifie").addEventListener("click", async () => {
     if (etat.plus_recente && etat.asset) {
       $("#majEtat").textContent = "v" + etat.version_disponible + " disponible (actuelle : v" + etat.version_courante + ")";
       $("#majTelecharge").style.display = "inline-block";
+    } else if (etat.plus_recente && etat.raison) {
+      // Une version PLUS RECENTE existe, mais aucune archive ne convient a ce
+      // binaire. Dire « A jour » ici serait un mensonge : on donne la raison.
+      $("#majEtat").textContent = "v" + etat.version_disponible + " existe, mais : " + etat.raison;
+      $("#majTelecharge").style.display = "none";
+      $("#majApplique").style.display = "none";
     } else {
       $("#majEtat").textContent = "À jour (v" + etat.version_courante + ")";
       $("#majTelecharge").style.display = "none";

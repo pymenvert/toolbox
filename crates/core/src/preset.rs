@@ -110,6 +110,17 @@ impl<T: Validated> Store<T> {
     /// Charge le preset `name`. Le document est **validé** après lecture : un
     /// fichier corrompu ou édité à la main avec des valeurs hors bornes est
     /// refusé plutôt que de devenir l'état du node.
+    /// Les octets du preset TELS QU'ILS SONT sur le disque, sans
+    /// désérialisation ni validation. Pour l'export diagnostic : un preset
+    /// abîmé est précisément celui qu'on veut récupérer, et `load` le
+    /// rejetterait. Une re-sérialisation, elle, effacerait silencieusement
+    /// tout champ que la version courante ne connaît pas.
+    pub fn octets(&self, name: &str) -> Result<Vec<u8>, CoreError> {
+        validate_name(name)?;
+        let path = self.path_of(name);
+        fs::read(&path).map_err(|e| CoreError::io(path.display().to_string(), e))
+    }
+
     pub fn load(&self, name: &str) -> Result<T, CoreError> {
         validate_name(name)?;
         let path = self.path_of(name);

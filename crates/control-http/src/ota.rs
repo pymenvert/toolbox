@@ -30,6 +30,12 @@ pub struct EtatMiseAJour {
     pub plus_recente: bool,
     /// Nom de l'archive adaptée à cette plateforme, si trouvée.
     pub asset: Option<String>,
+    /// Pourquoi aucune archive ne convient, le cas échéant. Sans ce champ,
+    /// l'UI affichait « À jour » dès que `asset` était absent — donc un node
+    /// compilé sur place se voyait annoncer « à jour » alors qu'une version
+    /// PLUS RÉCENTE existait bel et bien. Un silence qui ment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raison: Option<String>,
 }
 
 /// Ce que le binaire EN COURS d'exécution sait faire. Déclaré une fois au
@@ -140,6 +146,7 @@ pub fn verifier(version_courante: &str) -> Result<EtatMiseAJour, String> {
                 (nom == attendu).then(|| nom.to_string())
             })
         });
+    let raison = (asset.is_none()).then(raison_aucune_archive);
     Ok(EtatMiseAJour {
         // STRICTEMENT supérieure. Une simple inégalité annonçait une « mise
         // à jour » vers une version ANTÉRIEURE dès qu'un node tournait sur
@@ -149,7 +156,26 @@ pub fn verifier(version_courante: &str) -> Result<EtatMiseAJour, String> {
         version_courante: version_courante.to_string(),
         version_disponible: Some(version_dispo),
         asset,
+        raison,
     })
+}
+
+/// Pourquoi aucune archive publiée ne convient à CE binaire. Le message cite
+/// ce qu'il perdrait vraiment : annoncer « la lecture vidéo » à un Pi compilé
+/// sans GStreamer — qui, lui, perdrait sa fenêtre de sortie — enverrait
+/// chercher au mauvais endroit.
+fn raison_aucune_archive() -> String {
+    let c = capacites();
+    let perdu = match (c.video, c.fenetre) {
+        (true, true) => "la lecture vidéo et la fenêtre de sortie",
+        (true, false) => "la lecture vidéo",
+        (false, true) => "la fenêtre de sortie (donc toute projection)",
+        (false, false) => return "aucune archive publiée ne correspond à cette plateforme".into(),
+    };
+    format!(
+        "ce binaire a été compilé sur place : aucune archive publiée ne fait autant. \
+         Une mise à jour automatique vous ferait perdre {perdu}. Recompilez sur la machine."
+    )
 }
 
 /// `dispo` est-elle strictement postérieure à `courante` ? Comparaison
@@ -179,16 +205,10 @@ pub fn telecharger() -> Result<String, String> {
     if !etat.plus_recente {
         return Err(format!("déjà en {version} : rien à télécharger"));
     }
-    let asset = etat.asset.as_deref().ok_or_else(|| {
-        if nom_asset_plateforme().is_none() {
-            "ce binaire a été compilé sur place (vidéo et/ou fenêtre de sortie) : \
-             aucune archive publiée ne fait autant. Une mise à jour automatique \
-             vous ferait PERDRE la lecture vidéo. Recompilez plutôt sur la machine."
-                .to_string()
-        } else {
-            "pas d'archive pour cette plateforme dans la release".to_string()
-        }
-    })?;
+    let asset = etat
+        .asset
+        .as_deref()
+        .ok_or_else(|| etat.raison.clone().unwrap_or_else(raison_aucune_archive))?;
     let url = format!("https://github.com/{DEPOT}/releases/latest/download/{asset}");
     let dossier = dossier_du_binaire()?;
     let archive = dossier.join(asset);

@@ -429,11 +429,16 @@ impl OutputApp {
         // lue plus tôt écraserait un changement d'écran cible venu de l'UI
         // entre-temps — F11 sur la machine pendant qu'on change d'écran
         // depuis la tablette ramènerait la sortie sur l'ancien écran.
+        // Le marqueur d'écho part de ce que la fenêtre a RÉELLEMENT appliqué,
+        // pas de ce que le canal contient : un réglage venu de l'UI peut
+        // déjà y être sans que l'event loop l'ait traité (il peint une
+        // frame). Recopier le canal ferait passer ce réglage-là pour notre
+        // propre écho, et il serait ignoré pour toujours — l'écran cible
+        // choisi depuis la tablette ne serait jamais appliqué.
+        let mut cible = self.applique.unwrap_or(*self.settings.borrow());
+        cible.fullscreen = plein;
         self.settings_tx.send_modify(|s| s.fullscreen = plein);
-        // Marqué appliqué APRÈS la publication, à partir de la valeur
-        // RÉELLEMENT retenue : l'écho qui nous revient par le relais est
-        // alors reconnu comme le nôtre, et n'est pas rejoué.
-        self.applique = Some(*self.settings.borrow());
+        self.applique = Some(cible);
     }
 
     fn toggle_fullscreen(&mut self) {
