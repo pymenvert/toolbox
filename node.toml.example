@@ -173,6 +173,7 @@ log_buffer = 1000      # entrées gardées par la page de logs
 #   volume · rate (vitesse 0,25×–4×)
 #   brightness · contrast · gamma · saturation · hue · gain_r · gain_g · gain_b
 #   pixelate · posterize · noise · sharpen · mirror  (les 5 effets, 0..1)
+#   dmx_master (grand master lumières, 0..255)
 # Une cible mal orthographiée est ignorée avec un avertissement au démarrage :
 # elle n'empêche pas le node de partir.
 

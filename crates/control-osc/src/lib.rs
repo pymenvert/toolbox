@@ -322,6 +322,16 @@ pub fn event_to_osc(event: &toolbox_core::Event) -> Option<OscMessage> {
             "/dmx/chaser",
             vec![OscType::String(name.clone().unwrap_or_default())],
         ),
+        Event::DmxMasterDemande { valeur } => {
+            message("/dmx/master", vec![OscType::Int(i32::from(*valeur))])
+        }
+        Event::DmxFaderDemande { id, valeur } => message(
+            "/dmx/fader",
+            vec![
+                OscType::String(id.clone()),
+                OscType::Int(i32::from(*valeur)),
+            ],
+        ),
         Event::LutChanged { name } => message(
             "/lut",
             vec![OscType::String(name.clone().unwrap_or_default())],
@@ -532,6 +542,16 @@ pub fn map_message(addr: &str, args: &[OscType]) -> Result<Command, MapError> {
         "/dmx/chaser" => Ok(Command::DmxChaser {
             name: string_arg(args, 0),
         }),
+        // Grand master et faders : 0..255, comme la console. Un float est
+        // accepte (les surfaces OSC envoient souvent 0..1 mis a l'echelle
+        // par l'operateur) mais borne, jamais tronque en silence.
+        "/dmx/master" => octet_arg(args, 0)
+            .map(|valeur| Command::DmxMaster { valeur })
+            .ok_or_else(|| bad("attendu : niveau 0..255")),
+        "/dmx/fader" => match (string_arg(args, 0), octet_arg(args, 1)) {
+            (Some(id), Some(valeur)) => Ok(Command::DmxFader { id, valeur }),
+            _ => Err(bad("attendu : identifiant (string) puis niveau 0..255")),
+        },
         "/preset/fade" => match (string_arg(args, 0), float_arg(args, 1)) {
             (Some(name), Some(seconds)) => Ok(Command::PresetFade { name, seconds }),
             _ => Err(bad("attendu : nom (string) puis durée en secondes (float)")),
@@ -652,6 +672,26 @@ fn int_arg(args: &[OscType], index: usize) -> Option<i64> {
         OscType::Float(f) if f.fract() == 0.0 => Some(*f as i64),
         OscType::Double(d) if d.fract() == 0.0 => Some(*d as i64),
         _ => None,
+    }
+}
+
+/// Niveau lumière 0..=255, tolérant comme le reste du parseur.
+///
+/// Accepte un entier (0..255, la convention de la console) ET un flottant
+/// NON entier interprété comme 0..1 — beaucoup de surfaces OSC envoient
+/// leurs faders normalisés. Un `0.5` deviendrait sinon `0`, c'est-à-dire un
+/// noir au lieu d'un demi-niveau. Hors bornes : refusé, jamais tronqué en
+/// silence.
+fn octet_arg(args: &[OscType], index: usize) -> Option<u8> {
+    match args.get(index)? {
+        // Flottant fractionnaire = fader normalisé 0..1.
+        OscType::Float(f) if f.fract() != 0.0 => {
+            (*f >= 0.0 && *f <= 1.0).then(|| (f * 255.0).round() as u8)
+        }
+        OscType::Double(d) if d.fract() != 0.0 => {
+            (*d >= 0.0 && *d <= 1.0).then(|| (d * 255.0).round() as u8)
+        }
+        _ => u8::try_from(int_arg(args, index)?).ok(),
     }
 }
 
@@ -1059,6 +1099,32 @@ mod tests {
         assert_eq!(
             m.args,
             vec![OscType::String("scene_02".into()), OscType::Float(2.5)]
+        );
+
+        // Master et faders lumières : ils n'existaient QUE via POST /api/dmx,
+        // donc uniquement depuis la web UI. Poser un fader de surface sur le
+        // grand master — le geste le plus canonique d'une console — était
+        // impossible, comme de le piloter depuis Chataigne.
+        assert_eq!(
+            map_message("/dmx/master", &[OscType::Int(200)]),
+            Ok(Command::DmxMaster { valeur: 200 })
+        );
+        // Fader normalisé 0..1 d'une surface OSC : converti, pas tronqué à 0.
+        assert_eq!(
+            map_message("/dmx/master", &[OscType::Float(0.5)]),
+            Ok(Command::DmxMaster { valeur: 128 })
+        );
+        // Hors bornes : refusé, jamais tronqué en silence.
+        assert!(map_message("/dmx/master", &[OscType::Int(300)]).is_err());
+        assert_eq!(
+            map_message(
+                "/dmx/fader",
+                &[OscType::String("f1".into()), OscType::Int(64)]
+            ),
+            Ok(Command::DmxFader {
+                id: "f1".into(),
+                valeur: 64
+            })
         );
 
         // Un chaser qui démarre doit allumer le bouton de la surface, comme

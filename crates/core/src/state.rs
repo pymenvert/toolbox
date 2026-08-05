@@ -544,6 +544,15 @@ pub enum Event {
     DmxChaserDemande {
         name: Option<String>,
     },
+    /// Grand master lumières demandé : la console applique.
+    DmxMasterDemande {
+        valeur: u8,
+    },
+    /// Niveau de fader lumières demandé : la console applique.
+    DmxFaderDemande {
+        id: String,
+        valeur: u8,
+    },
     /// Départ synchronisé programmé : le player lancera la lecture à `at`
     /// (heure Unix en secondes).
     SyncScheduled {
@@ -922,6 +931,11 @@ impl NodeState {
             Command::CueGo { name } => Ok(vec![Event::CueDemandee { name: name.clone() }]),
             Command::DmxScene { name } => Ok(vec![Event::DmxSceneDemandee { name: name.clone() }]),
             Command::DmxChaser { name } => Ok(vec![Event::DmxChaserDemande { name: name.clone() }]),
+            Command::DmxMaster { valeur } => Ok(vec![Event::DmxMasterDemande { valeur: *valeur }]),
+            Command::DmxFader { id, valeur } => Ok(vec![Event::DmxFaderDemande {
+                id: id.clone(),
+                valeur: *valeur,
+            }]),
             Command::SyncArm => {
                 if self.player.media.is_none() {
                     return Err(CoreError::InvalidCommand(

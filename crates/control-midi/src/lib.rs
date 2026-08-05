@@ -152,6 +152,11 @@ fn scaled_command(target: ScaleTarget, value: u8) -> Command {
         ScaleTarget::Rate => Command::SetRate {
             rate: 0.25 + t * (4.0 - 0.25),
         },
+        // 0..127 → 0..255 : la course entière du fader couvre celle du
+        // master, et 127 donne bien 255 (pas 254).
+        ScaleTarget::DmxMaster => Command::DmxMaster {
+            valeur: (t * 255.0).round() as u8,
+        },
     }
 }
 

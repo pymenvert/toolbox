@@ -134,6 +134,10 @@ pub enum ScaleTarget {
     /// Vitesse de lecture, 0.25× à 4× (1× à mi-course n'est pas garanti :
     /// l'échelle est linéaire sur les bornes de la commande).
     Rate,
+    /// Grand master de la console lumières (0..255). Poser un fader de
+    /// surface dessus est le geste le plus canonique d'une console ; il
+    /// n'existait aucun chemin pour le faire.
+    DmxMaster,
 }
 
 /// Un binding MIDI : note ou CC → commande fixe ou paramètre continu.

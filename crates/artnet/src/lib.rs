@@ -483,6 +483,12 @@ pub async fn service(
                     Ok(toolbox_core::Event::DmxChaserDemande { name: None }) => {
                         Some(CommandeLumieres::ChaserArrete)
                     }
+                    Ok(toolbox_core::Event::DmxMasterDemande { valeur }) => {
+                        Some(CommandeLumieres::Master { valeur })
+                    }
+                    Ok(toolbox_core::Event::DmxFaderDemande { id, valeur }) => {
+                        Some(CommandeLumieres::FaderValeur { id, valeur })
+                    }
                     Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => None,
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 };

@@ -85,6 +85,8 @@ pub enum TestPattern {
 /// | `cue_go`           | `/cue/go <nom>`              |
 /// | `dmx_scene`        | `/dmx/scene <nom>`           |
 /// | `dmx_chaser`       | `/dmx/chaser [nom]` (rien = stop) |
+/// | `dmx_master`       | `/dmx/master <0..255>`       |
+/// | `dmx_fader`        | `/dmx/fader <id> <0..255>`   |
 /// | `mesh_set`         | — (UI/REST)                  |
 /// | `mesh_reset`       | — (UI/REST)                  |
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -251,6 +253,21 @@ pub enum Command {
     /// Lance le chaser lumières `name` — ou l'arrête (`None`).
     DmxChaser {
         name: Option<String>,
+    },
+    /// Grand master lumières, 0..=255 (OSC `/dmx/master`, fader MIDI).
+    /// Le master et les niveaux de fader n'existaient QUE via POST
+    /// /api/dmx, donc uniquement depuis la web UI : poser un fader de
+    /// surface MIDI sur le grand master — le geste le plus canonique
+    /// d'une console — était impossible, comme de le piloter depuis
+    /// Chataigne.
+    DmxMaster {
+        valeur: u8,
+    },
+    /// Niveau d'un fader lumières par identifiant, 0..=255
+    /// (OSC `/dmx/fader <id> <valeur>`).
+    DmxFader {
+        id: String,
+        valeur: u8,
     },
     /// Arme la synchro multi-node : média prêt, position 0, en pause.
     /// (`/sync/arm` — envoyé à tous les nodes avant un départ commun.)
