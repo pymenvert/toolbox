@@ -354,6 +354,7 @@ pub fn router(app: AppState) -> Router {
         .route("/api/diagnostic.zip", get(diagnostic_zip))
         .route("/api/features", get(features_get).post(features_set))
         .route("/api/fleet/media", get(fleet_media))
+        .route("/api/fleet/identify", post(fleet_identify))
         .route("/api/fleet/push", post(fleet_push))
         .route("/api/dmx", get(dmx_get).post(dmx_commande))
         .route("/api/cues", get(cues_get).post(cues_commande))
@@ -1404,6 +1405,59 @@ async fn fleet_media(
         .await
         .map_err(|e| CoreError::InvalidCommand(format!("réponse illisible : {e}")))?;
     Ok(Json(json))
+}
+
+/// Fait clignoter la mire « coins » sur un AUTRE node du parc.
+///
+/// L'UI visait la cible directement, en `mode: "no-cors"`. Depuis la v3.4.0,
+/// toute requête mutatrice dont l'`Origin` ne correspond pas au `Host` est
+/// refusée — et le navigateur JOINT toujours `Origin` sur un POST
+/// inter-origines. La cible répondait donc 403, tracé dans SON journal (que
+/// personne ne regarde), pendant que l'UI annonçait « Mire envoyée » : le
+/// bouton n'a jamais fonctionné entre deux machines. Un relais
+/// serveur-à-serveur contourne le problème sans affaiblir l'anti-CSRF, sur
+/// le modèle de `fleet_media` : la cible doit être un node connu du parc, et
+/// c'est le jeton de parc — jamais le mot de passe de l'UI — qui authentifie.
+async fn fleet_identify(
+    State(app): State<AppState>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Result<StatusCode, ApiError> {
+    let url = params
+        .get("url")
+        .ok_or_else(|| CoreError::InvalidCommand("paramètre url manquant".into()))?;
+    if !urls_du_parc(&app).iter().any(|u| u == url) {
+        return Err(CoreError::InvalidCommand(format!("node inconnu du parc : {url}")).into());
+    }
+    let mut requete = client_http()?.post(format!("{url}api/identify"));
+    if let Some(jeton) = &app.fleet_token {
+        requete = requete.header(ENTETE_JETON_PARC, jeton.clone());
+    }
+    let reponse = requete
+        .send()
+        .await
+        .map_err(|e| CoreError::InvalidCommand(format!("node injoignable : {e}")))?;
+    if !reponse.status().is_success() {
+        let statut = reponse.status();
+        // Message SPÉCIFIQUE : le jeton de parc n'ouvre volontairement que
+        // les échanges de médias. Renvoyer ici le conseil « posez le même
+        // fleet_token » enverrait l'utilisateur régler un paramètre qui ne
+        // changerait rien — l'identification restera refusée par un node
+        // protégé par mot de passe, et c'est voulu : la mire « coins »
+        // couvre la sortie pendant 4 s, donc en plein spectacle.
+        let message = if statut == reqwest::StatusCode::UNAUTHORIZED
+            || statut == reqwest::StatusCode::FORBIDDEN
+        {
+            "node refusé (HTTP 401/403) : il est protégé par un mot de passe d'interface. \
+             L'identification à distance n'est pas couverte par le jeton de parc (elle \
+             couvrirait la sortie d'une mire pendant 4 s). Ouvrez l'UI de ce node pour \
+             l'identifier."
+                .to_string()
+        } else {
+            format!("refusé par le node : HTTP {statut}")
+        };
+        return Err(CoreError::InvalidCommand(message).into());
+    }
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Deserialize)]

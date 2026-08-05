@@ -2794,11 +2794,25 @@ async function loadFleet() {
       li.appendChild(open);
     }
     const ident = document.createElement("button"); ident.className = "mini"; ident.textContent = "Identifier";
-    ident.addEventListener("click", () => {
-      // no-cors : requête envoyée au node cible sans lire la réponse
-      // (suffisant pour un déclencheur, et licite entre origines).
-      fetch(n.url + "api/identify", { method: "POST", mode: "no-cors" }).catch(() => {});
-      toast("Mire coins envoyée à " + n.name);
+    ident.addEventListener("click", async () => {
+      // Le node cible est vise par un RELAIS serveur-a-serveur, pas
+      // directement : un POST inter-origines porte toujours un en-tete
+      // Origin, que l'anti-CSRF de la cible refuse (403). En no-cors la
+      // reponse etait opaque, donc le .catch ne se declenchait jamais et
+      // l'UI annoncait « Mire envoyee » alors que rien n'etait parti.
+      // api() affiche DEJA le message d'erreur : ne pas en remettre un
+      // second ici (les doubles toasts ont ete traques en v3.3.0).
+      ident.disabled = true;
+      try {
+        if (n.soi_meme) {
+          await api("/api/identify", { method: "POST" });
+          toast("Mire coins affichée ici");
+        } else {
+          await api("/api/fleet/identify?url=" + encodeURIComponent(n.url), { method: "POST" });
+          toast("Mire coins envoyée à " + n.name);
+        }
+      } catch (e) { /* message deja affiche par api() */ }
+      finally { ident.disabled = false; }
     });
     li.appendChild(ident);
     ul.appendChild(li);
