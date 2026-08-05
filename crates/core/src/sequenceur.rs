@@ -120,9 +120,35 @@ where
     Ok(actions)
 }
 
+/// Désérialise les cues une par une, sur le modèle d'[`actions_tolerantes`].
+///
+/// Le filet existait pour les ACTIONS mais pas pour les cues elles-mêmes :
+/// `Declencheur` est un enum étiqueté sans repli, si bien qu'un déclencheur
+/// inconnu — une conduite écrite par une version plus récente, relue après
+/// un « Revenir à la version précédente » — faisait échouer le fichier
+/// ENTIER. Perdre la cue qu'on ne comprend pas vaut infiniment mieux que
+/// perdre tout le spectacle.
+fn cues_tolerantes<'de, D>(deserializer: D) -> Result<Vec<Cue>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let brutes = Vec::<serde_json::Value>::deserialize(deserializer)?;
+    let mut cues = Vec::with_capacity(brutes.len());
+    for brute in brutes {
+        match serde_json::from_value::<Cue>(brute.clone()) {
+            Ok(cue) => cues.push(cue),
+            Err(err) => {
+                tracing::error!(%err, cue = %brute, "cue illisible — ignorée (le reste de la conduite est conservé)");
+            }
+        }
+    }
+    Ok(cues)
+}
+
 /// L'état du séquenceur, publié à l'UI et persisté (sans le transitoire).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct EtatSequenceur {
+    #[serde(default, deserialize_with = "cues_tolerantes")]
     pub cues: Vec<Cue>,
     /// Cue en attente d'enchaînement (nom, échéance en ms) — transitoire,
     /// publié à l'UI, purgé au chargement.
@@ -498,6 +524,25 @@ fn publier(
 mod tests {
     use super::*;
     use crate::Bus;
+
+    /// Scénario réel : une version plus récente a écrit une conduite avec un
+    /// déclencheur qu'on ne connaît pas (retour arrière après mise à jour).
+    /// Avant, `Declencheur` étant un enum étiqueté sans repli, TOUTE la
+    /// conduite devenait illisible et partait en `.corrompu` — le spectacle
+    /// du soir avec. On ne perd plus que la cue incomprise.
+    #[test]
+    fn une_cue_au_declencheur_inconnu_ne_fait_pas_perdre_la_conduite() {
+        let brut = r#"{
+            "cues": [
+                {"nom": "ouverture", "declencheur": {"type": "manuel"}, "actions": []},
+                {"nom": "venue_du_futur", "declencheur": {"type": "au_lever_du_jour"}, "actions": []},
+                {"nom": "final", "declencheur": {"type": "manuel"}, "actions": []}
+            ]
+        }"#;
+        let etat: EtatSequenceur = serde_json::from_str(brut).expect("la conduite doit survivre");
+        let noms: Vec<&str> = etat.cues.iter().map(|c| c.nom.as_str()).collect();
+        assert_eq!(noms, vec!["ouverture", "final"]);
+    }
 
     #[test]
     fn les_jours_de_semaine_filtrent_le_declencheur() {

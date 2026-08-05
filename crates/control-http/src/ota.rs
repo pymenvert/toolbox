@@ -32,13 +32,68 @@ pub struct EtatMiseAJour {
     pub asset: Option<String>,
 }
 
-fn nom_asset_plateforme() -> &'static str {
-    if cfg!(target_os = "windows") {
-        "toolbox-node-windows-x64.zip"
-    } else if cfg!(target_arch = "aarch64") {
-        "toolbox-node-raspberrypi-arm64.tar.gz"
+/// Ce que le binaire EN COURS d'exécution sait faire. Déclaré une fois au
+/// démarrage par le binaire lui-même (lui seul connaît ses features).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Capacites {
+    /// Décodage vidéo et sorties GStreamer (feature `gstreamer`).
+    pub video: bool,
+    /// Fenêtre de sortie (feature `render`).
+    pub fenetre: bool,
+}
+
+static CAPACITES: std::sync::OnceLock<Capacites> = std::sync::OnceLock::new();
+
+/// À appeler au démarrage du node. Sans appel, on suppose le binaire le plus
+/// pauvre — jamais l'inverse : mieux vaut refuser une mise à jour possible
+/// que d'en proposer une qui retire des fonctions.
+pub fn declarer_capacites(capacites: Capacites) {
+    let _ = CAPACITES.set(capacites);
+}
+
+fn capacites() -> Capacites {
+    CAPACITES.get().copied().unwrap_or_default()
+}
+
+/// L'archive de release qui correspond à CE binaire — `None` quand aucune
+/// archive publiée ne sait faire autant que lui.
+///
+/// Le choix se faisait sur la seule plateforme : sous Windows il visait
+/// toujours `…-windows-x64.zip`, le binaire LÉGER, y compris sur une machine
+/// installée avec le pack vidéo. « Mettre à jour » depuis l'onglet Système
+/// remplaçait donc un node qui lit des vidéos par un node qui n'en lit plus
+/// — les DLL GStreamer toujours là, mais plus aucun code pour s'en servir.
+/// Sur un Pi où l'on a compilé sur place (le seul moyen de projeter), il
+/// proposait l'archive `--no-default-features` : ni vidéo, ni fenêtre.
+fn nom_asset_plateforme() -> Option<&'static str> {
+    asset_pour(
+        capacites(),
+        cfg!(target_os = "windows"),
+        cfg!(target_arch = "aarch64"),
+    )
+}
+
+/// Logique pure (plateforme passée en paramètre) : testable pour Windows
+/// comme pour le Pi depuis n'importe quelle machine.
+fn asset_pour(capacites: Capacites, windows: bool, aarch64: bool) -> Option<&'static str> {
+    if windows {
+        // Seule plateforme à publier les deux variantes.
+        Some(if capacites.video {
+            "toolbox-node-windows-x64-gstreamer.zip"
+        } else {
+            "toolbox-node-windows-x64.zip"
+        })
+    } else if capacites.video {
+        // Aucune archive Linux ou Pi ne contient GStreamer : la seule façon
+        // d'avoir la vidéo y est de compiler sur place. Se mettre à jour
+        // depuis la page Releases reviendrait à la perdre.
+        None
+    } else if aarch64 {
+        // L'archive ARM64 officielle est compilée --no-default-features :
+        // elle n'a même pas de fenêtre de sortie.
+        (!capacites.fenetre).then_some("toolbox-node-raspberrypi-arm64.tar.gz")
     } else {
-        "toolbox-node-linux-x64.tar.gz"
+        Some("toolbox-node-linux-x64.tar.gz")
     }
 }
 
@@ -79,9 +134,10 @@ pub fn verifier(version_courante: &str) -> Result<EtatMiseAJour, String> {
         .get("assets")
         .and_then(|a| a.as_array())
         .and_then(|assets| {
+            let attendu = nom_asset_plateforme()?;
             assets.iter().find_map(|a| {
                 let nom = a.get("name")?.as_str()?;
-                (nom == nom_asset_plateforme()).then(|| nom.to_string())
+                (nom == attendu).then(|| nom.to_string())
             })
         });
     Ok(EtatMiseAJour {
@@ -123,10 +179,16 @@ pub fn telecharger() -> Result<String, String> {
     if !etat.plus_recente {
         return Err(format!("déjà en {version} : rien à télécharger"));
     }
-    let asset = etat
-        .asset
-        .as_deref()
-        .ok_or("pas d'archive pour cette plateforme dans la release")?;
+    let asset = etat.asset.as_deref().ok_or_else(|| {
+        if nom_asset_plateforme().is_none() {
+            "ce binaire a été compilé sur place (vidéo et/ou fenêtre de sortie) : \
+             aucune archive publiée ne fait autant. Une mise à jour automatique \
+             vous ferait PERDRE la lecture vidéo. Recompilez plutôt sur la machine."
+                .to_string()
+        } else {
+            "pas d'archive pour cette plateforme dans la release".to_string()
+        }
+    })?;
     let url = format!("https://github.com/{DEPOT}/releases/latest/download/{asset}");
     let dossier = dossier_du_binaire()?;
     let archive = dossier.join(asset);
@@ -302,9 +364,13 @@ pub fn nettoyer_apres_demarrage() {
         warn!("dossier du binaire inconnu : pas de nettoyage OTA");
         return;
     };
-    let script = dossier.join("mise-a-jour.bat");
-    if script.exists() && std::fs::remove_file(&script).is_ok() {
-        info!(fichier = %script.display(), "script de bascule nettoyé");
+    // `relance.bat` autant que `mise-a-jour.bat` : le retour arrière en pose
+    // un, il ne doit pas rester dans le dossier d'installation.
+    for nom in ["mise-a-jour.bat", "relance.bat"] {
+        let script = dossier.join(nom);
+        if script.exists() && std::fs::remove_file(&script).is_ok() {
+            info!(fichier = %script.display(), "script de bascule nettoyé");
+        }
     }
     if binaire_precedent().is_some() {
         info!("version précédente conservée : retour arrière possible depuis l'onglet Système");
@@ -341,6 +407,34 @@ pub fn revenir_en_arriere() -> Result<String, String> {
         let _ = std::fs::rename(&ecarte, &courant); // rien n'a changé
         return Err(format!("retour arrière échoué (annulé) : {err}"));
     }
+    #[cfg(windows)]
+    {
+        // Sous Windows il n'y a NI service NI Restart=always : le démarrage
+        // automatique n'est qu'un .bat du dossier Démarrage, exécuté à
+        // l'ouverture de session. Sans ce script, le retour arrière arrêtait
+        // le node et personne ne le relançait — alors que le message promet
+        // « le node redémarre, reconnexion automatique ». Même mécanique que
+        // `appliquer()`, à ceci près que les renommages sont déjà faits :
+        // il ne reste qu'à attendre la fin du process et à relancer.
+        let script = dossier.join("relance.bat");
+        let contenu = format!(
+            "@echo off\r\n\
+             timeout /t 2 /nobreak > NUL\r\n\
+             start \"\" \"{courant}\"\r\n",
+            courant = courant.display(),
+        );
+        match std::fs::write(&script, contenu) {
+            Ok(()) => {
+                if let Err(err) = std::process::Command::new("cmd")
+                    .args(["/C", "start", "/min", "", &script.to_string_lossy()])
+                    .spawn()
+                {
+                    warn!(%err, "relance Windows non programmée : relancer le node à la main");
+                }
+            }
+            Err(err) => warn!(%err, "script de relance non écrit : relancer le node à la main"),
+        }
+    }
     info!("retour à la version précédente effectué : le node redémarre");
     Ok("Version précédente restaurée : le node redémarre.".into())
 }
@@ -348,6 +442,69 @@ pub fn revenir_en_arriere() -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Une mise à jour ne doit JAMAIS retirer de fonctions. Le choix se
+    /// faisait sur la seule plateforme : sous Windows il visait toujours le
+    /// binaire léger, y compris sur une machine installée avec le pack
+    /// vidéo — « Mettre à jour » retirait alors la lecture vidéo.
+    #[test]
+    fn l_archive_visee_ne_retire_jamais_de_fonctions() {
+        let leger = Capacites {
+            video: false,
+            fenetre: true,
+        };
+        let pack_video = Capacites {
+            video: true,
+            fenetre: true,
+        };
+        let arm64_officiel = Capacites {
+            video: false,
+            fenetre: false,
+        };
+
+        // Windows : la seule plateforme qui publie les deux variantes.
+        assert_eq!(
+            asset_pour(pack_video, true, false),
+            Some("toolbox-node-windows-x64-gstreamer.zip")
+        );
+        assert_eq!(
+            asset_pour(leger, true, false),
+            Some("toolbox-node-windows-x64.zip")
+        );
+
+        // Linux/Pi : aucune archive ne contient GStreamer. Un binaire
+        // compilé sur place pour avoir la vidéo ne doit rien se voir
+        // proposer, plutôt que de la perdre.
+        assert_eq!(asset_pour(pack_video, false, false), None);
+        assert_eq!(asset_pour(pack_video, false, true), None);
+
+        // L'archive ARM64 officielle n'a même pas de fenêtre de sortie :
+        // elle ne convient qu'à un binaire qui n'en a pas non plus.
+        assert_eq!(asset_pour(leger, false, true), None);
+        assert_eq!(
+            asset_pour(arm64_officiel, false, true),
+            Some("toolbox-node-raspberrypi-arm64.tar.gz")
+        );
+
+        // Linux x64 : l'archive officielle a bien la fenêtre.
+        assert_eq!(
+            asset_pour(leger, false, false),
+            Some("toolbox-node-linux-x64.tar.gz")
+        );
+    }
+
+    /// Sans déclaration explicite, on suppose le binaire le plus pauvre —
+    /// jamais l'inverse.
+    #[test]
+    fn capacites_par_defaut_prudentes() {
+        assert_eq!(
+            Capacites::default(),
+            Capacites {
+                video: false,
+                fenetre: false
+            }
+        );
+    }
 
     /// Le coeur du garde-fou : ne JAMAIS proposer une version antérieure.
     /// Avant, une simple inégalité proposait « 3.3.0 » à un node en 3.4.0

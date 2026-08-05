@@ -194,6 +194,16 @@ async fn run(mut config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std:
         warn!(%err, "dossier luts/ non créé");
     }
 
+    // Ce que CE binaire sait faire : l'OTA en a besoin pour choisir l'archive
+    // correspondante. Sans cela il visait l'archive de la plateforme et rien
+    // d'autre — une machine Windows installée avec le pack vidéo se voyait
+    // proposer le binaire léger, et « Mettre à jour » lui retirait la lecture
+    // vidéo. Le node est le seul à connaître ses propres features.
+    toolbox_control_http::ota::declarer_capacites(toolbox_control_http::ota::Capacites {
+        video: cfg!(feature = "gstreamer"),
+        fenetre: cfg!(feature = "render"),
+    });
+
     // Reste d'une mise à jour OTA réussie (ancien binaire, script) : nettoyé.
     toolbox_control_http::ota::nettoyer_apres_demarrage();
 
