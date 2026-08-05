@@ -152,7 +152,12 @@ async fn run(mut config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std:
         // rend à la taille de sa surface : la valeur est ignorée. L'annoncer
         // « appliquée » faisait croire à un Pi 3 allégé en 960×540 alors que
         // rien n'avait changé, et l'installateur promet précisément cela.
-        let resolution_utilisee = config.output.mode == toolbox_core::SortieMode::Kms;
+        // La feature compte AUTANT que le mode : `config.resolution` n'est lu
+        // que par la sortie KMS, elle-même sous `#[cfg(feature = "gstreamer")]`.
+        // Sans ce terme, un binaire sans GStreamer configuré en mode « kms »
+        // annonçait la résolution comme appliquée alors que rien ne la lit.
+        let resolution_utilisee =
+            cfg!(feature = "gstreamer") && config.output.mode == toolbox_core::SortieMode::Kms;
         if resolution_utilisee {
             info!(
                 profil = %reglages.profil,

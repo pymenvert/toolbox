@@ -247,7 +247,7 @@ Sous Windows, aucune dépendance système (midir utilise WinMM).
   démarrage à froid, 3e passe sur la mesure, mise à jour d'une
   installation existante), chaque lot repassé en relecture adversariale,
   et vérifications EMPIRIQUES sur un vrai node à chaque fois que possible.
-  264 tests. Faits notables :
+  267 tests. Faits notables :
   **l'archive Pi officielle ne projette rien** (`--no-default-features` :
   ni fenêtre, ni MIDI, ni GStreamer) alors que le manuel invitait à
   installer des paquets `gstreamer1.0-*` — seul le pack Windows

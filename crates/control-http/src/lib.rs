@@ -2532,6 +2532,69 @@ mod tests {
         }
     }
 
+    /// `fps` doit suivre EXACTEMENT la règle de `rendu` : `null` quand rien
+    /// ne peut le peupler. Il restait un zéro dur, et un run d'endurance sur
+    /// un Pi parfaitement sain ressortait « sortie sans aucune image ». Rien
+    /// ne retenait ce correctif : le seul test qui regarde ce champ force le
+    /// drapeau à vrai.
+    #[tokio::test]
+    async fn fps_est_nul_quand_la_mesure_n_existe_pas() {
+        let bed = testbed(); // mesure_disponible = false par défaut
+        for route in ["/api/system", "/api/outputs"] {
+            let response = bed
+                .router
+                .clone()
+                .oneshot(
+                    HttpRequest::get(route)
+                        .body(Body::empty())
+                        .expect("requête"),
+                )
+                .await
+                .expect("réponse");
+            let json = body_json(response).await;
+            assert!(
+                json["fps"].is_null(),
+                "{route} : fps doit être null quand la mesure n'existe pas, pas 0 —                  un zéro se lit « sortie morte »"
+            );
+        }
+        // Et `rendu` suit la même règle, sur la route qui le porte.
+        let response = bed
+            .router
+            .clone()
+            .oneshot(
+                HttpRequest::get("/api/system")
+                    .body(Body::empty())
+                    .expect("requête"),
+            )
+            .await
+            .expect("réponse");
+        assert!(body_json(response).await["rendu"].is_null());
+    }
+
+    /// Le relais d'identification n'accepte que des nodes CONNUS du parc :
+    /// l'URL vient du client, et la suivre sans contrôle serait un SSRF.
+    #[tokio::test]
+    async fn le_relais_d_identification_refuse_un_node_inconnu() {
+        let bed = testbed(); // parc vide
+        let response = bed
+            .router
+            .clone()
+            .oneshot(
+                HttpRequest::post("/api/fleet/identify?url=http://192.168.1.99:8080/")
+                    .header("origin", "http://192.168.1.50:8080")
+                    .header("host", "192.168.1.50:8080")
+                    .body(Body::empty())
+                    .expect("requête"),
+            )
+            .await
+            .expect("réponse");
+        assert_ne!(
+            response.status(),
+            StatusCode::NO_CONTENT,
+            "un node absent du parc ne doit pas être contacté"
+        );
+    }
+
     /// Une LUT d'étalonnage réaliste (64 points ≈ 7 Mo) doit atteindre le
     /// parseur. Sans `DefaultBodyLimit` relevé sur la route, axum coupait à
     /// 2 Mo et répondait 413 SANS corps JSON : le garde « 64 Mo max » de

@@ -1687,20 +1687,37 @@ $("#mapPresetDelete").addEventListener("click", async () => {
 });
 
 /* Sortie : écran cible + plein écran, appliqués à chaud. */
+/* Derniere liste d'ecrans affichee : evite de reconstruire le menu (et donc
+   de le refermer sous la souris) a chaque sondage. */
+let ecransSignature = null;
 async function loadOutputs() {
   let data;
   try { data = await api("/api/outputs"); } catch (e) { return; }
   const monitors = data.monitors || [], st = data.settings || { monitor: 0, fullscreen: false };
   const sel = $("#outMonitor");
-  sel.innerHTML = monitors.length ? "" : '<option value="">(aucun écran détecté)</option>';
-  monitors.forEach(m => {
-    const o = document.createElement("option");
-    o.value = m.index;
-    o.textContent = "Écran " + (m.index + 1) + " · " + m.name + " (" + m.width + "×" + m.height + ")";
-    sel.appendChild(o);
-  });
-  if (monitors.length) sel.value = st.monitor;
-  $("#outFullscreen").checked = !!st.fullscreen;
+  // La liste n'est RECONSTRUITE que si elle a change. Depuis qu'un sondage
+  // rappelle loadOutputs toutes les 5 s, la reconstruire a chaque passage
+  // fermerait le menu deroulant ouvert par l'operateur et ecraserait sa
+  // selection en cours -- une carte « Sortie » inutilisable a la souris.
+  const signature = JSON.stringify(monitors);
+  if (signature !== ecransSignature) {
+    ecransSignature = signature;
+    sel.innerHTML = monitors.length ? "" : '<option value="">(aucun écran détecté)</option>';
+    monitors.forEach(m => {
+      const o = document.createElement("option");
+      o.value = m.index;
+      o.textContent = "Écran " + (m.index + 1) + " · " + m.name + " (" + m.width + "×" + m.height + ")";
+      sel.appendChild(o);
+    });
+    if (monitors.length) sel.value = st.monitor;
+  } else if (monitors.length && sel !== document.activeElement) {
+    // Liste inchangee : on suit quand meme l'ecran courant, sauf si
+    // l'operateur a le menu sous le doigt.
+    sel.value = st.monitor;
+  }
+  if ($("#outFullscreen") !== document.activeElement) {
+    $("#outFullscreen").checked = !!st.fullscreen;
+  }
 }
 async function pushOutput() {
   const body = { monitor: +$("#outMonitor").value || 0, fullscreen: $("#outFullscreen").checked };
@@ -1835,9 +1852,18 @@ let pendingDeleteMedia = null;
 async function loadMedia() {
   try { mediaList = await api("/api/media") || []; } catch (e) { return; }
   renderMediaTable(); renderPlAdd(); renderParcMedia();
+  // majChampsAction : « Charger un media » est le type d'action par DEFAUT,
+  // et son selecteur n'etait rempli qu'a l'evaluation du script -- donc avant
+  // que la mediatheque n'arrive. En ouvrant l'onglet Sequences, on trouvait
+  // un menu vide et il fallait changer de type puis revenir pour le peupler.
+  majChampsAction();
 }
 
 /* ===================== Fichiers du parc ===================== */
+/* Miroir de validate_upload_name (crates/core/src/media.rs) : nom PLAT, jeu
+   de caracteres restreint, et pas de point en tete. Proposer autre chose
+   revient a promettre un envoi que le serveur refusera. */
+const NOM_PARC = /^(?!\.)[A-Za-z0-9._ ()-]+$/;
 let parcNodes = [];
 async function loadParc() {
   try { parcNodes = (await api("/api/fleet") || []).filter(n => !n.soi_meme); } catch (e) { return; }
@@ -1855,9 +1881,19 @@ function renderParcMedia() {
     return;
   }
   // /api/media renvoie des MediaInfo { path, bytes } — jamais `name`.
-  // Et un envoi de parc exige un nom PLAT (validate_upload_name refuse les
-  // sous-dossiers) : inutile de proposer ce que le serveur rejettera.
-  mediaList.filter(m => !m.path.includes("/")).forEach(m => {
+  // Et un envoi de parc exige un nom que validate_upload_name accepte
+  // (crates/core/src/media.rs) : plat ET restreint a un jeu de caracteres.
+  // Ne filtrer que les sous-dossiers laissait proposer « été.mp4 », que le
+  // serveur refuse ensuite avec un message technique.
+  const plats = mediaList.filter(m => NOM_PARC.test(m.path));
+  if (!plats.length) {
+    const o = document.createElement("option");
+    o.disabled = true;
+    o.textContent = "— aucun media eligible (sous-dossier ou nom accentue) —";
+    sel.appendChild(o);
+    return;
+  }
+  plats.forEach(m => {
     const o = document.createElement("option");
     o.value = o.textContent = m.path;
     sel.appendChild(o);
@@ -2978,6 +3014,9 @@ function renderSante(sys) {
   // Ecrans branches/debranches a chaud : le node republie la liste, encore
   // faut-il la relire. Seulement quand la carte « Sortie » est visible.
   setInterval(() => { if (!document.hidden && $("#page-mapping").classList.contains("visible")) loadOutputs(); }, 5000);
+  // (loadOutputs ne reconstruit le menu que si la liste a change : voir
+  //  ecransSignature — sinon un sondage toutes les 5 s ecraserait la
+  //  selection en cours de l'operateur.)
   sizeStage();
   paintSeek();
 })();

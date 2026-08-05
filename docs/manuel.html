@@ -303,12 +303,17 @@ footer { margin-top: 60px; padding-top: 24px; border-top: 1px solid var(--lisere
       <h4><span class="voyant" style="background:var(--alerte)"></span>Ubuntu / Debian</h4>
       <p><code>toolbox-node-linux-x64</code></p>
       <p><b>Sans lecture vidéo</b> (mires, mapping, calibrage, OSC/MIDI) :
-      comme le pack Windows léger, ce binaire est compilé sans GStreamer —
-      installer les paquets <code>gstreamer1.0-*</code> n'y changera rien.
-      Pour lire des vidéos sur Linux, compiler sur place :
-      <code>sudo apt install libgstreamer1.0-dev
-      libgstreamer-plugins-base1.0-dev libasound2-dev</code> puis
-      <code>cargo build --release -p toolbox-node --features gstreamer</code>.</p>
+      ce binaire est compilé sans GStreamer, comme le pack Windows léger.
+      Sur <b>cette archive</b>, installer les paquets <code>gstreamer1.0-*</code>
+      ne change donc rien.</p>
+      <p>Pour lire des vidéos sur Linux, il faut compiler sur place — et les
+      deux temps comptent : les paquets <b>-dev</b> pour compiler, les
+      <b>plugins</b> pour lire ensuite.</p>
+      <p><code>sudo apt install libgstreamer1.0-dev
+      libgstreamer-plugins-base1.0-dev libasound2-dev</code><br>
+      <code>cargo build --release -p toolbox-node --features gstreamer</code><br>
+      <code>sudo apt install gstreamer1.0-plugins-base gstreamer1.0-plugins-good
+      gstreamer1.0-plugins-bad gstreamer1.0-libav</code></p>
     </div>
     <div class="carte">
       <h4><span class="voyant" style="background:var(--alerte)"></span>Raspberry Pi 4 / 5</h4>
@@ -543,9 +548,9 @@ footer { margin-top: 60px; padding-top: 24px; border-top: 1px solid var(--lisere
       <tr><td><code>/sync/startAt</code></td><td>heure Unix (double)</td><td>Départ commun au timestamp — horloges NTP partagées</td></tr>
       <tr><td><code>/cue/go</code></td><td>nom</td><td>Déclenche une cue du séquenceur</td></tr>
       <tr><td><code>/dmx/scene</code></td><td>nom</td><td>Rappelle une scène de la console lumières</td></tr>
-      <tr><td><code>/dmx/chaser</code></td><td>nom (ou rien)</td><td>Lance un chaser ; sans argument, arrête celui en cours</td></tr>
-      <tr><td><code>/dmx/master</code></td><td>entier 0..255 <i>ou</i> flottant 0..1</td><td>Grand master lumières. C'est le <b>type</b> qui décide : un entier est un niveau DMX, un flottant est un fader normalisé (0.5 = mi-course, 1.0 = plein)</td></tr>
-      <tr><td><code>/dmx/fader</code></td><td>id, puis entier 0..255 <i>ou</i> flottant 0..1</td><td>Niveau d'un fader lumières, par identifiant. Même règle que <code>/dmx/master</code></td></tr>
+      <tr><td><code>/dmx/chaser</code></td><td>nom, ou chaîne vide</td><td>Un nom lance le chaser ; une <b>chaîne vide</b> — vider le champ dans Chataigne — arrête celui en cours. Un message sans argument marche aussi, mais Chataigne ne sait pas en envoyer sur un paramètre texte</td></tr>
+      <tr><td><code>/dmx/master</code></td><td>entier 0..255 <i>ou</i> flottant 0..1</td><td>Grand master lumières. Un <b>entier</b> est un niveau DMX (0..255). Un <b>flottant fractionnaire</b> — ou exactement <code>1.0</code> — est un fader normalisé (0.5 = mi-course, 1.0 = plein). Un flottant à valeur entière (<code>90.0</code>) reste un niveau DMX : Chataigne envoie volontiers <code>90.0</code> pour 90</td></tr>
+      <tr><td><code>/dmx/fader</code></td><td>id, puis entier 0..255 <i>ou</i> flottant 0..1</td><td>Niveau d'un fader lumières, par identifiant. Même règle de valeur que <code>/dmx/master</code></td></tr>
     </tbody>
   </table></div>
   <h3>Auto-découverte OSCQuery (Chataigne)</h3>
@@ -651,7 +656,8 @@ cc = 7                       <span class="c"># le fader 7 pilote le volume</span
 scale = "volume"             <span class="c"># 0..127 → 0..1</span>
 <span class="c"># Cibles : volume, rate (0,25×–4×), les 8 réglages couleur</span>
 <span class="c"># (brightness, contrast, gamma, saturation, hue, gain_r/g/b)</span>
-<span class="c"># et les 5 effets (pixelate, posterize, noise, sharpen, mirror).</span>
+<span class="c"># les 5 effets (pixelate, posterize, noise, sharpen, mirror)</span>
+<span class="c"># et dmx_master (grand master lumieres, 0..255).</span>
 
 [[midi.bindings]]
 note = 62

@@ -131,8 +131,11 @@ pub enum ScaleTarget {
     Noise,
     Sharpen,
     Mirror,
-    /// Vitesse de lecture, 0.25× à 4× (1× à mi-course n'est pas garanti :
-    /// l'échelle est linéaire sur les bornes de la commande).
+    /// Vitesse de lecture, 0,25× à 4×, sur une échelle GÉOMÉTRIQUE :
+    /// 0,25× en bas, 0,5× au quart, 1× PILE à mi-course, 2× aux trois
+    /// quarts, 4× à fond. Un fader de vitesse se pense en octaves, et la
+    /// vitesse normale doit être atteignable — en linéaire elle tombait
+    /// entre deux crans du contrôleur.
     Rate,
     /// Grand master de la console lumières (0..255). Poser un fader de
     /// surface dessus est le geste le plus canonique d'une console ; il

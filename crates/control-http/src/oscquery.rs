@@ -331,7 +331,7 @@ pub fn namespace(state: &NodeState) -> Value {
             })),
             "dmx": container("/dmx", json!({
                 "scene": leaf("/dmx/scene", "s", "Rappelle une scène de la console lumières", None, None),
-                "chaser": leaf("/dmx/chaser", "s", "Lance un chaser (nom) ; sans argument : arrêt", None, None),
+                "chaser": leaf("/dmx/chaser", "s", "Lance un chaser (nom) ; chaîne VIDE : arrêt du chaser en cours", None, None),
                 "master": leaf("/dmx/master", "i", "Grand master lumières : entier 0..255, ou flottant 0..1 (fader normalisé)",
                     None, Some(json!([{ "MIN": 0, "MAX": 255 }]))),
                 "fader": leaf("/dmx/fader", "si", "Niveau d'un fader : identifiant, puis entier 0..255 ou flottant 0..1", None, None),
