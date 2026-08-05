@@ -630,6 +630,7 @@ async fn run(mut config: NodeConfig, logs: LogBuffer) -> Result<(), Box<dyn std:
                 state: handle.state_watch(),
                 video: video_rx,
                 settings: output_settings_rx,
+                settings_tx: output_settings_tx.clone(),
                 monitors: monitors_tx,
                 fps: fps_tx,
                 mesures: mesures_tx,
